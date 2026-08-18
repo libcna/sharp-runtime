@@ -45,14 +45,16 @@ namespace System {
          * C++ counterpart of .NET LoaderOptimization.DomainMask (deprecated).
          * @deprecated Use MultiDomainHost instead.
          */
-        DomainMask      = 3,
+        DomainMask [[deprecated(
+            "LoaderOptimization.DomainMask has been deprecated and is not supported.")]] = 3,
         /**
          * @brief Disallow binding redirects.
          *
          * C++ counterpart of .NET LoaderOptimization.DisallowBindings (deprecated).
          * @deprecated This value is not supported.
          */
-        DisallowBindings = 4,
+        DisallowBindings [[deprecated(
+            "LoaderOptimization.DisallowBindings has been deprecated and is not supported.")]] = 4,
     };
 
 } // namespace System

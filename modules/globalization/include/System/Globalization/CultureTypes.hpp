@@ -18,8 +18,16 @@ enum class CultureTypes {
     AllCultures            = 0x0007, ///< All cultures recognized by .NET (NeutralCultures | SpecificCultures | InstalledWin32Cultures).
     UserCustomCulture      = 0x0008, ///< Custom cultures created by the user.
     ReplacementCultures    = 0x0010, ///< Custom cultures that replace shipped cultures.
-    WindowsOnlyCultures    = 0x0020, ///< @deprecated Cultures that are specific to Windows and not cross-platform.
-    FrameworkCultures      = 0x0040, ///< @deprecated Cultures that ship with the .NET Framework.
+    /// @deprecated Cultures that are specific to Windows and not cross-platform.
+    /// Deprecated by ticket #2289, transcribing .NET's `[Obsolete]` (`CultureTypes.cs:21`).
+    WindowsOnlyCultures [[deprecated(
+        "CultureTypes.WindowsOnlyCultures has been deprecated. Use other values in CultureTypes "
+        "instead.")]] = 0x0020,
+    /// @deprecated Cultures that ship with the .NET Framework.
+    /// Deprecated by ticket #2289, transcribing .NET's `[Obsolete]` (`CultureTypes.cs:23`).
+    FrameworkCultures [[deprecated(
+        "CultureTypes.FrameworkCultures has been deprecated. Use other values in CultureTypes "
+        "instead.")]] = 0x0040,
 };
 
 /**

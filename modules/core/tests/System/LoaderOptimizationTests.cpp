@@ -9,6 +9,15 @@
 using System::LoaderOptimization;
 using System::LoaderOptimizationAttribute;
 
+// #2289 deprecated LoaderOptimization::DomainMask and ::DisallowBindings, transcribing .NET's
+// [Obsolete] (LoaderOptimization.cs:8,10). Every use below is inside a scoped suppression, and
+// THE SUPPRESSION IS THE EVIDENCE: it is REQUIRED, and deleting any of them fails this build with
+// "error: ... is deprecated ... [-Werror=deprecated-declarations]" -- which is exactly the
+// diagnostic SR-AUD-117 asked for, demonstrated rather than asserted.
+//
+// The VALUES must still be pinned: deprecating an enumerator must not change what it is, and a
+// repair that quietly renumbered one would be far worse than the divergence it replaced.
+
 // ---------------------------------------------------------------------------
 // LoaderOptimization enum values
 // ---------------------------------------------------------------------------
@@ -30,15 +39,24 @@ TEST(LoaderOptimizationTests, MultiDomainHost_Value_IsThree) {
 }
 
 TEST(LoaderOptimizationTests, DomainMask_Value_IsThree) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     EXPECT_EQ(static_cast<int>(LoaderOptimization::DomainMask), 3);
+#pragma GCC diagnostic pop
 }
 
 TEST(LoaderOptimizationTests, DomainMask_EqualsMultiDomainHost) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     EXPECT_EQ(LoaderOptimization::DomainMask, LoaderOptimization::MultiDomainHost);
+#pragma GCC diagnostic pop
 }
 
 TEST(LoaderOptimizationTests, DisallowBindings_Value_IsFour) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     EXPECT_EQ(static_cast<int>(LoaderOptimization::DisallowBindings), 4);
+#pragma GCC diagnostic pop
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +85,10 @@ TEST(LoaderOptimizationAttributeTests, ByteCtor_Three_IsMultiDomainHost) {
 
 TEST(LoaderOptimizationAttributeTests, ByteCtor_Four_IsDisallowBindings) {
     LoaderOptimizationAttribute attr(uint8_t(4));
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     EXPECT_EQ(attr.getValueProperty(), LoaderOptimization::DisallowBindings);
+#pragma GCC diagnostic pop
 }
 
 // ---------------------------------------------------------------------------
@@ -85,8 +106,11 @@ TEST(LoaderOptimizationAttributeTests, EnumCtor_MultiDomain) {
 }
 
 TEST(LoaderOptimizationAttributeTests, EnumCtor_DisallowBindings) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     LoaderOptimizationAttribute attr(LoaderOptimization::DisallowBindings);
     EXPECT_EQ(attr.getValueProperty(), LoaderOptimization::DisallowBindings);
+#pragma GCC diagnostic pop
 }
 
 // ---------------------------------------------------------------------------

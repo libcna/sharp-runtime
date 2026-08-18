@@ -37,8 +37,16 @@ TEST(CultureTypesBatch28Test, Values) {
     EXPECT_EQ(static_cast<int>(CultureTypes::AllCultures),             0x0007);
     EXPECT_EQ(static_cast<int>(CultureTypes::UserCustomCulture),       0x0008);
     EXPECT_EQ(static_cast<int>(CultureTypes::ReplacementCultures),     0x0010);
+    // #2289 deprecated these two, transcribing .NET's [Obsolete] (CultureTypes.cs:21,23). The
+    // SUPPRESSION IS THE EVIDENCE: it is REQUIRED, and deleting it fails this build with
+    // "error: ... is deprecated ... [-Werror=deprecated-declarations]" -- which is exactly the
+    // diagnostic the finding asked for, demonstrated rather than asserted. Their VALUES must
+    // still be pinned, because deprecating an enumerator must not change what it is.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     EXPECT_EQ(static_cast<int>(CultureTypes::WindowsOnlyCultures),     0x0020);
     EXPECT_EQ(static_cast<int>(CultureTypes::FrameworkCultures),       0x0040);
+#pragma GCC diagnostic pop
 }
 
 TEST(CultureTypesBatch28Test, OperatorOr) {

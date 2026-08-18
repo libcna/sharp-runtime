@@ -673,11 +673,23 @@ TEST(AppDomainTests, ShadowCopyFiles_False) {
 }
 
 TEST(AppDomainTests, IsCompatibilitySwitchSet_ReturnsFalse) {
-    EXPECT_FALSE(System::AppDomain::CurrentDomain().IsCompatibilitySwitchSet("SomeSwitch"));
+    // #2250 made this return std::optional<bool>, so the assertion below now means "the switch
+    // is NOT SET" rather than "the switch is false" -- EXPECT_FALSE on an optional tests
+    // has_value(). Spelled out so the two are not confused: a switch explicitly set to false
+    // would be TRUTHY here.
+    EXPECT_EQ(std::nullopt,
+              System::AppDomain::CurrentDomain().IsCompatibilitySwitchSet("SomeSwitch"));
 }
 
 TEST(AppDomainTests, GetCurrentThreadId_Positive) {
+    // #2289 deprecated AppDomain::GetCurrentThreadId, transcribing .NET's [Obsolete]
+    // (AppDomain.cs:228). THE SUPPRESSION IS THE EVIDENCE: it is REQUIRED, and deleting it
+    // fails this build with -Werror=deprecated-declarations. The call must still WORK --
+    // deprecating a member must not change what it does.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     EXPECT_GT(System::AppDomain::GetCurrentThreadId(), 0);
+#pragma GCC diagnostic pop
 }
 
 TEST(AppDomainTests, SetDynamicBase_NoThrow) {

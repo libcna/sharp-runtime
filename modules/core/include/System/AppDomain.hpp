@@ -336,7 +336,12 @@ namespace System {
          * @deprecated In .NET this method is deprecated; prefer Thread.ManagedThreadId.
          *             Delegates to Environment::getCurrentManagedThreadIdProperty().
          */
-        [[nodiscard]] static SharpRuntime::intcs GetCurrentThreadId() {
+        [[nodiscard]] [[deprecated(
+            "AppDomain.GetCurrentThreadId has been deprecated because it does not provide a "
+            "stable Id when managed threads are running on fibers (aka lightweight threads). To "
+            "get a stable identifier for a managed thread, use the ManagedThreadId property on "
+            "Thread instead.")]]
+        static SharpRuntime::intcs GetCurrentThreadId() {
             return Environment::getCurrentManagedThreadIdProperty();
         }
 
