@@ -5,6 +5,7 @@
 //   MidpointRounding, UInt128, MarshalByRefObject, EventHandler,
 //   ReadOnlyMemory, Activator, ThreadStaticAttribute, FlagsAttribute
 #include <gtest/gtest.h>
+#include "System/PlatformNotSupportedException.hpp"
 #include <limits>
 #include <type_traits>
 #include <vector>
@@ -86,8 +87,52 @@ TEST(MarshalByRefObjectNewTests, PolymorphicDeletion_NoLeak) {
     std::unique_ptr<System::MarshalByRefObject> p = std::make_unique<Derived>();
     EXPECT_NE(p.get(), nullptr);
 }
-TEST(MarshalByRefObjectNewTests, DefaultCtor_DoesNotThrow) {
-    EXPECT_NO_THROW(System::MarshalByRefObject obj);
+namespace detail2297 {
+/// Detection idiom: true only if `T` has a callable `InitializeLifetimeService()`. Written as a
+/// concept over a dependent expression so that the member's ABSENCE is a value rather than a
+/// compile error -- which is what makes the assertion below expressible at all.
+template <typename T>
+concept HasInitializeLifetimeService = requires(T& t) { t.InitializeLifetimeService(); };
+}  // namespace detail2297
+
+TEST(MarshalByRefObjectNewTests, Fix2297_TheBaseIsNoLongerDirectlyConstructible) {
+    // #2297 made the constructor protected, matching .NET's `protected MarshalByRefObject()`;
+    // C# rejects the equivalent with CS0144. This test used to construct the base directly.
+    struct Derived : System::MarshalByRefObject {};
+    static_assert(!std::is_default_constructible_v<System::MarshalByRefObject>,
+                  "#2297: the constructor is protected");
+    static_assert(!std::is_copy_constructible_v<System::MarshalByRefObject>,
+                  "#2297: and the copy member went with it, so the base cannot be sliced out");
+    static_assert(std::is_default_constructible_v<Derived>,
+                  "a derived type is still constructible -- that is the point");
+    EXPECT_NO_THROW(Derived obj; (void)obj);
+}
+
+TEST(MarshalByRefObjectNewTests, Fix2297_GetLifetimeServiceThrowsAndTheVirtualOneIsStillAbsent) {
+    // GetLifetimeService() is added: .NET keeps it precisely so a caller receives
+    // PlatformNotSupportedException (`MarshalByRefObject.cs:17-21`), and its absence here turned
+    // that observable diagnostic into a compile error at an unrelated place. It is NOT virtual in
+    // .NET, so adding it costs no vtable slot.
+    struct Derived : System::MarshalByRefObject {};
+    Derived obj;
+    EXPECT_THROW((void)obj.GetLifetimeService(), System::PlatformNotSupportedException);
+    try {
+        (void)obj.GetLifetimeService();
+        ADD_FAILURE() << "expected PlatformNotSupportedException";
+    } catch (const System::PlatformNotSupportedException& e) {
+        EXPECT_STREQ(e.what(), "Remoting is not supported on this platform.");
+    }
+
+    // InitializeLifetimeService() is DELIBERATELY still absent: .NET's is virtual, and this class
+    // already has a vtable, so adding it inserts a SLOT -- a vtable change here and in both
+    // derived classes. SA-3 excludes those explicitly. Ticket #2374 carries the approval request,
+    // and this assertion is what makes its arrival visible rather than silent.
+    // The `requires` form needs the name to be findable at all, so it is written as a
+    // detection idiom over a dependent type instead -- an absent member must be expressible as
+    // absent, not as a hard error.
+    static_assert(!detail2297::HasInitializeLifetimeService<Derived>,
+                  "#2374 landed: InitializeLifetimeService() is present, so re-derive the vtable "
+                  "pins in AppDomain and ContextBoundObject");
 }
 
 // ---------------------------------------------------------------------------

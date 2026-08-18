@@ -1459,8 +1459,11 @@ TEST(PredicateTests, Predicate_IsEven) {
 // MarshalByRefObject
 // ===========================================================================
 
-TEST(MarshalByRefObjectTests, Instantiation_NoThrow) {
-    EXPECT_NO_THROW(System::MarshalByRefObject obj);
+TEST(MarshalByRefObjectTests, Fix2297_DerivedInstantiation_NoThrow) {
+    // #2297 made the base's constructor protected, matching .NET. Deriving is the only route,
+    // and the only one there ever should have been.
+    struct Derived : System::MarshalByRefObject {};
+    EXPECT_NO_THROW(Derived obj; (void)obj);
 }
 
 // ===========================================================================
