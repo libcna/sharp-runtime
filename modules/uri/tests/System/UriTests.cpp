@@ -828,15 +828,71 @@ TEST(UriTests, DocumentedContract_HostCaseIsPreserved) {
     EXPECT_EQ(u.getHostProperty(), "EXAMPLE.COM");
 }
 
-TEST(UriTests, DocumentedContract_CaseDifferingUrisAreNotEqualYet) {
-    // Pins the open SR-AUD-142 divergence so #1995's repair is a deliberate, visible
-    // change rather than a silent one: this test must be updated when identity changes.
+TEST(UriTests, Fix1995_CaseDifferingUrisAreEqual) {
+    // INVERTED by #1995 / SR-AUD-142. This pinned the open divergence so the repair would be a
+    // deliberate, visible change; it is now the repair's own assertion.
     Uri a("HTTP://EXAMPLE.COM:80/Path");
     Uri b("http://example.com/Path");
-    EXPECT_FALSE(a == b);
-    // The matching hash inequality was removed by #2284: unequal values are permitted to hash
-    // equally (docs/HashAssertionContractRule.md R2), so identity is pinned on operator== alone
-    // and that is the single line #1995 has to update.
+    EXPECT_TRUE(a == b);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode()) << "the hash must agree with equality";
+}
+
+TEST(UriTests, Fix1995_TheFragmentAndUserInfoAreIgnored) {
+    // THE HALF THE DESIGN RECORD MISSED. .NET compares UriComponents.HttpRequestUrl, which is
+    // Scheme | Host | Port | Path | Query (UriEnumTypes.cs:43) -- and its own comment says
+    // "Fragment AND UserInfo (for non-mailto URIs) are ignored" (Uri.cs:1833). No reading of
+    // section 14.1's proposal would have predicted either.
+    EXPECT_TRUE(Uri("http://example.com/p#one") == Uri("http://example.com/p#two"));
+    EXPECT_TRUE(Uri("http://user@example.com/p") == Uri("http://example.com/p"));
+    EXPECT_EQ(Uri("http://example.com/p#one").GetHashCode(),
+              Uri("http://example.com/p#two").GetHashCode());
+}
+
+TEST(UriTests, Fix1995_PathAndQueryStillDiscriminate) {
+    // The widening stops where .NET's does: the four components HttpRequestUrl DOES include must
+    // still separate URIs, or "canonicalise for comparison" would have become "compare nothing".
+    EXPECT_FALSE(Uri("http://example.com/a") == Uri("http://example.com/b"));
+    EXPECT_FALSE(Uri("http://example.com/p?a=1") == Uri("http://example.com/p?a=2"));
+    EXPECT_FALSE(Uri("http://example.com/p") == Uri("https://example.com/p"));
+    EXPECT_FALSE(Uri("http://example.com/p") == Uri("http://other.com/p"));
+    EXPECT_FALSE(Uri("http://example.com:8080/p") == Uri("http://example.com/p"));
+}
+
+TEST(UriTests, Fix1995_AMixedCaseSchemeStillResolvesItsDefaultPortForComparison) {
+    // A TRAP MEASUREMENT FOUND, not the design record: defaultPortForScheme matches lower-case
+    // names only, so this port parses "HTTP://example.com/" with port -1 and
+    // "http://example.com/" with port 80. Comparing the STORED numbers would have left these
+    // unequal even after folding the scheme -- defeating the repair on the very input it exists
+    // for. The identity key resolves the default from the FOLDED scheme, for comparison only.
+    EXPECT_TRUE(Uri("HTTP://example.com/") == Uri("http://example.com/"));
+    EXPECT_EQ(Uri("HTTP://example.com/").getPortProperty(), -1)
+        << "and the parse itself is unchanged -- resolution happens only for comparison";
+}
+
+TEST(UriTests, Decl1995_TheCaseInsensitivePathRuleIsNotReproduced) {
+    // NOT REPRODUCED, and stated rather than discovered later. .NET compares the PATH
+    // case-insensitively for UNC and DOS paths (Uri.cs:1849) and hashes a file: URI
+    // case-insensitively (Uri.cs:1548-1551). This port models neither IsUncOrDosPath nor IsFile,
+    // so the path is always compared case-sensitively -- a NARROWER equality than .NET's, which
+    // never calls equal two URIs .NET would call unequal.
+    EXPECT_FALSE(Uri("file:///C:/Path") == Uri("file:///C:/path"));
+}
+
+TEST(UriTests, Decl1995_RenderedStringsAreUnchanged) {
+    // The repair canonicalises for COMPARISON only. AbsoluteUri and OriginalString still return
+    // the raw input, which is what keeps this out of the review plan's section 15 exclusion.
+    Uri u("HTTP://EXAMPLE.COM:80/Path");
+    EXPECT_EQ(u.getOriginalStringProperty(), "HTTP://EXAMPLE.COM:80/Path");
+    EXPECT_EQ(u.getSchemeProperty(), "HTTP");
+    EXPECT_EQ(u.getHostProperty(), "EXAMPLE.COM");
+}
+
+TEST(UriTests, Decl1995_ARelativeReferenceComparesItsOriginalString) {
+    // .NET: "if (IsNotAbsoluteUri) return OriginalString.Equals(other.OriginalString);"
+    // (Uri.cs:1752-1753) -- no canonicalisation, and never equal to an absolute URI.
+    EXPECT_TRUE(Uri("/a/b") == Uri("/a/b"));
+    EXPECT_FALSE(Uri("/a/b") == Uri("/A/B")) << "no folding for a relative reference";
+    EXPECT_FALSE(Uri("/a/b") == Uri("http://example.com/a/b"));
 }
 
 TEST(UriTests, DocumentedContract_MixedCaseSchemeHasNoDefaultPort) {

@@ -59,6 +59,16 @@ namespace System {
         /** Parses @p uriString into component fields. Called by all constructors. */
         void parse(const std::string& uriString);
 
+        /**
+         * @brief Builds the canonical string that `operator==` compares and `GetHashCode` hashes.
+         *
+         * Ticket #1995 / SR-AUD-142. Both identity members feed from this one function, so they
+         * cannot disagree -- the same guarantee .NET gets by feeding both from
+         * `GetParts(UriComponents.HttpRequestUrl, ...)`. See the definition in `Uri.cpp` for what
+         * is included, what is deliberately excluded, and what is not reproduced.
+         */
+        [[nodiscard]] std::string identityKey() const;
+
     public:
         /**
          * @brief Constructs a Uri from an absolute or relative URI string.

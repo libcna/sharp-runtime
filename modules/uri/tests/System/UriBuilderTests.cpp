@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <functional>
 #include "System/UriBuilder.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -310,19 +311,26 @@ TEST(UriBuilderTest, HashIsObtainableWhereverEqualsSucceeds_OtherUnparseableRend
     }
 }
 
-TEST(UriBuilderTest, HashIsValueIdenticalWhereTheOldRouteSucceeded) {
-    // The compatibility claim, asserted rather than argued: for every builder whose
-    // rendering parses, hashing the string and hashing the built Uri give the same number.
-    UriBuilder shapes[6];
-    shapes[0].setHostProperty("example.com");
-    shapes[1].setHostProperty("example.com"); shapes[1].setPortProperty(8080);
-    shapes[2].setHostProperty("example.com"); shapes[2].setUserNameProperty("u");
-                                              shapes[2].setPasswordProperty("p");
-    shapes[3].setHostProperty("example.com"); shapes[3].setQueryProperty("a=1");
-    shapes[4].setHostProperty("example.com"); shapes[4].setFragmentProperty("f");
-    shapes[5].setHostProperty("[::1]");       shapes[5].setPortProperty(443);
-    for (const UriBuilder& b : shapes)
-        EXPECT_EQ(b.GetHashCode(), b.getUriProperty().GetHashCode()) << b.ToString();
+TEST(UriBuilderTest, Decl1995_BuilderHashNoLongerMatchesTheBuiltUrisHash) {
+    // REWRITTEN by #1995. This asserted #2004's compatibility claim -- that for every builder
+    // whose rendering parses, hashing the string and hashing the built Uri give the same number.
+    // That claim rested on Uri::GetHashCode hashing absoluteUri_ verbatim, which #1995 changed:
+    // Uri now hashes a canonical identity key (folded scheme and host, resolved port, no fragment
+    // or user-info), so the two numbers legitimately differ.
+    //
+    // The builder's own hash is UNCHANGED and still hashes the rendered string, because #2004
+    // measured four ordinary setter routes where building a Uri THROWS -- see this file's
+    // GetHashCode doc-comment. Making the builder delegate to Uri, which is what .NET does
+    // (`GetHashCode() => Uri.GetHashCode()`, UriBuilder.cs:279), would reintroduce that throw.
+    // That conflict is ticket #2391, not something to resolve silently here.
+    UriBuilder b;
+    b.setHostProperty("EXAMPLE.COM");
+    b.setPortProperty(80);
+    EXPECT_EQ(b.GetHashCode(), static_cast<SharpRuntime::intcs>(
+                                    std::hash<std::string>{}(b.ToString())))
+        << "the builder still hashes its rendered string";
+    EXPECT_NE(b.GetHashCode(), b.getUriProperty().GetHashCode())
+        << "and the built Uri now hashes its canonical identity instead";
 }
 
 TEST(UriBuilderTest, EqualsAndGetHashCodeAreTotalOnTheSameSet) {
@@ -379,21 +387,20 @@ TEST(UriBuilderTest, DeliberatelyUnequalPairsStayUnequal_PinsTheGatedIdentityCha
     // and only they have to be updated when #1995 lands.
 }
 
-TEST(UriBuilderTest, UriIdentityItselfIsUnchangedByThisTicket) {
-    // Uri's own operator== and GetHashCode were already paired (both read absoluteUri_) and
-    // this ticket does not touch them. Pinned so a later reader does not mistake #2004 for
-    // an identity change.
+TEST(UriBuilderTest, Fix1995_UriIdentityIsNowCanonical) {
+    // INVERTED by #1995. This was written by #2004 to say "this ticket does not change Uri
+    // identity", so a later reader would not mistake #2004 for an identity change. #1995 IS that
+    // change, so the pin's subject moves rather than the pin being deleted.
     System::Uri a("http://example.com/p");
     System::Uri b("http://example.com/p");
     System::Uri caseDiff("HTTP://EXAMPLE.COM/p");
     System::Uri explicitDefaultPort("http://example.com:80/p");
-    // Equal Uris hash equally -- the contract direction, kept. The two matching inequalities for
-    // the unequal pairs were removed by #2284: a collision between unequal values is legal
-    // (docs/HashAssertionContractRule.md R2), so the operator== assertions carry the pin.
     EXPECT_TRUE(a == b);
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
-    EXPECT_FALSE(a == caseDiff);
-    EXPECT_FALSE(a == explicitDefaultPort);
+    EXPECT_TRUE(a == caseDiff)            << "#1995: scheme and host are folded for comparison";
+    EXPECT_TRUE(a == explicitDefaultPort) << "#1995: an explicit default port is the default";
+    EXPECT_EQ(a.GetHashCode(), caseDiff.GetHashCode());
+    EXPECT_EQ(a.GetHashCode(), explicitDefaultPort.GetHashCode());
 }
 
 TEST(UriBuilderTest, Layout_SizeOfUriBuilderIsPinned) {

@@ -642,15 +642,83 @@ bool Uri::getIsLoopbackProperty() const {
 
 std::string Uri::ToString() const { return absoluteUri_; }
 
+// ---------------------------------------------------------------------------
+// Ticket #1995 / SR-AUD-142 — URI identity.
+//
+// operator== compared absoluteUri_ verbatim and GetHashCode hashed it, so
+// "HTTP://EXAMPLE.COM:80/Path" and "http://example.com/Path" were UNEQUAL with different hashes,
+// although they name the same resource.
+//
+// .NET compares and hashes the SAME component set, which is why the two agree by construction:
+//
+//     UriComponents components = UriComponents.HttpRequestUrl;          // Uri.cs:1835, 1539
+//     if (_syntax.InFact(UriSyntaxFlags.MailToLikeUri)) components |= UriComponents.UserInfo;
+//     string selfUrl = ... GetParts(components, UriFormat.SafeUnescaped);
+//
+// and HttpRequestUrl is `Scheme | Host | Port | Path | Query` (UriEnumTypes.cs:43).
+//
+// THE DESIGN RECORD MISSED THE MOST SURPRISING HALF OF THAT. Section 14.1 proposes only
+// "case-fold scheme and host, treat an explicit default port as absent"; the reference ALSO
+// EXCLUDES THE FRAGMENT AND THE USER-INFO, and says so in a comment of its own -- "Fragment AND
+// UserInfo (for non-mailto URIs) are ignored" (Uri.cs:1833). So `http://a/b#x == http://a/b#y`
+// and `http://u@a/b == http://a/b`, which no reading of the record would have predicted.
+//
+// Scheme and host are folded HERE rather than at parse time because this port deliberately does
+// no parse-time canonicalisation (review plan section 15); .NET lower-cases them while parsing,
+// so by the time its equality runs they are already canonical. Folding at comparison reaches the
+// same answer without touching AbsoluteUri or OriginalString -- no rendered string moves.
+//
+// NOT REPRODUCED, and measured rather than assumed: .NET compares the PATH case-insensitively for
+// UNC and DOS paths (`IsUncOrDosPath ? OrdinalIgnoreCase : Ordinal`, Uri.cs:1849) and hashes a
+// file: URI case-insensitively (Uri.cs:1548-1551). This port models neither IsUncOrDosPath nor
+// IsFile, so the path is always compared case-sensitively. That is a narrower equality than
+// .NET's -- it never calls equal two URIs .NET would call unequal -- and a test pins it.
+std::string Uri::identityKey() const {
+    // A relative reference has no components to canonicalise: .NET compares OriginalString
+    // (Uri.cs:1752-1753).
+    if (!isAbsoluteUri_) return "\x01relative\x01" + absoluteUri_;
+
+    const auto fold = [](std::string v) {
+        for (char& c : v)
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        return v;
+    };
+
+    const std::string foldedScheme = fold(scheme_);
+
+    // THE DEFAULT PORT MUST BE RESOLVED FROM THE FOLDED SCHEME, and that is a trap measurement
+    // found rather than the design record: defaultPortForScheme matches lower-case names only, so
+    // this port parses "HTTP://example.com/" with port -1 and "http://example.com/" with port 80.
+    // Comparing the stored numbers would therefore have left those two UNEQUAL even after
+    // case-folding the scheme -- defeating the repair on exactly the input it exists for.
+    // (`UriTests.DocumentedContract_MixedCaseSchemeHasNoDefaultPort` pins that parse behaviour,
+    // which is unchanged: this resolves for COMPARISON only.)
+    //
+    // .NET has no such trap because it lower-cases the scheme while parsing and then resolves the
+    // default, so its `Port != other.Port` (Uri.cs:1822) is already comparing resolved numbers.
+    const intcs resolvedPort = (port_ == -1) ? defaultPortForScheme(foldedScheme) : port_;
+
+    return foldedScheme + "\x01" + fold(host_) + "\x01" + std::to_string(resolvedPort) + "\x01"
+         + path_ + "\x01" + query_;
+}
+
 intcs Uri::GetHashCode() const {
-    return static_cast<intcs>(std::hash<std::string>{}(absoluteUri_));
+    // Hashes exactly what operator== compares, so the two cannot disagree -- which is the same
+    // guarantee .NET gets by feeding both from GetParts(HttpRequestUrl, ...).
+    return static_cast<intcs>(std::hash<std::string>{}(identityKey()));
 }
 
 // ---------------------------------------------------------------------------
 // Operators
 // ---------------------------------------------------------------------------
 
-bool Uri::operator==(const Uri& other) const { return absoluteUri_ == other.absoluteUri_; }
+bool Uri::operator==(const Uri& other) const {
+    // An absolute and a relative reference are never equal: .NET returns false as soon as
+    // IsAbsoluteUri differs (Uri.cs:1749-1750). The key encodes that, but stating it here keeps
+    // the intent visible.
+    if (isAbsoluteUri_ != other.isAbsoluteUri_) return false;
+    return identityKey() == other.identityKey();
+}
 bool Uri::operator!=(const Uri& other) const { return !(*this == other); }
 
 // ---------------------------------------------------------------------------
