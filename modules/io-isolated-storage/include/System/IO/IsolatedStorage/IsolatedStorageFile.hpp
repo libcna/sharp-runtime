@@ -61,6 +61,10 @@ namespace System::IO::IsolatedStorage
     class IsolatedStorageFile : public IsolatedStorage
     {
     private:
+        /// #2208: the stream resolves its relative path through this class's own fullPath(), so
+        /// the confinement has exactly one implementation rather than two that could drift.
+        friend class IsolatedStorageFileStream;
+
         std::filesystem::path rootDirectory_; ///< Root directory of this isolated storage scope.
         bool disposed_ = false;               ///< True after Close()/Dispose().
 
@@ -126,6 +130,16 @@ namespace System::IO::IsolatedStorage
 
         /** Returns an isolated storage scoped to the current assembly (same root as application). */
         [[nodiscard]] static IsolatedStorageFile GetUserStoreForAssembly();
+
+        /**
+         * @brief Obtains the user store scoped to the calling assembly and domain.
+         *
+         * .NET's `GetStore(Assembly | Domain | User)` (IsolatedStorageFile.cs:466-469). It is the
+         * store `IsolatedStorageFileStream`'s storeless constructor defaults to, which is why
+         * #2208 needed it; like this port's other two factories it resolves to the same storage
+         * root, so the scope is recorded rather than reflected in the directory.
+         */
+        [[nodiscard]] static IsolatedStorageFile GetUserStoreForDomain();
 
         // --- File operations ---
 

@@ -169,6 +169,13 @@ namespace System::IO::IsolatedStorage
                                     IsolatedStorageScope::Assembly | IsolatedStorageScope::User);
     }
 
+    IsolatedStorageFile IsolatedStorageFile::GetUserStoreForDomain()
+    {
+        return IsolatedStorageFile(SharpRuntime::Storage::StoragePaths::GetIsolatedStorageRoot(),
+                                    IsolatedStorageScope::Assembly | IsolatedStorageScope::Domain
+                                        | IsolatedStorageScope::User);
+    }
+
     // --- File operations ---
 
     bool IsolatedStorageFile::FileExists(const std::string& relativePath) const
@@ -183,7 +190,7 @@ namespace System::IO::IsolatedStorage
         System::IO::FileMode mode) const
     {
         throwIfDisposed();
-        return IsolatedStorageFileStream(fullPath(relativePath, "relativePath"), mode);
+        return IsolatedStorageFileStream(relativePath, mode, *this, "relativePath");
     }
 
     IsolatedStorageFileStream IsolatedStorageFile::CreateFile(const std::string& relativePath) const

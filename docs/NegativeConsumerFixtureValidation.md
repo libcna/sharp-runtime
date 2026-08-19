@@ -1555,7 +1555,7 @@ sanitizer was given a deliberate defect built with the same flags:
 
 §21.5 records **11 fixtures / 94 sites**, and that has been stale since 2026-08-04: the measured
 total today is **45 fixtures / 231 sites**. #1894 adds no fixture of its own, so the total is
-unchanged by this section.
+unchanged by this section. (§23 later takes it to **47 fixtures / 240 sites**.)
 
 **The first version of this subsection claimed the intervening fixtures "were each recorded in
 their own ticket's migration note rather than here, so the record exists". That was asserted rather
@@ -1601,3 +1601,44 @@ the audit re-runs clean: **0 fixtures without a `docs/` record.**
 
 Build directories used: `build-asan` (reused) and `build-ubsan` (created), both `--parallel 2`,
 both with `ccache`.
+
+---
+
+## 23. Ticket #2208 — the isolated-storage stream confinement fixture (2026-08-19)
+
+`test/consumer/io_isolated_storage_stream_confinement_negative.cpp`, **4 sites**, component
+`IO.IsolatedStorage`. Running total: **47 fixtures / 240 sites**, measured by running
+`scripts/check_negative_consumer_fixtures.py` rather than derived from §22.4 -- whose 45/231 was
+itself already stale, #1888/#1889 having taken it to 46/236 earlier the same day.
+
+### 23.1 What is unusual about this one
+
+Almost every fixture in this document pins a **spelling a ticket outlawed**. This one pins
+almost none, and the reason is a premise correction worth recording.
+
+#2208 was written as *"remove `IsolatedStorageFileStream`'s path constructor and take the owning
+store instead"*, which would have been a public source break with an outlawed spelling to pin.
+The reference says otherwise: .NET publishes eight constructors, all beginning
+`(string path, FileMode mode, ...)`, with the store an **optional trailing** parameter
+(`IsolatedStorageFileStream.cs:21-56`); its storeless form defaults to
+`GetUserStoreForDomain()` and resolves through `isf.GetFullPath(path)` like every other
+(`:82-118`). So the confinement landed **without removing an overload**, and on POSIX there is
+no source break at all — `std::filesystem::path` converts to `std::string` implicitly there, so
+the old call still compiles and only its *meaning* changes.
+
+What is left to pin is therefore not a spelling but a **structure**: the ways a consumer could
+step around the resolver.
+
+### 23.2 The four sites
+
+| # | id | what it proves |
+|---|---|---|
+| 1 | `store-fullpath-is-not-consumer-reachable` | `IsolatedStorageFile::fullPath()` is private and the stream is its only friend, so the friendship the repair relies on grants a consumer nothing |
+| 2 | `resolving-ctor-is-private` | the four-argument constructor — the only one taking its `paramName` from the caller rather than from the door — is unreachable |
+| 3 | `resolve-is-private` | `Resolve()` is private, so nothing advertises that the check is separable from the construction |
+| 4 | `store-first-overload-does-not-exist` | the `(store, path, mode)` order .NET does not have |
+
+**Site 4 is the one this section exists for.** An earlier cut of #2208 used exactly that order,
+before the reference was read. The wrong order is not a compile error waiting to happen — it
+compiles perfectly well as an *addition*, and would leave this port with two spellings where
+.NET has one. A behavioural test cannot see it, because both orders confine correctly.

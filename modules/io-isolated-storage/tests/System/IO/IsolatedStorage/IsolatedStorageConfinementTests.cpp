@@ -24,6 +24,7 @@
 
 #include "System/ArgumentException.hpp"
 #include "System/IO/FileMode.hpp"
+#include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageException.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageFile.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageFileStream.hpp"
@@ -968,21 +969,111 @@ namespace {
     }
 
     // =====================================================================================
-    // The residual this repair deliberately does not close (#2208).
+    // #2208 -- the residual is closed. INVERTED from the pin that recorded it.
     // =====================================================================================
 
-    TEST_F(IsolatedStorageConfinementTest, Residual_FileStreamConstructorIsNotAConfinementBoundary)
+    TEST_F(IsolatedStorageConfinementTest, Fix2208_TheStreamConstructorIsNowAConfinementBoundary)
     {
-        // Pinned, not celebrated: IsolatedStorageFileStream's public constructor takes a full
-        // path and opens it anywhere.  Confining it is a public signature change (#2208).  If
-        // this test ever starts failing, #2208 shipped and this pin must be inverted.
+        // INVERTED BY #2208 (2026-08-19). Its predecessor was called
+        // Residual_FileStreamConstructorIsNotAConfinementBoundary, took an absolute path, and said
+        // "if this test ever starts failing, #2208 shipped and this pin must be inverted." It did.
+        //
+        // The constructor used to open whatever path it was handed, ANYWHERE on the filesystem,
+        // and create that path's missing parents on the way. That was a WIDER hole than #2207's
+        // declared TOCTOU: no race and no privilege were needed, only the call.
+        //
+        // What confinement MEANS here is containment, not rejection: fullPath() strips leading
+        // separators at every door, so an absolute path is REINTERPRETED as relative to the store
+        // rather than refused. That rule is older than this ticket (#2209 recorded it) and applies
+        // to OpenFile, CreateFile, DeleteFile and MoveFile alike; refusing it only at this one
+        // door would make the type inconsistent with itself.
         const fs::path target = outside_ / "direct_stream.dat";
+
         {
-            System::IO::IsolatedStorage::IsolatedStorageFileStream stream(target, FileMode::Create);
+            System::IO::IsolatedStorage::IsolatedStorageFileStream stream(
+                target.string(), FileMode::Create, store());
             stream.Close();
         }
-        EXPECT_TRUE(fs::exists(target))
-            << "IsolatedStorageFileStream became confined; invert this pin and close #2208";
+
+        EXPECT_FALSE(fs::exists(target))
+            << "#2208: the outside path must not be created -- this is the whole repair";
+
+        // ...and the write landed INSIDE the store, at the absolute path reinterpreted relative
+        // to the root. Asserting where it went, not merely where it did not go, is what makes
+        // this a containment test rather than a test that the call failed for some other reason.
+        const fs::path contained = root_ / target.relative_path();
+        EXPECT_TRUE(fs::exists(contained))
+            << "#2208: the absolute path must be reinterpreted relative to the store root";
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Fix2208_TheStreamConstructorRefusesEveryEscapeItsSiblingsDo)
+    {
+        // The confinement now has ONE implementation: the constructor resolves through the store's
+        // own fullPath(), the same resolver OpenFile/CreateFile use. So it must refuse exactly what
+        // they refuse -- asserted rather than assumed, because two resolvers that drift apart is
+        // the failure mode a shared one exists to prevent.
+        writeFile(outside_ / "secret.txt", "secret");
+
+        EXPECT_THROW((void)System::IO::IsolatedStorage::IsolatedStorageFileStream(
+                         "../outside/secret.txt", FileMode::Open, store()),
+                     System::ArgumentException) << "a `..` climb";
+
+        // The refusal must come BEFORE anything is created. The constructor's one job on the way
+        // in is to make the file's missing parents, so a check that ran after it would leave a
+        // directory tree outside the store behind every refused call.
+        EXPECT_THROW((void)System::IO::IsolatedStorage::IsolatedStorageFileStream(
+                         "../outside/made2208/x.dat", FileMode::Create, store()),
+                     System::ArgumentException);
+        EXPECT_FALSE(fs::exists(outside_ / "made2208"))
+            << "#2208: a refused path must not have had its parents created first";
+
+        std::error_code ec;
+        fs::create_directory_symlink(outside_, root_ / "escape2208", ec);
+        if (!ec) {
+            EXPECT_THROW((void)System::IO::IsolatedStorage::IsolatedStorageFileStream(
+                             "escape2208/secret.txt", FileMode::Open, store()),
+                         System::ArgumentException) << "a pre-existing symlink out of the store";
+        }
+
+        // An absolute path is contained rather than refused (see the sibling case), so what must
+        // hold for it is that it cannot READ the outside file it names.
+        EXPECT_THROW((void)System::IO::IsolatedStorage::IsolatedStorageFileStream(
+                         (outside_ / "secret.txt").string(), FileMode::Open, store()),
+                     System::IO::FileNotFoundException)
+            << "an absolute path must resolve inside the store, where no such file exists";
+
+        // The STORELESS constructor is .NET's `(path, mode)` and defaults to the domain store.
+        // It must be confined too -- that it defaults its store rather than skipping one is the
+        // whole reason .NET can publish it, and the reason #2208 did not have to remove it.
+        // Only a refusal is asserted here: a success would write into the real user store root
+        // rather than this fixture's temporary one.
+        EXPECT_THROW((void)System::IO::IsolatedStorage::IsolatedStorageFileStream(
+                         "../../../etc/passwd2208", FileMode::Create),
+                     System::ArgumentException)
+            << "#2208: the storeless constructor resolves against a default store, not the "
+               "filesystem";
+
+        // .NET validates the mode before touching the path, with this exact text
+        // (SR.IsolatedStorage_FileOpenMode). Every named FileMode is legal, so only a value cast
+        // in from outside the enumeration can reach it.
+        try {
+            (void)System::IO::IsolatedStorage::IsolatedStorageFileStream(
+                "modecheck2208.dat", static_cast<FileMode>(99), store());
+            ADD_FAILURE() << "#2208: an undefined FileMode must be rejected";
+        } catch (const System::ArgumentException& ex) {
+            EXPECT_STREQ(ex.what(), "Invalid mode, see System.IO.FileMode.");
+        }
+        EXPECT_FALSE(fs::exists(root_ / "modecheck2208.dat"))
+            << "#2208: the mode is checked before the file is created, as .NET checks it first";
+
+        // ...and a legitimate relative path still works, so the refusals above are not the
+        // constructor simply refusing everything.
+        {
+            System::IO::IsolatedStorage::IsolatedStorageFileStream ok(
+                "inside2208.dat", FileMode::Create, store());
+            ok.Close();
+        }
+        EXPECT_TRUE(fs::exists(root_ / "inside2208.dat"));
     }
 
 } // namespace
