@@ -31,14 +31,29 @@ public:
     explicit CompilerFeatureRequiredAttribute(std::string featureName)
         : featureName_(std::move(featureName)) {}
 
+    /**
+     * Initializes the attribute with its feature name and optionality.
+     *
+     * #1980 group G-4 / SR-AUD-160. .NET declares `public bool IsOptional { get; init; }`
+     * (`CompilerFeatureRequiredAttribute.cs`), and `init` means the value can be supplied **at
+     * construction and never afterwards** -- `new CompilerFeatureRequiredAttribute("X") {
+     * IsOptional = true }` is legal, assigning to it later is not. C++ has no `init`, and the
+     * exact analogue of that pair of facts is a constructor parameter with no setter. This
+     * overload is what makes removing `setIsOptionalProperty` a *translation* rather than a
+     * narrowing: the value is still settable, just no longer mutable.
+     */
+    CompilerFeatureRequiredAttribute(std::string featureName, bool isOptional)
+        : featureName_(std::move(featureName)), isOptional_(isOptional) {}
+
     /** Gets the required compiler feature's name. */
     [[nodiscard]] const std::string& getFeatureNameProperty() const noexcept { return featureName_; }
 
     /** Gets whether a compiler may ignore an unknown feature name. */
     [[nodiscard]] bool getIsOptionalProperty() const noexcept { return isOptional_; }
 
-    /** Sets whether a compiler may ignore an unknown feature name. */
-    void setIsOptionalProperty(bool value) noexcept { isOptional_ = value; }
+    // #1980 G-4 / SR-AUD-160: setIsOptionalProperty is GONE. .NET's IsOptional is `{ get; init; }`
+    // -- settable at construction, immutable afterwards -- so a full setter published a mutability
+    // .NET does not have. Supply the value through the two-argument constructor above.
 };
 
 } // namespace System::Runtime::CompilerServices

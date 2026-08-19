@@ -100,12 +100,17 @@ namespace System::Runtime::Versioning {
         /**
          * @param platformName Platform on which the API is obsolete.
          * @param message      Optional deprecation message.
-         * @param url          Optional URL with migration guidance.
+         *
+         * #1980 group G-4 / SR-AUD-164. **There is no `url` parameter, deliberately.** .NET
+         * declares exactly two constructors -- `(platformName)` and `(platformName, message)`
+         * (`PlatformAttributes.cs`) -- and exposes the URL as a **settable property**,
+         * `public string? Url { get; set; }`. This port had it the other way round: a third
+         * constructor parameter .NET does not have, feeding a read-only accessor. Both halves
+         * were wrong, and in opposite directions.
          */
         explicit ObsoletedOSPlatformAttribute(const std::string& platformName,
-                                               const std::string& message = {},
-                                               const std::string& url = {})
-            : platformName_(platformName), message_(message), url_(url) {}
+                                               const std::string& message = {})
+            : platformName_(platformName), message_(message) {}
 
         /** @return The platform identifier. */
         [[nodiscard]] const std::string& getPlatformNameProperty() const { return platformName_; }
@@ -113,8 +118,16 @@ namespace System::Runtime::Versioning {
         /** @return The deprecation message, or empty if not provided. */
         [[nodiscard]] const std::string& getMessageProperty()      const { return message_; }
 
-        /** @return The migration URL, or empty if not provided. */
+        /** @return The migration URL, or empty if not set. */
         [[nodiscard]] const std::string& getUrlProperty()          const { return url_; }
+
+        /**
+         * @brief Sets the URL that provides more information about the obsolescence.
+         *
+         * #1980 G-4 / SR-AUD-164: .NET's `Url` is `{ get; set; }` -- a fully settable property,
+         * not a constructor parameter.
+         */
+        void setUrlProperty(const std::string& value) { url_ = value; }
     };
 
     /** Marks an API as requiring preview features that may change in future releases. */
@@ -127,16 +140,27 @@ namespace System::Runtime::Versioning {
 
         /**
          * @param message Explanation of why the API is preview.
-         * @param url     Optional URL with more information.
+         *
+         * #1980 group G-4 / SR-AUD-164. **No `url` parameter**, matching .NET's
+         * `public RequiresPreviewFeaturesAttribute(string? message)`
+         * (`RequiresPreviewFeaturesAttribute.cs:34`); the URL is a settable property there.
          */
-        explicit RequiresPreviewFeaturesAttribute(const std::string& message, const std::string& url = {})
-            : message_(message), url_(url) {}
+        explicit RequiresPreviewFeaturesAttribute(const std::string& message)
+            : message_(message) {}
 
         /** @return The informational message, or empty if not provided. */
         [[nodiscard]] const std::string& getMessageProperty() const { return message_; }
 
-        /** @return The informational URL, or empty if not provided. */
+        /** @return The informational URL, or empty if not set. */
         [[nodiscard]] const std::string& getUrlProperty()     const { return url_; }
+
+        /**
+         * @brief Sets the URL that provides more information.
+         *
+         * #1980 G-4 / SR-AUD-164: .NET's `Url` is `{ get; set; }`
+         * (`RequiresPreviewFeaturesAttribute.cs:47`).
+         */
+        void setUrlProperty(const std::string& value) { url_ = value; }
     };
 
 } // namespace System::Runtime::Versioning

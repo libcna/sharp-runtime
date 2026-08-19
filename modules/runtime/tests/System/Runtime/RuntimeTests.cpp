@@ -122,14 +122,37 @@ TEST(StateMachineAttributeTests, AsyncAndIteratorAttributes_InheritStateMachineT
               System::Type::From<char>().getNameProperty());
 }
 
+namespace {
+    /// Dependent on purpose: gcc evaluates a NON-dependent `requires` eagerly and hard-errors on
+    /// the missing member instead of yielding false (the #2299 trap).
+    template <typename T>
+    concept HasSetIsOptional = requires(T a) { a.setIsOptionalProperty(true); };
+}
+
 TEST(CompilerFeatureRequiredAttributeTests, StoresFeatureNameAndOptionalFlag) {
+    // MIGRATED by #1980 group G-4 / SR-AUD-160. The old body called setIsOptionalProperty, which
+    // published a mutability .NET does not have: its IsOptional is `{ get; init; }` -- settable at
+    // construction, immutable afterwards. The value is now supplied through the constructor.
     CompilerFeatureRequiredAttribute attr("custom-feature");
     EXPECT_EQ(attr.getFeatureNameProperty(), "custom-feature");
     EXPECT_FALSE(attr.getIsOptionalProperty());
-    attr.setIsOptionalProperty(true);
-    EXPECT_TRUE(attr.getIsOptionalProperty());
+
+    CompilerFeatureRequiredAttribute optional("custom-feature", true);
+    EXPECT_EQ(optional.getFeatureNameProperty(), "custom-feature");
+    EXPECT_TRUE(optional.getIsOptionalProperty());
+
     EXPECT_EQ(CompilerFeatureRequiredAttribute::RefStructs, "RefStructs");
     EXPECT_EQ(CompilerFeatureRequiredAttribute::RequiredMembers, "RequiredMembers");
+}
+
+TEST(CompilerFeatureRequiredAttributeTests, Decl1980G4_IsOptionalIsNotMutableAfterConstruction) {
+    // `init` is settable-at-construction AND immutable-afterwards. Removing the setter without
+    // adding the constructor would have been a narrowing; keeping the setter would have published
+    // mutability .NET lacks. This asserts both halves at once.
+    static_assert(std::is_constructible_v<CompilerFeatureRequiredAttribute, std::string, bool>,
+                  "#1980 G-4: the value must still be settable at construction");
+    static_assert(!HasSetIsOptional<CompilerFeatureRequiredAttribute>,
+                  "#1980 G-4: .NET's IsOptional is init-only, so there is no setter");
 }
 
 TEST(CompilerMetadataMarkerAttributeTests, MarkersInstantiateAndDeriveFromAttribute) {
@@ -640,11 +663,29 @@ TEST(UnsupportedOSPlatformGuardAttributeTests, Constructor_StoresPlatform) {
     EXPECT_EQ(attr.getPlatformNameProperty(), "windows");
 }
 
-TEST(ObsoletedOSPlatformAttributeTests, Constructor_AllFields) {
-    ObsoletedOSPlatformAttribute attr("ios", "Use X instead", "https://example.com");
+TEST(ObsoletedOSPlatformAttributeTests, Fix1980G4_UrlIsASettablePropertyNotAConstructorArgument) {
+    // MIGRATED by #1980 group G-4 / SR-AUD-164, and the port had BOTH halves wrong, in OPPOSITE
+    // directions: it took a third constructor parameter .NET does not have, and fed it into a
+    // read-only accessor where .NET's is `public string? Url { get; set; }`. .NET declares
+    // exactly `(platformName)` and `(platformName, message)` (PlatformAttributes.cs).
+    ObsoletedOSPlatformAttribute attr("ios", "Use X instead");
     EXPECT_EQ(attr.getPlatformNameProperty(), "ios");
     EXPECT_EQ(attr.getMessageProperty(), "Use X instead");
+    EXPECT_EQ(attr.getUrlProperty(), "") << "unset until assigned, as .NET's null is";
+
+    attr.setUrlProperty("https://example.com");
     EXPECT_EQ(attr.getUrlProperty(), "https://example.com");
+
+    static_assert(!std::is_constructible_v<ObsoletedOSPlatformAttribute,
+                                            std::string, std::string, std::string>,
+                  "#1980 G-4: .NET has no three-argument constructor");
+}
+
+TEST(ObsoletedOSPlatformAttributeTests, Fix1980G4_TheOneArgumentConstructorIsDotNets) {
+    ObsoletedOSPlatformAttribute attr("android");
+    EXPECT_EQ(attr.getPlatformNameProperty(), "android");
+    EXPECT_EQ(attr.getMessageProperty(), "");
+    EXPECT_EQ(attr.getUrlProperty(), "");
 }
 
 TEST(RequiresPreviewFeaturesAttributeTests, DefaultConstructor_EmptyMessage) {
@@ -655,6 +696,20 @@ TEST(RequiresPreviewFeaturesAttributeTests, DefaultConstructor_EmptyMessage) {
 TEST(RequiresPreviewFeaturesAttributeTests, Constructor_WithMessage) {
     RequiresPreviewFeaturesAttribute attr("Preview feature");
     EXPECT_EQ(attr.getMessageProperty(), "Preview feature");
+}
+
+TEST(RequiresPreviewFeaturesAttributeTests, Fix1980G4_UrlIsASettablePropertyNotAConstructorArgument) {
+    // The same inversion as ObsoletedOSPlatformAttribute, in the second of the two types G-4
+    // names. .NET: `public RequiresPreviewFeaturesAttribute(string? message)` and
+    // `public string? Url { get; set; }` (RequiresPreviewFeaturesAttribute.cs:34,47).
+    RequiresPreviewFeaturesAttribute attr("Preview feature");
+    EXPECT_EQ(attr.getUrlProperty(), "");
+    attr.setUrlProperty("https://aka.ms/preview");
+    EXPECT_EQ(attr.getUrlProperty(), "https://aka.ms/preview");
+
+    static_assert(!std::is_constructible_v<RequiresPreviewFeaturesAttribute,
+                                            std::string, std::string>,
+                  "#1980 G-4: .NET's constructor takes the message alone");
 }
 
 // ===========================================================================
