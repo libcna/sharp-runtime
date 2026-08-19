@@ -218,16 +218,45 @@ TEST(JsonNodeTeardownTests, RetainedSubtree_SurvivesTheTeardownIntact) {
 
 // A child owned by a *different* container must keep that container's link, which is the
 // `== this` guard #1886 added and which the donate path must not bypass.
+//
+// REWRITTEN BY #1888 (2026-08-19). This used to build the second container by COPY-CONSTRUCTING
+// the first -- `std::make_shared<JsonArray>(realOwner)`, commented "shares children" -- which was
+// the implicit copy that #1888 deleted. The subject of the case is #1886's `== this` guard, not
+// the copy, so the guard is now reached the supported way: two containers that genuinely hold
+// different children, one of which dies.
 TEST(JsonNodeTeardownTests, ForeignChild_KeepsItsRealOwnerThroughTheTeardown) {
     JsonArray realOwner;
     realOwner.Add(str("v"));
     auto child = realOwner[0];
+    ASSERT_EQ(child->getParentProperty(), &realOwner);
     {
-        auto imposter = std::make_shared<JsonArray>(realOwner); // copy-constructed: shares children
-        imposter->Add(str("own"));
+        JsonArray other;
+        other.Add(str("own"));
+        // `other`'s teardown donates ITS OWN children. `child` is not one of them, and the
+        // `== this` guard is what stops the walk from touching a node whose parent names someone
+        // else -- which is exactly what this case exists to pin.
     }
-    EXPECT_EQ(child->getParentProperty(), &realOwner);
+    EXPECT_EQ(child->getParentProperty(), &realOwner)
+        << "#1886: a foreign container's teardown must not steal this link";
     EXPECT_EQ(realOwner.getCountProperty(), 1);
+}
+
+// The stronger form of the same guard, and the one the deleted copy used to reach by accident:
+// a node that MOVED between containers must be released by its NEW owner and left alone by the
+// old one. Reached through Remove/Add, which is now the only way to move a node at all.
+TEST(JsonNodeTeardownTests, Fix1888_AMovedChildIsReleasedByItsNewOwnerOnly) {
+    std::shared_ptr<JsonNode> child;
+    JsonArray newOwner;
+    {
+        JsonArray oldOwner;
+        oldOwner.Add(str("v"));
+        child = oldOwner[0];
+        oldOwner.RemoveAt(0);
+        newOwner.Add(child);
+        ASSERT_EQ(child->getParentProperty(), &newOwner);
+    }   // oldOwner dies here and must not touch `child`
+    EXPECT_EQ(child->getParentProperty(), &newOwner);
+    EXPECT_EQ(newOwner.getCountProperty(), 1);
 }
 
 TEST(JsonNodeTeardownTests, DeepTreeDestroyedDuringExceptionUnwinding_DoesNotTerminate) {

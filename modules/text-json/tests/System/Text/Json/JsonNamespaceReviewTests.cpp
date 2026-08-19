@@ -838,6 +838,11 @@ TEST(JsonEmbeddedNulTests, THEDELIBERATEEXCEPTIONJsonNodeParseStillHasNoDepthBou
 // names the ticket that owns it. None of them endorses the behaviour; each of them fails the
 // day it changes, which is exactly when the owning ticket needs re-reading.
 
+namespace detail1888Review {
+    /// Dependent parameter, per the #2299 gcc trap.
+    template <typename T> concept HasPublicDetachParent = requires(T& t) { t.DetachParent(); };
+}
+
 TEST(JsonGatedBehaviourPins, Decl2118_GetRawTextReRendersRatherThanReturningSourceText) {
     // RENAMED AND RE-ROLED BY #2118 on 2026-08-19: this was a GATED pin ("a defect knowingly still
     // present"); it is now a DECLARATION. The user decided against retaining source spans, so the
@@ -979,11 +984,19 @@ TEST(JsonGatedBehaviourPins, PINCCF019JsonNodeSParentIsABorrowedPointerAndDetach
     object->Add("a", child);
     EXPECT_EQ(child->getParentProperty(), object.get()) << "a raw, borrowed parent pointer";
     EXPECT_EQ((*object)["a"]->GetValueKind(), JsonValueKind::Number);
-    // DetachParent is public -- the source break #1888 is blocked on.
-    child->DetachParent();
-    EXPECT_EQ(child->getParentProperty(), nullptr)
-        << "#1888: a caller can sever the link the container believes it owns";
-    EXPECT_TRUE(object->ContainsKey("a")) << "and the container still lists it";
+    // INVERTED BY #1888 (2026-08-19). This used to call DetachParent() directly and assert that a
+    // caller "can sever the link the container believes it owns" while the container still lists
+    // the key -- the defect, pinned. DetachParent is now protected with JsonArray/JsonObject as
+    // friends, which is the reachability .NET has: its DetachParent is a PRIVATE helper on each
+    // container and there is none on JsonNode at all.
+    static_assert(!detail1888Review::HasPublicDetachParent<Nodes::JsonObject>,
+                  "#1888: DetachParent must not be publicly callable");
+
+    // The link can still be severed -- through the container, which keeps the two in step instead
+    // of letting them disagree. That is the property the old assertion was really about.
+    object->Remove("a");
+    EXPECT_EQ(child->getParentProperty(), nullptr) << "the container detaches its own child";
+    EXPECT_FALSE(object->ContainsKey("a")) << "#1888: and no longer lists it -- they cannot disagree";
 }
 
 TEST(JsonGatedBehaviourPins, PINConvertersAndReferenceHandlingAreDECLARATIONONLYNotConsulted) {

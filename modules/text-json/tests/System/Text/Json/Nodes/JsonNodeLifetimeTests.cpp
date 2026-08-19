@@ -33,6 +33,12 @@ using System::Text::Json::Nodes::JsonNode;
 using System::Text::Json::Nodes::JsonObject;
 using System::Text::Json::Nodes::JsonValue;
 
+namespace detail1888 {
+    /// Dependent parameter, per the #2299 gcc trap: a non-dependent `requires` on a missing or
+    /// inaccessible name hard-errors instead of yielding false.
+    template <typename T> concept HasPublicDetachParent = requires(T& t) { t.DetachParent(); };
+}
+
 namespace {
 
     std::shared_ptr<JsonNode> str(const std::string& s) { return JsonValue::Create(s); }
@@ -171,19 +177,36 @@ TEST(JsonNodeLifetimeTests, RetainedLeafOnly_AfterWholeTreeDestroyed_HasNoParent
     EXPECT_EQ(leaf->getRootProperty(), leaf.get());
 }
 
-// --- Only the destroying owner's own links are cleared (J08, J13) -------------------------
+// --- The three defects #1888 closed (J08, J09, J13) ---------------------------------------
+//
+// These three cases used to PIN the defects, each with a `NOLINT - deliberate` marker saying so.
+// #1888 landed on 2026-08-19 and they are INVERTED: what they assert now is that the spelling is
+// gone, and that the lifetime behaviour they were really protecting still holds by other means.
 
-// Probe case J13: DetachParent() is public today, so a node can legitimately end up stored in
-// one container while its parent link names another. The destructor of the container that no
-// longer owns it must leave that link alone.
-TEST(JsonNodeLifetimeTests, ChildOwnedByAnotherContainer_KeepsItsParentWhenTheFormerOwnerDies) {
+TEST(JsonNodeLifetimeTests, Fix1888_ANodeCannotBePutIntoTwoContainers) {
+    // WAS: ChildOwnedByAnotherContainer_KeepsItsParentWhenTheFormerOwnerDies (probe case J13).
+    // DetachParent() was PUBLIC, so a caller could clear a node's parent link and hand the same
+    // node to a second container -- leaving one container holding a node whose parent named
+    // another. The old case pinned the destructor's behaviour in that state.
+    //
+    // The state is now unreachable: DetachParent is protected, with JsonArray and JsonObject as
+    // friends. That is the reachability .NET has -- its DetachParent is a PRIVATE helper on each
+    // container (JsonObject.cs:316, JsonArray.IList.cs:231) whose body is `item?.Parent = null`,
+    // and `Parent`'s setter is internal. There is no DetachParent on JsonNode.cs at all.
+    static_assert(!detail1888::HasPublicDetachParent<JsonArray>,
+                  "#1888: DetachParent must not be publicly callable");
+
+    // What the old case really protected -- a container releasing only its OWN children -- still
+    // holds, and is reached the supported way: Remove detaches, and the former owner's death
+    // leaves the surviving container's link alone.
     JsonArray live;
     std::shared_ptr<JsonNode> child;
     {
         JsonArray stale;
         stale.Add(str("v"));
         child = stale[0];
-        child->DetachParent();
+        stale.RemoveAt(0);                       // the supported detach
+        ASSERT_EQ(child->getParentProperty(), nullptr);
         live.Add(child);
         ASSERT_EQ(child->getParentProperty(), &live);
     }
@@ -191,38 +214,41 @@ TEST(JsonNodeLifetimeTests, ChildOwnedByAnotherContainer_KeepsItsParentWhenTheFo
     EXPECT_EQ(child->getRootProperty(), &live);
 }
 
-// Probe case J08: JsonNode's copy operations are still implicitly generated (ticket #1888, not
-// approved), so a copy-constructed array shares the original's children, which keep reporting
-// the original as their parent. Destroying the copy must not steal that link.
-TEST(JsonNodeLifetimeTests, CopyConstructedArrayDestroyed_LeavesTheOriginalsParentLinkIntact) {
+TEST(JsonNodeLifetimeTests, Fix1888_CopyAndAssignmentAreGoneAndDeepCloneReplacesThem) {
+    // WAS: CopyConstructedArrayDestroyed_LeavesTheOriginalsParentLinkIntact (J08) and
+    // OriginalDestroyedBeforeItsCopy_DetachesOnceAndTheCopyIsHarmless (J09). Both carried a
+    // `NOLINT - deliberate: pins today's implicit copy` marker.
+    //
+    // A .NET JsonNode is a REFERENCE type, so there was never an object copy to translate --
+    // these four members were a C++ artefact, and both were wrong for a parented node: the copy
+    // shared the original's children, each still reporting the ORIGINAL as its parent, and
+    // assignment SLICED, rewriting parent_ on a node still stored in a container.
+    static_assert(!std::is_copy_constructible_v<JsonArray>);
+    static_assert(!std::is_copy_assignable_v<JsonArray>);
+    static_assert(!std::is_move_constructible_v<JsonArray>);
+    static_assert(!std::is_move_assignable_v<JsonArray>);
+    static_assert(!std::is_copy_constructible_v<JsonObject>);
+    static_assert(!std::is_copy_constructible_v<JsonNode>);
+
+    // XObject already deleted all four, so this ended an asymmetry inside the port. That is NOT
+    // asserted here: modules/text-json does not depend on modules/xml-linq, and adding the edge
+    // for a test convenience is what the module-boundary rule exists to stop -- the same rule that
+    // blocked #1997's A-2. XLinqLifetimeTests owns the XObject half.
+
+    // DeepClone is the replacement, and it does what the implicit copy did NOT: the clone's
+    // children are its own, and they name the CLONE as their parent.
     JsonArray original;
     original.Add(str("v"));
     auto child = original[0];
-    {
-        JsonArray aliasing = original;  // NOLINT - deliberate: pins today's implicit copy
-        ASSERT_EQ(aliasing.getCountProperty(), 1);
-        ASSERT_EQ(child->getParentProperty(), &original);
-    }
-    EXPECT_EQ(child->getParentProperty(), &original);
-    EXPECT_EQ(child->getRootProperty(), &original);
-}
-
-// The reverse order: the original dies first (detaching the child), then the aliasing copy
-// dies. The copy must find a link that no longer names it and do nothing - in particular it
-// must not re-clear, re-read, or otherwise touch an already detached child.
-TEST(JsonNodeLifetimeTests, OriginalDestroyedBeforeItsCopy_DetachesOnceAndTheCopyIsHarmless) {
-    std::shared_ptr<JsonNode> child;
-    {
-        JsonArray aliasing;
-        {
-            JsonArray original;
-            original.Add(str("v"));
-            child = original[0];
-            aliasing = original;  // NOLINT - deliberate: pins today's implicit copy-assign
-        }
-        EXPECT_EQ(child->getParentProperty(), nullptr);
-    }
-    EXPECT_EQ(child->getParentProperty(), nullptr);
+    const auto clone = original.DeepClone();
+    auto* asArray = dynamic_cast<JsonArray*>(clone.get());
+    ASSERT_NE(asArray, nullptr);
+    ASSERT_EQ(asArray->getCountProperty(), 1);
+    EXPECT_NE((*asArray)[0].get(), child.get()) << "a deep clone shares no child with the original";
+    EXPECT_EQ((*asArray)[0]->getParentProperty(), asArray)
+        << "and the clone's children name the CLONE -- which is exactly what the implicit copy "
+           "got wrong";
+    EXPECT_EQ(child->getParentProperty(), &original) << "the original is untouched";
 }
 
 // --- Structural mutation before destruction ----------------------------------------------

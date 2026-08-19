@@ -36,6 +36,34 @@ namespace System::Text::Json::Nodes {
     public:
         virtual ~JsonNode() = default;
 
+        // Ticket #1888. A .NET `JsonNode` is a REFERENCE type, so there is no object copy to
+        // translate -- assigning one C# variable to another copies a reference. C++ generates the
+        // copy and move members implicitly here, and all four are wrong for a parented node:
+        //
+        //   * copy construction gave a second container sharing the SAME children, each of which
+        //     still reported the ORIGINAL as its parent (probe case J08);
+        //   * copy assignment SLICED, rewriting parent_ on a node that was still stored in a
+        //     container (J09).
+        //
+        // `System::Xml::Linq::XObject` already deletes all four for the same reason, so this ends an
+        // asymmetry inside the port rather than inventing a restriction. Use DeepClone() for a copy.
+        //
+        // HONEST RECORD: deleting the two MOVE members is currently an EQUIVALENCE, and it is kept
+        // deliberately rather than because a test can see it. Measured -- restoring them as
+        // `= default` changes no observable, for two independent reasons:
+        //   * `JsonNode` is ABSTRACT (three pure virtuals), so `is_move_constructible_v<JsonNode>`
+        //     is false whatever these declarations say;
+        //   * `JsonArray` and `JsonObject` each have a USER-DECLARED destructor (#1895's iterative
+        //     teardown), which suppresses their implicit move constructors, so their
+        //     move-constructibility falls back to the copy constructor -- already deleted.
+        // The deletion states the intent and becomes load-bearing the day a container drops its
+        // user-declared destructor. It is not load-bearing today, and the mutation that restores
+        // it is reported as uncaught rather than dressed up.
+        JsonNode(const JsonNode&) = delete;
+        JsonNode& operator=(const JsonNode&) = delete;
+        JsonNode(JsonNode&&) = delete;
+        JsonNode& operator=(JsonNode&&) = delete;
+
         /** @return The options this node was constructed with. */
         [[nodiscard]] JsonNodeOptions getOptionsProperty() const { return options_; }
 
@@ -64,6 +92,26 @@ namespace System::Text::Json::Nodes {
          */
         void AssignParent(JsonNode* parent);
 
+    protected:
+        /**
+         * @brief Clears the parent container pointer.
+         *
+         * @note **Protected since ticket #1888, and the header's previous note about it was wrong.**
+         * It said this "mirrors JsonNode.cs's internal DetachParent" -- there is **no
+         * `DetachParent` on `JsonNode.cs` at all**. .NET puts it on the *containers*, as a
+         * **private** helper on each (`JsonObject.cs:316`, `JsonArray.IList.cs:231`), whose whole
+         * body is `item?.Parent = null` -- and `Parent`'s setter is `internal`. So in .NET a
+         * consumer can neither call it nor reach what it does.
+         *
+         * Public here, it let a caller put one node into **two** containers (probe case J13). It is
+         * now protected, with the two containers as friends, which is the same reachability .NET
+         * has expressed in C++.
+         */
+        void DetachParent() { parent_ = nullptr; }
+
+        friend class JsonArray;
+        friend class JsonObject;
+
     private:
         /** @return true if this node currently contains other nodes. #1896's cycle-guard
          *  short-circuit; see AssignParent. Non-virtual by design -- a virtual would be a vtable
@@ -72,8 +120,6 @@ namespace System::Text::Json::Nodes {
 
     public:
 
-        /** @brief Internal: clears the parent container pointer. Not part of .NET's public surface (mirrors JsonNode.cs's internal DetachParent). */
-        void DetachParent() { parent_ = nullptr; }
 
         /** @return This node cast to JsonArray. @throws System::InvalidOperationException if this isn't a JsonArray. */
         [[nodiscard]] JsonArray& AsArray();
