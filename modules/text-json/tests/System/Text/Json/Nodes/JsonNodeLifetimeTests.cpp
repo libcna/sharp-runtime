@@ -547,13 +547,23 @@ TEST(JsonNodeLifetimeTests, RetainedChild_ReportsNoParentEvenIfTheFreedOwnersSto
 
 // --- Representation invariants ------------------------------------------------------------
 
-// The repair is layout-identical by construction; these assertions fail the build rather than a
-// test run if a future change adds a member (plan section 20 and ticket #1886's acceptance
-// criteria).
+// #1886's repair was layout-identical by construction, and these assertions fail the BUILD rather
+// than a test run if a member appears. They did exactly that when #1889 landed on 2026-08-19, which
+// is the evidence they are load-bearing rather than decorative -- so the two container figures are
+// UPDATED here, and the two that did not move are left as #1886 wrote them.
+//
+// #1889 added one System::Collections::detail::MutationCounter (8 bytes) to each CONTAINER, for
+// fail-fast enumeration. JsonNode and JsonValue are untouched, which is what shows the counter
+// went where the enumerators are and nowhere else.
 static_assert(sizeof(JsonNode) == 24, "#1886: JsonNode must stay 24 bytes");
-static_assert(sizeof(JsonArray) == 48, "#1886: JsonArray must stay 48 bytes");
-static_assert(sizeof(JsonObject) == 48, "#1886: JsonObject must stay 48 bytes");
+static_assert(sizeof(JsonArray) == 56, "#1886/#1889: JsonArray is 56 bytes (was 48)");
+static_assert(sizeof(JsonObject) == 56, "#1886/#1889: JsonObject is 56 bytes (was 48)");
 static_assert(sizeof(JsonValue) == 40, "#1886: JsonValue must stay 40 bytes");
+
+// The growth is exactly one counter on each, asserted as a RELATIONSHIP so a second member added
+// later cannot hide behind a literal somebody updated by hand.
+static_assert(sizeof(JsonArray) == 48 + sizeof(System::Collections::detail::MutationVersion));
+static_assert(sizeof(JsonObject) == 48 + sizeof(System::Collections::detail::MutationVersion));
 static_assert(alignof(JsonArray) == 8 && alignof(JsonObject) == 8, "#1886: alignment unchanged");
 static_assert(std::has_virtual_destructor_v<JsonNode>, "#1886: destruction stays virtual");
 static_assert(std::is_polymorphic_v<JsonArray> && std::is_polymorphic_v<JsonObject>,
@@ -563,7 +573,139 @@ static_assert(std::is_nothrow_destructible_v<JsonObject>, "#1886: ~JsonObject mu
 
 TEST(JsonNodeLifetimeTests, PublicLayoutIsUnchangedByTheDetachContract) {
     EXPECT_EQ(sizeof(JsonNode), 24u);
-    EXPECT_EQ(sizeof(JsonArray), 48u);
-    EXPECT_EQ(sizeof(JsonObject), 48u);
+    // #1889 added one MutationCounter to each container; the detach contract itself still
+    // costs no layout, which is what this case is about, so it is written relative to that.
+    EXPECT_EQ(sizeof(JsonArray), 48u + sizeof(System::Collections::detail::MutationVersion));
+    EXPECT_EQ(sizeof(JsonObject), 48u + sizeof(System::Collections::detail::MutationVersion));
     EXPECT_EQ(sizeof(JsonValue), 40u);
+}
+
+// =================================================================================================
+// #1889 -- fail-fast enumeration. The two defects it closes were MEASURED, not theorised.
+// =================================================================================================
+
+TEST(JsonNodeLifetimeTests, Fix1889_AnIteratorHeldAcrossAReallocatingAddIsRefusedNotDangling) {
+    // Probe case J11. begin()/end() used to hand out RAW std::vector iterators, so an iterator
+    // held across an Add that reallocated the buffer was an ASan-confirmed heap-use-after-free --
+    // a SIGSEGV in a build with no sanitizer. It is now an InvalidOperationException.
+    JsonArray arr;
+    arr.Add(str("a"));
+    auto it = arr.begin();
+
+    // Enough insertions to force at least one reallocation whatever the initial capacity.
+    for (int i = 0; i < 64; ++i) arr.Add(str("x"));
+
+    EXPECT_THROW((void)*it, System::InvalidOperationException)
+        << "#1889: a stale dereference must be refused, not read from freed storage";
+    EXPECT_THROW((void)++it, System::InvalidOperationException)
+        << "advancing a stale enumerator is refused too -- not just dereferencing it";
+}
+
+TEST(JsonNodeLifetimeTests, Fix1889_AnIteratorHeldAcrossClearIsRefusedRatherThanSilentlyWrong) {
+    // Probe case J12, and the worse of the two: Clear() does not reallocate, so the old iterator
+    // read DESTROYED STORAGE and returned a plausible value WITH NO DIAGNOSTIC IN ANY BUILD --
+    // not even under a sanitizer, in the general case.
+    JsonArray arr;
+    arr.Add(str("a"));
+    arr.Add(str("b"));
+    auto it = arr.begin();
+    arr.Clear();
+    EXPECT_THROW((void)*it, System::InvalidOperationException);
+
+    JsonObject obj;
+    obj.Add("k", str("v"));
+    auto oit = obj.begin();
+    obj.Clear();
+    EXPECT_THROW((void)*oit, System::InvalidOperationException);
+}
+
+TEST(JsonNodeLifetimeTests, Fix1889_EveryMutatingDoorInvalidatesAndNonMutatingReadsDoNot) {
+    // A counter is only useful if EVERY door bumps it, and only usable if no read does. Both
+    // halves are asserted, because a counter that over-fires is as wrong as one that under-fires.
+    const auto stale = [](auto& container, auto&& mutate) {
+        auto it = container.begin();
+        mutate();
+        return [it]() mutable { (void)*it; };
+    };
+
+    {   // Add
+        JsonArray a; a.Add(str("x"));
+        auto probe = stale(a, [&]{ a.Add(str("y")); });
+        EXPECT_THROW(probe(), System::InvalidOperationException) << "Add";
+    }
+    {   // Insert
+        JsonArray a; a.Add(str("x"));
+        auto probe = stale(a, [&]{ a.Insert(0, str("y")); });
+        EXPECT_THROW(probe(), System::InvalidOperationException) << "Insert";
+    }
+    {   // RemoveAt
+        JsonArray a; a.Add(str("x")); a.Add(str("y"));
+        auto probe = stale(a, [&]{ a.RemoveAt(1); });
+        EXPECT_THROW(probe(), System::InvalidOperationException) << "RemoveAt";
+    }
+    {   // SetItem -- the door easiest to forget, because the element COUNT does not change
+        JsonArray a; a.Add(str("x"));
+        auto probe = stale(a, [&]{ a.SetItem(0, str("z")); });
+        EXPECT_THROW(probe(), System::InvalidOperationException)
+            << "SetItem: the count is unchanged, so only the counter can notice";
+    }
+    {   // JsonObject::Add and Remove
+        JsonObject o; o.Add("k", str("v"));
+        auto probe = stale(o, [&]{ o.Add("k2", str("v2")); });
+        EXPECT_THROW(probe(), System::InvalidOperationException) << "JsonObject::Add";
+    }
+    {
+        JsonObject o; o.Add("k", str("v")); o.Add("k2", str("v2"));
+        auto probe = stale(o, [&]{ o.Remove("k2"); });
+        EXPECT_THROW(probe(), System::InvalidOperationException) << "JsonObject::Remove";
+    }
+
+    // ...and a READ must not invalidate. If it did, no caller could iterate at all.
+    {
+        JsonArray a; a.Add(str("x")); a.Add(str("y"));
+        auto it = a.begin();
+        (void)a.getCountProperty();
+        (void)a[0];
+        (void)a.IndexOf(a[1]);
+        EXPECT_NO_THROW((void)*it) << "#1889: reads must not bump the counter";
+    }
+
+    // AND begin()/end() THEMSELVES MUST NOT BUMP IT. A first cut of this case missed that: a
+    // mutation making begin() bump went UNCAUGHT, because a single range-for still works -- the
+    // one enumerator snapshots the version begin() just produced. It is observable only with TWO
+    // enumerators over the same unmutated container, which is a legitimate thing to hold.
+    {
+        JsonArray a; a.Add(str("x")); a.Add(str("y"));
+        auto first = a.begin();
+        auto second = a.begin();
+        const auto stop = a.end();
+        EXPECT_NO_THROW((void)*first)
+            << "#1889: taking a second enumerator must not invalidate the first";
+        EXPECT_NO_THROW((void)*second);
+        EXPECT_NE(first, stop);
+    }
+    {
+        JsonObject o; o.Add("k", str("v"));
+        auto first = o.begin();
+        auto second = o.begin();
+        EXPECT_NO_THROW((void)*first);
+        EXPECT_NO_THROW((void)*second);
+    }
+}
+
+TEST(JsonNodeLifetimeTests, Fix1889_AFullIterationOverAnUnmutatedContainerStillWorks) {
+    // The guard must not break ordinary use -- including the `it->` form, which needs operator->
+    // and which a first measurement of this ticket wrongly reported as having no callers.
+    JsonArray arr;
+    for (int i = 0; i < 5; ++i) arr.Add(str("v"));
+    int seen = 0;
+    for (const auto& item : arr) { EXPECT_NE(item, nullptr); ++seen; }
+    EXPECT_EQ(seen, 5);
+
+    JsonObject obj;
+    obj.Add("a", str("1"));
+    obj.Add("b", str("2"));
+    std::string keys;
+    for (auto it = obj.begin(); it != obj.end(); ++it) keys += it->first;
+    EXPECT_EQ(keys, "ab") << "the `it->` form must work -- JsonNodeParseDepthTests uses it";
 }

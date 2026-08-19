@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <memory>
+#include "System/Collections/detail/MutationCounter.hpp"
+#include "System/Collections/IEnumerator.hpp"
 #include <string>
 #include <utility>
 #include <vector>
@@ -28,6 +30,10 @@ namespace System::Text::Json::Nodes {
      */
     class JsonObject : public JsonNode {
         std::vector<std::pair<std::string, std::shared_ptr<JsonNode>>> properties_;
+
+        /// Fail-fast enumeration counter (#1889); see JsonArray for why it must be
+        /// `detail::MutationCounter` rather than a bare integer.
+        System::Collections::detail::MutationCounter version_;
 
         // Verified against JsonObject.IDictionary.cs's CreateDictionary(): real .NET's backing
         // dictionary uses StringComparer.OrdinalIgnoreCase (when PropertyNameCaseInsensitive is
@@ -94,6 +100,7 @@ namespace System::Text::Json::Nodes {
                 throw System::ArgumentException("An item with the same key has already been added.", "propertyName");
             if (value) value->AssignParent(this);
             properties_.emplace_back(propertyName, std::move(value));
+            ++version_;   // #1889
         }
 
         /** @brief Removes the property named @p propertyName. @return true if it was present. */
@@ -102,6 +109,7 @@ namespace System::Text::Json::Nodes {
             if (idx < 0) return false;
             if (auto& value = properties_[static_cast<size_t>(idx)].second) value->DetachParent();
             properties_.erase(properties_.begin() + idx);
+            ++version_;   // #1889
             return true;
         }
 
@@ -139,6 +147,7 @@ namespace System::Text::Json::Nodes {
             } else {
                 if (value) value->AssignParent(this);
                 properties_.emplace_back(propertyName, std::move(value));
+            ++version_;   // #1889
             }
         }
 
@@ -146,10 +155,51 @@ namespace System::Text::Json::Nodes {
         void Clear() {
             for (auto& [name, value] : properties_) if (value) value->DetachParent();
             properties_.clear();
+            ++version_;   // #1889
         }
 
-        [[nodiscard]] auto begin() const { return properties_.begin(); }
-        [[nodiscard]] auto end() const { return properties_.end(); }
+        /**
+         * @brief Fail-fast enumerator over the object's properties (#1889).
+         *
+         * The same repository idiom as `JsonArray::Enumerator`, for the same two measured
+         * defects (J11, J12): raw `std::vector` iterators had no version guard, so one held
+         * across a reallocating `Add` was an ASan-confirmed heap-use-after-free and one held
+         * across `Clear()` silently read destroyed storage with no diagnostic in any build.
+         */
+        class Enumerator {
+            const JsonObject* owner_;
+            std::size_t index_;
+            System::Collections::detail::MutationVersion version_;
+
+            void requireCurrent() const {
+                System::Collections::detail::requireUnmodified(version_ == owner_->version_);
+            }
+
+        public:
+            Enumerator(const JsonObject* owner, std::size_t index)
+                : owner_(owner), index_(index), version_(owner->version_) {}
+
+            [[nodiscard]] const std::pair<std::string, std::shared_ptr<JsonNode>>& operator*() const {
+                requireCurrent();
+                return owner_->properties_[index_];
+            }
+            /// Provided because callers iterate with `it->`; a forward iterator must offer it,
+            /// and the guard runs here too rather than only on `operator*`.
+            [[nodiscard]] auto operator->() const { return &**this; }
+
+            Enumerator& operator++() {
+                requireCurrent();
+                ++index_;
+                return *this;
+            }
+            [[nodiscard]] bool operator==(const Enumerator& other) const {
+                return owner_ == other.owner_ && index_ == other.index_;
+            }
+            [[nodiscard]] bool operator!=(const Enumerator& other) const { return !(*this == other); }
+        };
+
+        [[nodiscard]] Enumerator begin() const { return Enumerator(this, 0); }
+        [[nodiscard]] Enumerator end() const { return Enumerator(this, properties_.size()); }
 
         [[nodiscard]] JsonValueKind GetValueKind() const override { return JsonValueKind::Object; }
 

@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <memory>
+#include "System/Collections/detail/MutationCounter.hpp"
+#include "System/Collections/IEnumerator.hpp"
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -19,6 +21,13 @@ namespace System::Text::Json::Nodes {
      */
     class JsonArray : public JsonNode {
         std::vector<std::shared_ptr<JsonNode>> items_;
+
+        /// Fail-fast enumeration counter (#1889). CLAUDE.md's collection invariant is binding here:
+        /// it must be `detail::MutationCounter` and never a bare integer -- `++` on a signed counter
+        /// is undefined at INTCS_MAX, and the implicitly declared assignment operator would
+        /// transplant the SOURCE's counter into the destination, leaving an enumerator apparently
+        /// valid over storage the assignment destroyed. `MutationCounter` solves both.
+        System::Collections::detail::MutationCounter version_;
 
     public:
         explicit JsonArray(JsonNodeOptions options = {}) : JsonNode(options) {}
@@ -64,12 +73,14 @@ namespace System::Text::Json::Nodes {
             if (value) value->AssignParent(this);
             if (auto& old = items_[static_cast<size_t>(index)]) old->DetachParent();
             items_[static_cast<size_t>(index)] = std::move(value);
+            ++version_;   // #1889
         }
 
         /** @brief Appends @p item to the end of the array. */
         void Add(std::shared_ptr<JsonNode> item) {
             if (item) item->AssignParent(this);
             items_.push_back(std::move(item));
+            ++version_;   // #1889
         }
 
         /** @brief Inserts @p item at @p index. @throws System::ArgumentOutOfRangeException if out of range. */
@@ -78,6 +89,7 @@ namespace System::Text::Json::Nodes {
                 throw System::ArgumentOutOfRangeException("index");
             if (item) item->AssignParent(this);
             items_.insert(items_.begin() + index, std::move(item));
+            ++version_;   // #1889
         }
 
         /** @brief Removes the item at @p index. @throws System::ArgumentOutOfRangeException if out of range. */
@@ -86,6 +98,7 @@ namespace System::Text::Json::Nodes {
                 throw System::ArgumentOutOfRangeException("index");
             if (auto& item = items_[static_cast<size_t>(index)]) item->DetachParent();
             items_.erase(items_.begin() + index);
+            ++version_;   // #1889
         }
 
         /**
@@ -104,6 +117,7 @@ namespace System::Text::Json::Nodes {
         void Clear() {
             for (auto& item : items_) if (item) item->DetachParent();
             items_.clear();
+            ++version_;   // #1889
         }
 
         /** @return The index of @p item within the array, or -1 if not found (pointer identity). */
@@ -113,8 +127,55 @@ namespace System::Text::Json::Nodes {
             return -1;
         }
 
-        [[nodiscard]] auto begin() const { return items_.begin(); }
-        [[nodiscard]] auto end() const { return items_.end(); }
+        /**
+         * @brief Fail-fast enumerator over the array's elements.
+         *
+         * Ticket **#1889**. `begin()`/`end()` used to hand out **raw `std::vector` iterators with
+         * no version guard**, and two measured defects followed:
+         *   * an iterator held across a reallocating `Add` was an **ASan-confirmed
+         *     heap-use-after-free** -- a SIGSEGV in a build without a sanitizer (probe case J11);
+         *   * an iterator held across `Clear()` **silently returned a value from destroyed
+         *     storage, with no diagnostic in any build** (J12).
+         *
+         * This is the repository's standard fail-fast idiom, the same one `List<T>` and `BitArray`
+         * use: the container holds a `detail::MutationCounter`, the enumerator snapshots a
+         * `detail::MutationVersion`, and a stale dereference or advance raises
+         * `InvalidOperationException` rather than reading freed memory.
+         */
+        class Enumerator {
+            const JsonArray* owner_;
+            std::size_t index_;
+            System::Collections::detail::MutationVersion version_;
+
+            void requireCurrent() const {
+                System::Collections::detail::requireUnmodified(version_ == owner_->version_);
+            }
+
+        public:
+            Enumerator(const JsonArray* owner, std::size_t index)
+                : owner_(owner), index_(index), version_(owner->version_) {}
+
+            [[nodiscard]] const std::shared_ptr<JsonNode>& operator*() const {
+                requireCurrent();
+                return owner_->items_[index_];
+            }
+            /// Provided because callers iterate with `it->`; a forward iterator must offer it,
+            /// and the guard runs here too rather than only on `operator*`.
+            [[nodiscard]] auto operator->() const { return &**this; }
+
+            Enumerator& operator++() {
+                requireCurrent();
+                ++index_;
+                return *this;
+            }
+            [[nodiscard]] bool operator==(const Enumerator& other) const {
+                return owner_ == other.owner_ && index_ == other.index_;
+            }
+            [[nodiscard]] bool operator!=(const Enumerator& other) const { return !(*this == other); }
+        };
+
+        [[nodiscard]] Enumerator begin() const { return Enumerator(this, 0); }
+        [[nodiscard]] Enumerator end() const { return Enumerator(this, items_.size()); }
 
         [[nodiscard]] JsonValueKind GetValueKind() const override { return JsonValueKind::Array; }
 

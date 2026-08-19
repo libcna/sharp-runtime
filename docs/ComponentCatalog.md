@@ -43,7 +43,7 @@ for maintainers and are not part of the consumer include surface.
 | `Numerics` | `modules/numerics` | static | `Buffers`, `Collections.Core`, `Core.Base` | — | — | — | `System/Numerics/BigInteger.hpp` |
 | `Runtime` | `modules/runtime` | static | `Collections.Core`, `Core.Base` | — | — | — | `System/Runtime/AmbiguousImplementationException.hpp` |
 | `Text` | `modules/text` | static | `Buffers`, `Core.Base` | — | — | — | `System/Text/ASCIIEncoding.hpp` |
-| `Text.Json` | `modules/text-json` | static | `Core.Base`, `Text` | `Collections.Core` | `Collections.Core` | — | `System/Text/Json/JsonCommentHandling.hpp` |
+| `Text.Json` | `modules/text-json` | static | `Collections.Core`, `Core.Base`, `Text` | — | `Collections.Core` | — | `System/Text/Json/JsonCommentHandling.hpp` |
 | `Text.RegularExpressions` | `modules/text-regular-expressions` | interface | `Core.Base` | — | — | — | `System/Text/RegularExpressions/Capture.hpp` |
 | `Threading` | `modules/threading` | static | `Core.Base`, `TimeZone` | — | — | — | `System/AsyncCallback.hpp` |
 | `Threading.Tasks` | `modules/threading-tasks` | static | `Core.Base`, `Threading` | — | — | — | `System/IAsyncDisposable.hpp` |
