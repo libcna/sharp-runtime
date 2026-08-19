@@ -57,7 +57,22 @@ namespace System::Threading {
         // so the field is layout-neutral (build-probe/1955_probe1_layout_{before,after}.log).
         std::atomic<intcs> participantCount_;
         intcs remainingCount_;
-        longcs phaseCount_ = 0;
+        // Ticket #1957 / SR-AUD-210, cause T-E/2. This was a plain `longcs` read under mutex_,
+        // and FinishPhase() runs the post-phase action while HOLDING mutex_, so a legal
+        // `barrier.getCurrentPhaseNumberProperty()` inside that action deadlocked on a
+        // non-recursive std::mutex -- exactly the hazard #1955 recorded here when it fixed the
+        // sibling property, and it named this one as the remaining case.
+        //
+        // .NET's own CurrentPhaseNumber is `Volatile.Read(ref _currentPhase)` (Barrier.cs:184-188)
+        // -- a lock-free read of a plain field -- so the reference already answers this: the
+        // property must not take the barrier's lock. std::atomic<longcs> is 8 bytes and 8-aligned,
+        // the same as longcs, so the change is layout-neutral (sizeof(Barrier) is 160 before and
+        // after, build-probe/1957_probe2_barrier.cpp) -- the same argument #1955 made for
+        // participantCount_ and disposed_.
+        //
+        // Writers keep writing under mutex_, so every compound invariant with remainingCount_ is
+        // unaffected.
+        std::atomic<longcs> phaseCount_{0};
         std::function<void(Barrier&)> postPhaseAction_;
         mutable std::mutex mutex_;
         std::condition_variable cv_;
@@ -106,8 +121,22 @@ namespace System::Threading {
         [[nodiscard]] intcs  getParticipantCountProperty() const {
             return participantCount_.load(std::memory_order_acquire);
         }
-        /** Returns the current phase number. */
-        [[nodiscard]] longcs getCurrentPhaseNumberProperty() const { std::unique_lock lock(mutex_); return phaseCount_; }
+        /**
+         * @brief Returns the current phase number.
+         *
+         * Read without taking the barrier's lock, matching .NET's
+         * `Volatile.Read(ref _currentPhase)` (`Barrier.cs:184-188`) and keeping the property
+         * callable from inside a post-phase action (#1957, SR-AUD-210). Taking `mutex_` here
+         * deadlocked, because `FinishPhase()` invokes that action while holding it.
+         *
+         * @note **Inside the post-phase action this returns the phase that is ENDING, not the
+         * one about to begin.** That is .NET's value, not an accident of ordering: .NET
+         * increments in `SetResetEvents`, which its `FinishPhase` calls from the `finally`
+         * *after* the action has run (`Barrier.cs:781-816, 834-836`).
+         */
+        [[nodiscard]] longcs getCurrentPhaseNumberProperty() const {
+            return phaseCount_.load(std::memory_order_acquire);
+        }
 
         /**
          * @brief Signals that a participant has reached the barrier and blocks until all participants have arrived.
@@ -187,7 +216,9 @@ namespace System::Threading {
          * lastPostPhaseException_ once they wake.
          */
         void FinishPhase(std::unique_lock<std::mutex>& lock) {
-            ++phaseCount_;
+            // The participant count is reset BEFORE the action, matching .NET, which zeroes the
+            // arrival count in SetCurrentTotal and only then calls FinishPhase
+            // (Barrier.cs:454-458).
             remainingCount_ = participantCount_;
             if (postPhaseAction_) {
                 actionCallerId_.store(std::this_thread::get_id());
@@ -201,6 +232,19 @@ namespace System::Threading {
             } else {
                 lastPostPhaseException_ = nullptr;
             }
+
+            // #1957 MOVED THIS, and the move is what makes the now-reachable property answer
+            // what .NET answers. .NET increments the phase in SetResetEvents, which FinishPhase
+            // calls from its `finally` -- AFTER the action, and on the throwing path too
+            // (Barrier.cs:804-812, 834-836). So inside the action the phase is the one ENDING.
+            //
+            // The increment used to run first, which was unobservable only because the property
+            // that would have seen it deadlocked. Fixing the deadlock without moving it would
+            // have shipped a newly reachable wrong answer instead of a hang.
+            //
+            // Nothing outside the action can see the difference: mutex_ is held for this whole
+            // function, so no waiter can run until it is released.
+            ++phaseCount_;
             cv_.notify_all();
             (void)lock;
             if (lastPostPhaseException_)

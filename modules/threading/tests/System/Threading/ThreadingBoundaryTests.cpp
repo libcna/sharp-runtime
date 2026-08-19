@@ -23,6 +23,7 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -30,8 +31,10 @@
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Exception.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/NullReferenceException.hpp"
 #include "System/OperationCanceledException.hpp"
+#include "System/Threading/Barrier.hpp"
 #include "System/Threading/CancellationToken.hpp"
 #include "System/Threading/CancellationTokenRegistration.hpp"
 #include "System/Threading/CancellationTokenSource.hpp"
@@ -841,4 +844,152 @@ TEST(PeriodicTimerSingleConsumerTests, Fix1957_SingleConsumerUseIsCompletelyUnch
     EXPECT_EQ(ticks, 5);
     timer.Dispose();
     EXPECT_FALSE(timer.WaitForNextTick());
+}
+
+// =============================================================================================
+// Ticket #1957 / SR-AUD-210 — the Barrier's post-phase action can read the barrier.
+//
+// FinishPhase() invokes the post-phase action while HOLDING mutex_, and
+// getCurrentPhaseNumberProperty() took that same non-recursive mutex, so a legal call from
+// inside the action self-deadlocked. #1955 fixed the sibling property
+// (getParticipantCountProperty) the same way and named this one as the remaining case.
+//
+// .NET's CurrentPhaseNumber is `Volatile.Read(ref _currentPhase)` (Barrier.cs:184-188) -- a
+// lock-free read of a plain field -- so the reference settles the design: the property must not
+// take the lock.
+//
+// THE SECOND HALF, which the design record did not name: .NET increments the phase in
+// SetResetEvents, called from FinishPhase's `finally` AFTER the action runs
+// (Barrier.cs:804-812, 834-836). This port incremented FIRST, which was unobservable only
+// because the property that would have seen it deadlocked. Fixing the deadlock alone would have
+// shipped a newly reachable WRONG ANSWER in place of a hang.
+//
+// Landed under SA-5, with SA-3's layout condition discharged as layout-neutral: sizeof(Barrier)
+// is 160 before and after (build-probe/1957_probe2_barrier.cpp).
+// =============================================================================================
+
+TEST(BarrierPostPhaseReadabilityTests, Decl1957_TheAtomicPhaseIsLayoutNeutral) {
+    static_assert(sizeof(System::Threading::Barrier) == 160,
+                  "#1957/SR-AUD-210 must not change Barrier's layout");
+    static_assert(alignof(System::Threading::Barrier) == 8);
+    EXPECT_EQ(sizeof(System::Threading::Barrier), 160u);
+}
+
+TEST(BarrierPostPhaseReadabilityTests, Fix1957_ThePostPhaseActionCanReadThePhaseNumber) {
+    // The deadlock itself. Before the repair this test HANGS rather than fails, which is why the
+    // work runs on a detached thread behind a bounded handshake: a stuck join would take the whole
+    // executable down instead of failing one assertion.
+    std::atomic<bool> done{false};
+    std::atomic<long long> seenInsideAction{-1};
+
+    std::thread worker([&] {
+        System::Threading::Barrier barrier(1, [&](System::Threading::Barrier& b) {
+            seenInsideAction.store(b.getCurrentPhaseNumberProperty());
+        });
+        barrier.SignalAndWait();
+        done.store(true);
+    });
+    worker.detach();
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(4);
+    while (!done.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+    ASSERT_TRUE(done.load())
+        << "reading the phase number from the post-phase action deadlocked";
+    EXPECT_EQ(seenInsideAction.load(), 0)
+        << "inside the action the phase is the one ENDING, matching .NET";
+}
+
+TEST(BarrierPostPhaseReadabilityTests, Fix1957_ThePhaseAdvancesAfterTheActionNotBefore) {
+    // The ordering half, asserted across three phases so an off-by-one cannot pass by accident.
+    std::atomic<bool> done{false};
+    std::vector<long long> insideAction;
+    std::vector<long long> afterSignal;
+    std::mutex recordMutex;
+
+    std::thread worker([&] {
+        System::Threading::Barrier barrier(1, [&](System::Threading::Barrier& b) {
+            std::lock_guard<std::mutex> g(recordMutex);
+            insideAction.push_back(b.getCurrentPhaseNumberProperty());
+        });
+        for (int i = 0; i < 3; ++i) {
+            barrier.SignalAndWait();
+            std::lock_guard<std::mutex> g(recordMutex);
+            afterSignal.push_back(barrier.getCurrentPhaseNumberProperty());
+        }
+        done.store(true);
+    });
+    worker.detach();
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(4);
+    while (!done.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    ASSERT_TRUE(done.load()) << "the barrier deadlocked";
+
+    std::lock_guard<std::mutex> g(recordMutex);
+    ASSERT_EQ(insideAction.size(), 3u);
+    ASSERT_EQ(afterSignal.size(), 3u);
+    EXPECT_EQ(insideAction, (std::vector<long long>{0, 1, 2})) << "the phase that is ending";
+    EXPECT_EQ(afterSignal,  (std::vector<long long>{1, 2, 3})) << "the phase that has begun";
+}
+
+TEST(BarrierPostPhaseReadabilityTests, Fix1957_ThePhaseStillAdvancesWhenTheActionThrows) {
+    // .NET increments in the `finally`, so a throwing action still advances the phase. Easy to
+    // break by moving the increment into the success path only.
+    System::Threading::Barrier barrier(1, [](System::Threading::Barrier&) {
+        throw System::InvalidOperationException("boom");
+    });
+    EXPECT_EQ(barrier.getCurrentPhaseNumberProperty(), 0);
+    EXPECT_THROW(barrier.SignalAndWait(), System::Threading::BarrierPostPhaseException);
+    EXPECT_EQ(barrier.getCurrentPhaseNumberProperty(), 1)
+        << "a throwing post-phase action must still advance the phase";
+}
+
+TEST(BarrierPostPhaseReadabilityTests, Fix1957_ThePhaseIsUnchangedForOutsideObservers) {
+    // Nothing a caller outside the action can see moved: the increment is still inside the
+    // critical section, before notify_all and before the lock is released.
+    System::Threading::Barrier barrier(1);
+    EXPECT_EQ(barrier.getCurrentPhaseNumberProperty(), 0);
+    barrier.SignalAndWait();
+    EXPECT_EQ(barrier.getCurrentPhaseNumberProperty(), 1);
+    barrier.SignalAndWait();
+    EXPECT_EQ(barrier.getCurrentPhaseNumberProperty(), 2);
+}
+
+TEST(BarrierPostPhaseReadabilityTests, Fix1957_TheOtherMembersStillRefuseReentrancy) {
+    // The boundary this ticket must NOT move: the members that mutate still throw rather than
+    // deadlock, because each guards before taking the lock. Only the two READ-ONLY properties are
+    // callable from the action.
+    std::atomic<bool> done{false};
+    std::atomic<int> threwCount{0};
+    std::atomic<long long> phase{-1};
+    std::atomic<int> participants{-1};
+
+    std::thread worker([&] {
+        System::Threading::Barrier barrier(1, [&](System::Threading::Barrier& b) {
+            phase.store(b.getCurrentPhaseNumberProperty());
+            participants.store(static_cast<int>(b.getParticipantCountProperty()));
+            for (auto call : std::vector<std::function<void()>>{
+                     [&] { (void)b.AddParticipant(); },
+                     [&] { b.RemoveParticipant(); },
+                     [&] { b.SignalAndWait(); },
+                     [&] { b.Dispose(); }}) {
+                try { call(); } catch (const System::InvalidOperationException&) { ++threwCount; }
+                catch (...) {}
+            }
+        });
+        barrier.SignalAndWait();
+        done.store(true);
+    });
+    worker.detach();
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(4);
+    while (!done.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+    ASSERT_TRUE(done.load()) << "a mutating member deadlocked instead of throwing";
+    EXPECT_EQ(threwCount.load(), 4) << "all four mutating members must refuse reentrancy";
+    EXPECT_EQ(phase.load(), 0);
+    EXPECT_EQ(participants.load(), 1);
 }
