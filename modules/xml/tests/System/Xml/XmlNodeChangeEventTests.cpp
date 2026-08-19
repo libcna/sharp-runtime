@@ -326,19 +326,68 @@ TEST(XmlNodeChangeEventTests, InnerTextAndInnerXmlBothDispatchTheirInserts) {
     }
 }
 
-TEST(XmlNodeChangeEventTests, RemoveAllDispatchesNothing_PinnedLifetimeDecision) {
-    // PIN, not an aspiration. RemoveAllChildren destroys its children, so a NodeRemoved
-    // handler would receive an XmlNode* naming freed storage — the CCF-019 shape. #2086
-    // tracks the safe way to complete this pair; until then the silence is deliberate and
-    // this assertion is what stops it being "fixed" without addressing the lifetime.
+// INVERTED by #2086. The pin said RemoveAllChildren "destroys its children, so a NodeRemoved
+// handler would receive an XmlNode* naming freed storage", and #2086 recorded two candidate
+// approaches with neither selected. The reference selects one: XmlNode.RemoveAll is literally a
+// loop over RemoveChild, which in this port detaches rather than destroys -- so the hazard does
+// not arise on that route and the pair is symmetric, one per child.
+TEST(XmlNodeChangeEventTests, Fix2086_RemoveAllDispatchesTheFullPairPerChild) {
     XmlDocument d;
     auto* r = Root(d);
     r->AppendChild(d.CreateElement("a"));
     r->AppendChild(d.CreateElement("b"));
     Recorder rec(d);
     r->RemoveAll();
-    EXPECT_TRUE(rec.events.empty());
+    EXPECT_EQ(rec.tags(), (std::vector<std::string>{"Removing", "Removed",
+                                                    "Removing", "Removed"}));
     EXPECT_FALSE(r->getHasChildNodesProperty());
+}
+
+TEST(XmlNodeChangeEventTests, Fix2086_TheNodeAHandlerReceivesIsALiveChild) {
+    // THE assertion that says the lifetime hazard is gone rather than merely unobserved: the
+    // handler dereferences the node it is given, in the order the children were removed. Against
+    // the old body this would have been a use-after-free; against a body that dispatched the
+    // node's PARENT or a null it fails outright.
+    XmlDocument d;
+    auto* r = Root(d);
+    r->AppendChild(d.CreateElement("a"));
+    r->AppendChild(d.CreateElement("b"));
+    r->AppendChild(d.CreateElement("c"));
+
+    std::vector<std::string> seen;
+    d.NodeRemoved = [&seen](void*, XmlNodeChangedEventArgs& e) {
+        XmlNode* node = e.getNodeProperty();
+        seen.push_back(node ? node->getNameProperty() : std::string("<null>"));
+    };
+    r->RemoveAll();
+    EXPECT_EQ(seen, (std::vector<std::string>{"a", "b", "c"}));
+}
+
+TEST(XmlNodeChangeEventTests, Fix2086_RemovedChildrenOutliveTheCall) {
+    // .NET's removed node becomes an orphan the caller may still use; this port's DetachNode
+    // gives the same guarantee. Reading the wrapper after RemoveAll is the whole difference
+    // between detaching and destroying.
+    XmlDocument d;
+    auto* r = Root(d);
+    auto* a = d.CreateElement("a");
+    r->AppendChild(a);
+    r->RemoveAll();
+    EXPECT_EQ(a->getNameProperty(), "a");
+    EXPECT_EQ(a->getParentNodeProperty(), nullptr);
+}
+
+TEST(XmlNodeChangeEventTests, Fix2086_InnerTextAndInnerXmlSettersDispatchTheirRemovalsToo) {
+    // The setters reach RemoveAllChildren, so replacing existing content now reports the
+    // removals as well as the inserts. Before #2086 only the inserts were visible, which made a
+    // handler counting events see content appear from nowhere.
+    XmlDocument d;
+    auto* r = Root(d);
+    r->AppendChild(d.CreateElement("old"));
+    Recorder rec(d);
+    r->setInnerTextProperty("hello");
+    EXPECT_EQ(rec.tags(), (std::vector<std::string>{"Removing", "Removed",
+                                                    "Inserting", "Inserted"}));
+    EXPECT_EQ(r->getInnerTextProperty(), "hello");
 }
 
 // ===========================================================================

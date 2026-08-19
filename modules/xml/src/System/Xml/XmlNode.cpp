@@ -407,19 +407,57 @@ namespace System::Xml {
         return oldChild;
     }
 
-    // Ticket #2079 deliberately raises NO node-change event here, and the reason is a
-    // lifetime one rather than an oversight: unlike RemoveChild (which detaches), this
-    // PurgeCache()es every wrapper and then DeleteChildren()s the natives, so by the time a
-    // NodeRemoved handler could run its XmlNode* would name a destroyed object. Handing
-    // caller code a borrowed pointer to freed storage is exactly the defect CCF-019 tracks,
-    // and it is not worth introducing to complete an event pair. Recorded in
-    // docs/SystemXmlNamespaceReviewPlan.md §20.6 with the follow-up ticket.
+    /**
+     * @brief Removes every child, raising the node-change pair for each. Ticket #2086.
+     *
+     * #2079 left this door silent, and #2086 recorded two candidate approaches with neither
+     * selected: (a) raise `NodeRemoving` per child and `NodeRemoved` never, rejected as
+     * misleading; (b) detach each child instead of destroying it, *"NOT compatible without
+     * approval"* because it changes lifetime semantics.
+     *
+     * **The reference selects (b), so it is derived rather than chosen.** `XmlNode.RemoveAll`
+     * is literally a loop over `RemoveChild`:
+     *
+     * @code
+     * public virtual void RemoveAll()
+     * {
+     *     XmlNode? child = FirstChild;
+     *     XmlNode? sibling;
+     *     while (child != null)
+     *     {
+     *         sibling = child.NextSibling;
+     *         RemoveChild(child);
+     *         child = sibling;
+     *     }
+     * }
+     * @endcode
+     *
+     * So every child gets the SYMMETRIC pair, and every removed child stays alive as an orphan
+     * — which is .NET's lifetime for a removed node too. This port's `RemoveChild` already
+     * detaches rather than destroying (`XmlDocument::DetachNode` moves the node under a scratch
+     * parent), so the borrowed-pointer hazard #2079 refused to introduce simply does not arise
+     * on this route: the wrapper a handler receives names a live object.
+     *
+     * The sibling is captured BEFORE the removal, exactly as .NET does, because detaching
+     * re-parents the child and its `NextSibling()` then walks the holder's list instead of this
+     * node's.
+     *
+     * @par The cost, stated
+     * Detached children live until the document does. That is not a new policy — every
+     * `RemoveChild` in this port has behaved that way since the detached holder was introduced —
+     * but this door is reached by the `InnerText`/`InnerXml` setters, so repeatedly reassigning
+     * them now accumulates orphans instead of freeing them. It is the same trade .NET makes,
+     * minus the garbage collector.
+     */
     void XmlNode::RemoveAllChildren() {
         XmlDocument* doc = GetDocument();
         if (!native_ || !doc) return;
-        for (tinyxml2::XMLNode* child = native_->FirstChild(); child; child = child->NextSibling())
-            doc->PurgeCache(child);
-        native_->DeleteChildren();
+        tinyxml2::XMLNode* child = native_->FirstChild();
+        while (child != nullptr) {
+            tinyxml2::XMLNode* sibling = child->NextSibling();
+            RemoveChild(doc->WrapNode(child));
+            child = sibling;
+        }
     }
 
     void XmlNode::RemoveAll() {
