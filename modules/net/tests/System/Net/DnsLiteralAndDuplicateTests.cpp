@@ -250,37 +250,101 @@ TEST(DnsDuplicateResultTests, ScopedIPv6AddressesOnDifferentLinksAreDistinct) {
 }
 
 // ---------------------------------------------------------------------------
-// 3. The requested family is applied to a literal.
+// 3. The requested family, at a literal AND at a name -- ticket #2046.
 //
-// A family-mismatched literal raises SocketException(HostNotFound) rather than
-// returning an empty vector. That is this repository's OWN established contract:
-// DnsTests.GetHostAddresses_RequestingIPv6Only_MismatchedIPv4Literal_Throws and
-// ..._RequestingIPv4Only_MismatchedIPv6Literal_Throws already pin it, and their
-// comment records the reasoning -- an empty vector is "indistinguishable from
-// 'checked and found nothing'". Plan section 7.3 predicted an empty result for
-// the Unix row; that prediction is corrected in section 17.6, not followed.
+// #2039 applied the filter to a literal and not to a name, so one function
+// answered the same question two ways depending on its argument's shape. It also
+// chose SocketException(HostNotFound) over an empty vector, on the ground that an
+// empty vector is "indistinguishable from 'checked and found nothing'", and
+// recorded that the plan's contrary prediction "was made without those tests in
+// view and is corrected ... rather than followed".
+//
+// THE REFERENCE SETTLES BOTH, AND IT DOES NOT MAKE THE TWO PATHS AGREE. #2046's own
+// acceptance criterion asks for one answer "the same way for a name as for a
+// literal"; measured, .NET gives THREE:
+//
+//   GetHostAddresses, literal, family mismatch -> Array.Empty<IPAddress>()   Dns.cs:213
+//   GetHostAddresses, name,    family unservable -> EAI_FAMILY
+//                                  -> SocketError.AddressFamilyNotSupported  NameResolutionPal.Unix.cs:41
+//   GetHostEntry,     literal   -> no short-circuit at all: reverse-resolve,
+//                                  then forward-resolve WITH the family        Dns.cs:290-320
+//
+// So the asymmetry is .NET's own and is reproduced deliberately rather than
+// tidied away.
 // ---------------------------------------------------------------------------
 
-TEST(DnsFamilyFilterTests, NonIPFamilyRejectsAnyLiteral) {
-    for (const char* text : {"127.0.0.1", "::1", "fe80::1%7", "1.2.3"}) {
-        for (AddressFamily family : {AddressFamily::Unix, AddressFamily::Unknown,
-                                      AddressFamily::Max}) {
-            EXPECT_THROW((void)Dns::GetHostAddresses(text, family), SocketException)
-                << text << " family " << static_cast<int>(family);
-            EXPECT_THROW((void)Dns::GetHostEntry(text, family), SocketException)
-                << text << " family " << static_cast<int>(family);
+TEST(DnsFamilyFilterTests, Fix2046_ANonIPFamilyIsRefusedForANameToo) {
+    // THE TICKET'S CORE. Before this, every family other than the two IP ones became AF_UNSPEC
+    // and a NAME resolved as though none had been asked for -- so GetHostAddresses("localhost",
+    // Unix) returned 127.0.0.1 while the same request against "127.0.0.1" was refused.
+    for (AddressFamily family : {AddressFamily::Unix, AddressFamily::Unknown,
+                                 AddressFamily::Max}) {
+        SCOPED_TRACE(static_cast<int>(family));
+        try {
+            (void)Dns::GetHostAddresses("localhost", family);
+            ADD_FAILURE() << "a name resolved under a family the resolver cannot serve";
+        } catch (const SocketException& ex) {
+            // .NET's code, reached through EAI_FAMILY. NOT HostNotFound: the host is fine, the
+            // family is not, and the two are different diagnoses.
+            EXPECT_EQ(ex.getSocketErrorCodeProperty(), SocketError::AddressFamilyNotSupported)
+                << ex.what();
         }
+        EXPECT_THROW((void)Dns::GetHostEntry("localhost", family), SocketException);
     }
 }
 
-TEST(DnsFamilyFilterTests, MismatchedIPFamilyRejectsALiteral) {
-    EXPECT_THROW((void)Dns::GetHostAddresses("127.0.0.1", AddressFamily::InterNetworkV6),
-                 SocketException);
-    EXPECT_THROW((void)Dns::GetHostAddresses("::1", AddressFamily::InterNetwork), SocketException);
-    EXPECT_THROW((void)Dns::GetHostAddresses("fe80::1%7", AddressFamily::InterNetwork),
-                 SocketException);
-    EXPECT_THROW((void)Dns::GetHostEntry("127.0.0.1", AddressFamily::InterNetworkV6),
-                 SocketException);
+TEST(DnsFamilyFilterTests, Fix2046_ALiteralOfTheWrongFamilyIsEmptyNotAnException) {
+    // INVERTED by #2046: Dns.cs:213 returns an empty array, not an exception.
+    for (const char* text : {"127.0.0.1", "::1", "fe80::1%7", "1.2.3"}) {
+        for (AddressFamily family : {AddressFamily::Unix, AddressFamily::Unknown,
+                                     AddressFamily::Max}) {
+            EXPECT_TRUE(Dns::GetHostAddresses(text, family).empty())
+                << text << " family " << static_cast<int>(family);
+        }
+    }
+    // The two IP families are the same rule, not a special case.
+    EXPECT_TRUE(Dns::GetHostAddresses("127.0.0.1", AddressFamily::InterNetworkV6).empty());
+    EXPECT_TRUE(Dns::GetHostAddresses("::1", AddressFamily::InterNetwork).empty());
+    EXPECT_TRUE(Dns::GetHostAddresses("fe80::1%7", AddressFamily::InterNetwork).empty());
+}
+
+TEST(DnsFamilyFilterTests, Fix2046_GetHostEntryStillThrowsBecauseItReturnsOneEntry) {
+    // GetHostEntry cannot return "nothing" the way GetHostAddresses can -- it returns one entry,
+    // not a list -- so the empty-array answer is not available to it. .NET does not
+    // short-circuit a literal there at all; this port does, and reaches .NET's OUTCOME for the
+    // case that matters: a family the resolver cannot serve.
+    for (AddressFamily family : {AddressFamily::Unix, AddressFamily::Unknown,
+                                 AddressFamily::Max}) {
+        try {
+            (void)Dns::GetHostEntry("127.0.0.1", family);
+            ADD_FAILURE() << "family " << static_cast<int>(family) << " was accepted";
+        } catch (const SocketException& ex) {
+            EXPECT_EQ(ex.getSocketErrorCodeProperty(), SocketError::AddressFamilyNotSupported)
+                << ex.what();
+        }
+    }
+    // ...and the STATED residual difference: a mismatch between the two IP families keeps
+    // HostNotFound, because .NET would forward-resolve the reverse-resolved name and could
+    // legitimately find an address of the requested family, where this port answers from the
+    // literal alone. Pinned so it stays a decision rather than an oversight.
+    try {
+        (void)Dns::GetHostEntry("127.0.0.1", AddressFamily::InterNetworkV6);
+        ADD_FAILURE() << "expected a SocketException";
+    } catch (const SocketException& ex) {
+        EXPECT_EQ(ex.getSocketErrorCodeProperty(), SocketError::HostNotFound) << ex.what();
+    }
+}
+
+TEST(DnsFamilyFilterTests, Fix2046_TheRefusalNamesTheFamilyAndTheHost) {
+    try {
+        (void)Dns::GetHostAddresses("localhost", AddressFamily::Unix);
+        ADD_FAILURE() << "expected a SocketException";
+    } catch (const SocketException& ex) {
+        EXPECT_EQ(ex.getSocketErrorCodeProperty(), SocketError::AddressFamilyNotSupported);
+        const std::string what(ex.what());
+        EXPECT_NE(what.find("Unix"), std::string::npos) << what;
+        EXPECT_NE(what.find("localhost"), std::string::npos) << what;
+    }
 }
 
 TEST(DnsFamilyFilterTests, MatchingAndUnspecifiedFamiliesStillReturnTheLiteral) {
@@ -300,17 +364,6 @@ TEST(DnsFamilyFilterTests, MatchingAndUnspecifiedFamiliesStillReturnTheLiteral) 
     }
 }
 
-TEST(DnsFamilyFilterTests, RejectionCarriesHostNotFoundAndNamesTheFamily) {
-    try {
-        (void)Dns::GetHostAddresses("127.0.0.1", AddressFamily::Unix);
-        ADD_FAILURE() << "expected a SocketException";
-    } catch (const SocketException& ex) {
-        EXPECT_EQ(ex.getSocketErrorCodeProperty(), SocketError::HostNotFound);
-        const std::string what(ex.what());
-        EXPECT_NE(what.find("Unix"), std::string::npos) << what;
-        EXPECT_NE(what.find("127.0.0.1"), std::string::npos) << what;
-    }
-}
 
 // ---------------------------------------------------------------------------
 // 4. The failure message no longer fabricates a Win32 error on POSIX.

@@ -103,8 +103,22 @@ namespace System::Net {
             return IPAddress(bytes, static_cast<longcs>(sin6.sin6_scope_id));
         }
 
+        // Whether the resolver can serve a request for this family at all.
+        //
+        // #2046. This used to be absent, and `addressFamilyToAiFamily` mapped EVERY value other
+        // than the two IP families to AF_UNSPEC -- so a NAME resolved normally under
+        // `AddressFamily::Unix` while the same request against a LITERAL was refused. One
+        // function answered the same question two ways depending on its argument's shape.
+        bool resolverCanServeFamily(AddressFamily family) {
+            return family == AddressFamily::Unspecified
+                || family == AddressFamily::InterNetwork
+                || family == AddressFamily::InterNetworkV6;
+        }
+
         // Maps a requested AddressFamily to the getaddrinfo() hint that resolves it: IPv4-only,
         // IPv6-only, or (for Unspecified) both families via AF_UNSPEC.
+        //
+        // Only ever called for a family `resolverCanServeFamily` accepts.
         int addressFamilyToAiFamily(AddressFamily family) {
             if (family == AddressFamily::InterNetwork) return AF_INET;
             if (family == AddressFamily::InterNetworkV6) return AF_INET6;
@@ -182,14 +196,22 @@ namespace System::Net {
         }
 
         // A literal that exists but is of the wrong family has no valid answer for the request.
-        // This raises SocketException(HostNotFound), NOT an empty vector, because that is this
-        // repository's OWN established and tested contract for the case: the two existing tests
-        // DnsTests.GetHostAddresses_RequestingIPv6Only_MismatchedIPv4Literal_Throws and
-        // ..._RequestingIPv4Only_MismatchedIPv6Literal_Throws pin it, and their comment records
-        // the reasoning verbatim -- "a silent empty vector [is] indistinguishable from 'checked
-        // and found nothing'". docs/SystemNetNamespaceReviewPlan.md §7.3 predicted an empty
-        // result for the AddressFamily::Unix row; that prediction was made without those tests
-        // in view and is corrected in §17.6 rather than followed.
+        //
+        // #2039 made this raise SocketException(HostNotFound) rather than returning an empty
+        // vector, on the ground that an empty vector is "indistinguishable from 'checked and
+        // found nothing'", and recorded that the plan's prediction of an empty result "was made
+        // without those tests in view and is corrected ... rather than followed".
+        //
+        // #2046 REVERSES THAT, because the reference settles it and #2039 did not have the
+        // reference. Dns.cs:213 is, verbatim:
+        //
+        //     addresses = (family == AddressFamily.Unspecified || address.AddressFamily == family)
+        //         ? new IPAddress[] { address } : Array.Empty<IPAddress>();
+        //
+        // -- an EMPTY ARRAY, no exception. So the plan's prediction was right and its
+        // "correction" was the error. GetHostAddresses now returns an empty vector;
+        // GetHostEntry cannot, because it returns one entry rather than a list, and .NET's own
+        // GetHostEntry does not short-circuit a literal at all (see its own note below).
         /**
          * @brief Rejects the two unspecified ("wildcard") addresses, as .NET does.
          *
@@ -220,6 +242,31 @@ namespace System::Net {
             throw SocketException(SocketError::HostNotFound,
                                   "Dns: host '" + host + "' has no address in the requested address family '" +
                                       addressFamilyName(family) + "'.");
+        }
+
+        /**
+         * @brief Refuses a family this resolver cannot serve, with .NET's own error code.
+         *
+         * #2046. .NET reaches `SocketError.AddressFamilyNotSupported` here by TWO routes and both
+         * end in the same place, which is why this port may take the shorter one:
+         *
+         *  - a family its native converter does not recognise fails
+         *    `TryConvertAddressFamilyPalToPlatform` and returns `EAI_FAMILY` outright
+         *    (`pal_networking.c`, `SystemNative_GetHostEntryForName`);
+         *  - a family it DOES convert but that `getaddrinfo` will not accept -- `AF_UNIX` is the
+         *    case that matters -- returns `EAI_FAMILY` from the C library. Measured directly in
+         *    this container: `getaddrinfo` with an `ai_family` of `AF_UNIX`, `AF_PACKET` or `99`
+         *    all return -6, `EAI_FAMILY`, "ai_family not supported".
+         *
+         * and `NameResolutionPal.Unix.cs:41-42` maps `EAI_FAMILY` to
+         * `SocketError.AddressFamilyNotSupported`.
+         */
+        [[noreturn]] void throwFamilyNotSupportedByResolver(const std::string& host,
+                                                            AddressFamily      family) {
+            throw SocketException(SocketError::AddressFamilyNotSupported,
+                                  "Dns: the address family '" + addressFamilyName(family) +
+                                      "' requested for host '" + host +
+                                      "' cannot be resolved by this runtime's resolver.");
         }
     }
 #endif
@@ -254,10 +301,16 @@ namespace System::Net {
             // #2043: BEFORE the family check, matching Dns.cs:686-690, which tests the wildcard
             // immediately after IPAddress.TryParse and before anything else looks at the value.
             throwIfUnspecifiedAddress(*literal, "hostNameOrAddress");
-            if (!literalSatisfiesFamily(family, *literal)) {
-                throwNoAddressOfRequestedFamily(hostNameOrAddress, family);
-            }
+            // #2046: an EMPTY vector, not an exception -- Dns.cs:213. See the note on
+            // literalSatisfiesFamily for why this reverses #2039.
+            if (!literalSatisfiesFamily(family, *literal)) return {};
             return { *literal };
+        }
+
+        // #2046: the family gate the NAME path never had. Without it every family other than the
+        // two IP ones became AF_UNSPEC and the name resolved as though none had been asked for.
+        if (!resolverCanServeFamily(family)) {
+            throwFamilyNotSupportedByResolver(hostNameOrAddress, family);
         }
 
         wsaInit();
@@ -286,10 +339,27 @@ namespace System::Net {
         throw System::PlatformNotSupportedException("Dns.GetHostEntry is not supported on Emscripten.");
 #else
         if (auto literal = tryParseIPLiteral(hostNameOrAddress)) {
+            // #2046. .NET's GetHostEntry does NOT short-circuit a literal: it reverse-resolves
+            // the address to a name and then forward-resolves that name WITH the family
+            // (Dns.cs:290-320), so a family the resolver cannot serve reaches the same
+            // EAI_FAMILY it would for a name. This port keeps the short-circuit -- reproducing
+            // .NET's route means a reverse DNS lookup on every literal, a network round trip
+            // this door has never made -- and reaches .NET's OUTCOME directly.
+            if (!resolverCanServeFamily(family)) {
+                throwFamilyNotSupportedByResolver(hostNameOrAddress, family);
+            }
+            // A mismatch between the two IP families keeps HostNotFound. This is a STATED
+            // residual difference rather than parity: .NET would forward-resolve the
+            // reverse-resolved name and could legitimately find an address of the requested
+            // family, where this port answers from the literal alone.
             if (!literalSatisfiesFamily(family, *literal)) {
                 throwNoAddressOfRequestedFamily(hostNameOrAddress, family);
             }
             return GetHostEntry(*literal);
+        }
+
+        if (!resolverCanServeFamily(family)) {
+            throwFamilyNotSupportedByResolver(hostNameOrAddress, family);
         }
 
         wsaInit();

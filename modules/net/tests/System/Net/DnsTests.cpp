@@ -75,10 +75,16 @@ TEST(DnsTests, GetHostAddresses_LiteralIPv4_ReturnsSameAddress) {
 // disabled entirely, silently, with no distinction between "no IPv6 address exists" and
 // "IPv6 support is turned off". Asking for an IPv6-only resolution of an IPv4-only literal
 // address has no valid answer, so it now surfaces as a SocketException(HostNotFound) --
-// consistent with how every other unresolvable-address case in this API already behaves --
-// instead of a silent empty vector indistinguishable from "checked and found nothing".
-TEST(DnsTests, GetHostAddresses_RequestingIPv6Only_MismatchedIPv4Literal_Throws) {
-    EXPECT_THROW(Dns::GetHostAddresses("127.0.0.1", AddressFamily::InterNetworkV6), SocketException);
+// #2046 REVERSED the reasoning recorded here. It said an exception is "consistent with how every
+// other unresolvable-address case in this API already behaves -- instead of a silent empty vector
+// indistinguishable from 'checked and found nothing'". That is a good argument and it is not
+// .NET's: Dns.cs:213 returns Array.Empty<IPAddress>(). The argument was made with the reference
+// absent, which is exactly the condition SA-5 exists to end.
+TEST(DnsTests, Fix2046_RequestingIPv6Only_MismatchedIPv4Literal_ReturnsEmpty) {
+    // INVERTED by #2046. Dns.cs:213 returns Array.Empty<IPAddress>() for a literal whose family
+    // does not match the request -- no exception. The comment above this test recorded the
+    // opposite as this repository's own contract; the reference was absent when it was written.
+    EXPECT_TRUE(Dns::GetHostAddresses("127.0.0.1", AddressFamily::InterNetworkV6).empty());
 }
 
 TEST(DnsTests, GetHostAddresses_LiteralIPv6_ReturnsSameAddress) {
@@ -100,8 +106,8 @@ TEST(DnsTests, GetHostAddresses_RequestingIPv6_LiteralIPv6_ReturnsAddress) {
 // for the numeric literal "127.0.0.1" fails with EAI_ADDRFAMILY, and requesting AF_INET for
 // the numeric literal "::1" is likewise rejected -- an IPv4-only request for an IPv6 literal
 // has no valid answer either.
-TEST(DnsTests, GetHostAddresses_RequestingIPv4Only_MismatchedIPv6Literal_Throws) {
-    EXPECT_THROW(Dns::GetHostAddresses("::1", AddressFamily::InterNetwork), SocketException);
+TEST(DnsTests, Fix2046_RequestingIPv4Only_MismatchedIPv6Literal_ReturnsEmpty) {
+    EXPECT_TRUE(Dns::GetHostAddresses("::1", AddressFamily::InterNetwork).empty());
 }
 
 TEST(DnsTests, GetHostEntry_LiteralIPv4_ReturnsEntryWithSameAddress) {
