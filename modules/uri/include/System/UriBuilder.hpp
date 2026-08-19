@@ -25,6 +25,28 @@ namespace System {
      * a final System::Uri.
      */
     class UriBuilder {
+        /**
+         * @brief `ToLowerInvariant` over ASCII only. Ticket #1996 group G-2.
+         *
+         * Invariant means invariant: `std::tolower` consults the global C locale, so a process
+         * that installed a Turkish one would fold `I` to a dotless `i` and change the scheme.
+         * This repository has removed that hazard from `CharUnicodeInfo` already (#2316).
+         *
+         * HONEST NOTE: a mutation replacing this with `std::tolower` is NOT caught, and it is an
+         * equivalence **in the "C" locale** rather than a gap -- which is the locale the test
+         * binary runs in, so the two agree on every byte there. Distinguishing them needs the
+         * global locale changed inside a shared binary, which #2174 considered and declined for
+         * exactly this reason. The explicit fold is kept because the guarantee is about what
+         * happens when a process does install another locale, and that is not something a test
+         * in this binary can observe.
+         */
+        static std::string toLowerAsciiInvariant(std::string text) {
+            for (char& c : text) {
+                if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+            }
+            return text;
+        }
+
         std::string scheme_   = "http";
         std::string host_     = "localhost";
         intcs       port_     = -1;
@@ -147,12 +169,66 @@ namespace System {
         /** @brief Returns the scheme component. */
         [[nodiscard]] const std::string& getSchemeProperty()   const noexcept { return scheme_; }
         /** @brief Sets the scheme component. */
-        void setSchemeProperty(const std::string& v)                          { scheme_ = v; }
+        /**
+         * @brief Sets the scheme, lower-casing it. Ticket #1996 group G-2.
+         *
+         * `UriBuilder.Scheme`'s setter ends in `value = value.ToLowerInvariant();`
+         * (`UriBuilder.cs:180`), so `setSchemeProperty("HTTP")` renders `http://…` where it used
+         * to render `HTTP://…`. Invariant, not locale-aware: an ASCII fold, so a Turkish locale
+         * cannot turn `I` into a dotless one.
+         *
+         * @note <b>The validation that surrounds this line in the reference is deliberately NOT
+         *       taken here.</b> .NET runs `Uri.CheckSchemeName` first, truncates at a `:` and
+         *       re-checks, and throws `ArgumentException` if it still fails. That block is this
+         *       ticket's group <b>G-3</b>, which #1996 identifies as "the only narrowing" -- it
+         *       makes a setter that never threw start throwing. Lower-casing is the last
+         *       statement of the block and is separable from it; the rest is not taken.
+         *
+         *       Measured consequence, and it is deliberate: `setSchemeProperty("bad scheme")`
+         *       still stores `"bad scheme"` and still renders `"bad scheme://localhost/"`. That
+         *       is G-3's to repair.
+         */
+        void setSchemeProperty(const std::string& v) {
+            scheme_ = toLowerAsciiInvariant(v);
+        }
 
         /** @brief Returns the host component. */
         [[nodiscard]] const std::string& getHostProperty()     const noexcept { return host_; }
         /** @brief Sets the host component. */
-        void setHostProperty(const std::string& v)                            { host_ = v; }
+        /**
+         * @brief Sets the host, bracketing an IPv6 literal. Ticket #1996 group G-1.
+         *
+         * `UriBuilder.Host`'s setter wraps a value containing `:` in `[...]` unless it is already
+         * bracketed (`UriBuilder.cs:167-197`), so `setHostProperty("::1")` renders
+         * `http://[::1]/` where it used to render the unparseable `http://::1/`.
+         *
+         * The trigger is .NET's own: the value must contain one of `s_hostReservedChars`,
+         * `":/\?#@[]"` (`:164`), and then a `:` specifically. A plain DNS name touches none of
+         * them and is stored unchanged.
+         *
+         * @note <b>The rejection in the same block is deliberately NOT taken.</b> .NET also
+         *       throws `ArgumentException(net_uri_BadHostName)` for a bracketed value whose
+         *       inside holds a reserved character other than `:`, and for any value with a
+         *       reserved character but no `:` -- "contoso.com/path", "user@contoso.com". Those
+         *       make a setter that never threw start throwing, which #1996's own note reserves
+         *       for a group this one is not. Only the bracketing lands here.
+         */
+        void setHostProperty(const std::string& v) {
+            // Nothing to bracket.
+            if (v.find(':') == std::string::npos) { host_ = v; return; }
+            // ALREADY CARRIES A BRACKET: left exactly as given, and this is a deliberate
+            // divergence forced by taking G-1 without G-3's rejection. .NET wraps first and
+            // THEN throws for a half-bracketed value -- "[::1" becomes "[[::1]" and is refused
+            // because the inside holds a '[' (UriBuilder.cs:178-187). Without that throw the
+            // wrap would leave the nonsense "[[::1]" stored, turning a value this port's Uri
+            // already refuses (#1991) into one it might not. Leaving it untouched keeps that
+            // refusal exactly where it was.
+            if (v.find('[') != std::string::npos || v.find(']') != std::string::npos) {
+                host_ = v;
+                return;
+            }
+            host_ = "[" + v + "]";
+        }
 
         /** @brief Returns the port number, or -1 if not set. */
         [[nodiscard]] intcs getPortProperty()                   const noexcept { return port_; }

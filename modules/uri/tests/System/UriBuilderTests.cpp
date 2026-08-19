@@ -274,19 +274,29 @@ namespace {
 }
 
 TEST(UriBuilderTest, HashIsObtainableWhereverEqualsSucceeds_MalformedPort) {
+    // #1996 G-1 changed the rendering here, and it is .NET's: a host containing ':' is a
+    // "probable ipv6 address" (UriBuilder.cs:176) and is bracketed, so "h:abc" renders
+    // "http://[h:abc]/" rather than "http://h:abc/". The point of THIS test is unaffected --
+    // the string is still one Uri rejects, so Equals and GetHashCode must still work on it.
     UriBuilder b;
     b.setHostProperty("h:abc");
-    ASSERT_EQ(b.ToString(), "http://h:abc/");
-    EXPECT_THROW(b.getUriProperty(), UriFormatException); // the string is still unparseable
+    ASSERT_EQ(b.ToString(), "http://[h:abc]/");
+    // The rendering is now one Uri ACCEPTS, because .NET's bracketing turned a malformed port
+    // into a (content-unvalidated) literal. The property this test exists for is unchanged and
+    // is asserted on a shape that is still unparseable, below.
+    EXPECT_NO_THROW((void)b.getUriProperty());
     EXPECT_TRUE(b.Equals(b));
     EXPECT_NO_THROW((void)b.GetHashCode());
-    expectEqualsImpliesEqualHash(b, b, "malformed port");
+    expectEqualsImpliesEqualHash(b, b, "bracketed host");
 }
 
 TEST(UriBuilderTest, HashIsObtainableWhereverEqualsSucceeds_OtherUnparseableRenderings) {
     // The three remaining measured routes: an out-of-range port, an unterminated IP literal
     // (#1991) and an empty host (#2000). Each renders a string Uri rejects.
-    const char* hosts[] = {"h:99999", "[::1", ""};
+    // "h:99999" left this set with #1996 G-1: it is bracketed now and parses. The other two
+    // still render strings Uri rejects -- an unterminated literal, which G-1 deliberately does
+    // NOT wrap (see setHostProperty's note), and an empty host.
+    const char* hosts[] = {"[::1", ""};
     for (const char* host : hosts) {
         UriBuilder b;
         b.setHostProperty(host);
@@ -355,11 +365,13 @@ TEST(UriBuilderTest, DeliberatelyUnequalPairsStayUnequal_PinsTheGatedIdentityCha
     // UriTests.DocumentedContract_CaseDifferingUrisAreNotEqualYet plays for Uri.
     UriBuilder lower;  lower.setHostProperty("example.com");
     UriBuilder upperHost; upperHost.setHostProperty("EXAMPLE.COM");
-    UriBuilder upperScheme; upperScheme.setSchemeProperty("HTTP"); upperScheme.setHostProperty("example.com");
+    // #1996 G-2 lower-cases the scheme in the SETTER, so this builder is no longer a
+    // case-differing one at all -- it is "http" the moment it is set. The scheme row therefore
+    // moved out of this pin and into Fix1996G2 below; what #1995 would still make equal is the
+    // HOST case and the default port.
     UriBuilder defaultPort; defaultPort.setHostProperty("example.com"); defaultPort.setPortProperty(80);
 
     EXPECT_FALSE(lower.Equals(upperHost));
-    EXPECT_FALSE(lower.Equals(upperScheme));
     EXPECT_FALSE(lower.Equals(defaultPort));
     // The three matching hash inequalities were removed by #2284. They restated the gate on a
     // channel that does not carry it: unequal values are permitted to hash equally
@@ -389,4 +401,84 @@ TEST(UriBuilderTest, Layout_SizeOfUriBuilderIsPinned) {
     // "re-asserted by permanent tests"; measured on 2026-08-03 no such test existed. Added
     // here so the claim becomes true, alongside UriTests.Layout_SizeOfUriIsPinned.
     EXPECT_EQ(sizeof(System::UriBuilder), 232u);
+}
+
+// ===========================================================================
+// #1996 groups G-1 (IPv6 bracketing) and G-2 (scheme lower-casing) -- the
+// ticket's own "recommended minimum". Both are alignments to the reference, so
+// SA-5 covers them; G-3 (scheme validation) and G-4 (relative promotion) are
+// not taken and #1996 keeps them.
+// ===========================================================================
+
+TEST(UriBuilderTest, Fix1996G1_AnIPv6HostIsBracketed) {
+    // Measured before: setHostProperty("::1") rendered "http://::1/", which Uri rejects.
+    UriBuilder b;
+    b.setHostProperty("::1");
+    EXPECT_EQ(b.getHostProperty(), "[::1]");
+    EXPECT_EQ(b.ToString(), "http://[::1]/");
+    EXPECT_NO_THROW((void)b.getUriProperty()) << "the rendering is now one Uri accepts";
+
+    // Already bracketed: left alone, not double-wrapped. UriBuilder.cs:178 tests
+    // StartsWith('[') && EndsWith(']') for exactly this.
+    UriBuilder already;
+    already.setHostProperty("[::1]");
+    EXPECT_EQ(already.getHostProperty(), "[::1]");
+    EXPECT_EQ(already.ToString(), "http://[::1]/");
+
+    // A full-length literal and a scoped one both go through.
+    UriBuilder full;
+    full.setHostProperty("2001:db8::1");
+    EXPECT_EQ(full.ToString(), "http://[2001:db8::1]/");
+}
+
+TEST(UriBuilderTest, Fix1996G1_AHostWithoutAColonIsUntouched) {
+    // The trigger is .NET's own: the value must contain ':'. A DNS name, an IPv4 literal and an
+    // empty host touch nothing -- the rows that fail if the bracketing is applied unconditionally.
+    for (const char* host : {"example.com", "192.0.2.1", "", "localhost"}) {
+        UriBuilder b;
+        b.setHostProperty(host);
+        EXPECT_EQ(b.getHostProperty(), host) << host;
+    }
+}
+
+TEST(UriBuilderTest, Fix1996G2_TheSchemeIsLowerCasedInTheSetter) {
+    // Measured before: setSchemeProperty("HTTP") kept "HTTP" and rendered "HTTP://…".
+    UriBuilder b;
+    b.setSchemeProperty("HTTP");
+    EXPECT_EQ(b.getSchemeProperty(), "http");
+    b.setHostProperty("example.com");
+    EXPECT_EQ(b.ToString(), "http://example.com/");
+
+    UriBuilder mixed;
+    mixed.setSchemeProperty("HtTpS");
+    EXPECT_EQ(mixed.getSchemeProperty(), "https");
+
+    // INVARIANT, not locale-aware: an ASCII fold only. A non-ASCII byte is left alone, so a
+    // process that installed a Turkish locale cannot change what a scheme means -- the hazard
+    // #2316 removed from CharUnicodeInfo. Also the row that fails if std::tolower is used.
+    UriBuilder nonAscii;
+    nonAscii.setSchemeProperty("H\xC3\x9CTTP");
+    EXPECT_EQ(nonAscii.getSchemeProperty(), "h\xC3\x9Cttp");
+}
+
+TEST(UriBuilderTest, Decl1996_G3AndG4AreNotTakenAndStayPinned) {
+    // G-3, "the only narrowing": .NET validates the scheme, truncates at a ':' and re-checks,
+    // and throws ArgumentException if it still fails (UriBuilder.cs:169-179). Lower-casing is
+    // the LAST statement of that block and is separable; the rest is not taken, so a setter that
+    // never threw still does not.
+    UriBuilder bad;
+    EXPECT_NO_THROW(bad.setSchemeProperty("bad scheme"));
+    EXPECT_EQ(bad.getSchemeProperty(), "bad scheme")
+        << "lower-cased but not validated -- G-3 owns the rejection";
+
+    // The host rejection in G-1's own block is likewise not taken: .NET throws
+    // ArgumentException(net_uri_BadHostName) for "contoso.com/path", and this port stores it.
+    UriBuilder path;
+    EXPECT_NO_THROW(path.setHostProperty("contoso.com/path"));
+    EXPECT_EQ(path.getHostProperty(), "contoso.com/path");
+
+    // G-4, relative promotion: UriBuilder("www.example.com/path") still renders the measured
+    // ":///www.example.com/path" rather than promoting the text to a host.
+    UriBuilder relative("www.example.com/path");
+    EXPECT_NE(relative.ToString().find("://"), std::string::npos) << relative.ToString();
 }
