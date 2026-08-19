@@ -28,9 +28,23 @@ namespace System::Threading {
      * window that does not exist in this port (a failure *after* the OS thread starts but
      * *before* user code runs; here `std::thread` either constructs or throws
      * `std::system_error`). C++ has no `internal`, and the mechanical translations are not
-     * equivalent: `private` with no friend would make the type impossible to instantiate at all,
-     * and a `friend` would have to name a class that never throws it. Choosing between those
-     * changes the public surface, so it is **ticket #2390** rather than a guess made here.
+     * equivalent.
+     *
+     * **Ticket #2390 settled this on 2026-08-19, and the answer is a general rule** --
+     * `docs/StandingApprovals.md` **SA-12**, which applies to every ported type with `internal`
+     * members. The rule is conditional on whether this port has a real creator: where it does,
+     * the members become `private` and that creator is a `friend` (the shape #2298 used for
+     * `LocalDataStoreSlot`); where it does not, the members **stay public** and the divergence is
+     * recorded here. **This type is the second case**, because no code in this port can ever
+     * throw it. Two alternatives were considered and declined: `private` with no friend makes the
+     * type impossible to instantiate at all, leaving dead code and costing the tests that verify
+     * the fixed message and `COR_E_THREADSTART` -- the only observable content it has; and
+     * `private` plus a friend that never constructs it is a **dead friend declaration** that
+     * looks faithful while granting access to a class that will never use it.
+     *
+     * **The divergence is in accessibility ALONE.** The parameter lists, the message, the HResult
+     * and the `final` are .NET's exactly, so a caller who writes what .NET allows gets what .NET
+     * gives.
      */
     class ThreadStartException final : public System::SystemException {
     public:

@@ -9,6 +9,7 @@
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/Generic/IComparer.hpp"
+#include "System/Collections/Generic/IEqualityComparer.hpp"
 #include "System/Half.hpp"
 
 namespace System::Numerics {
@@ -72,22 +73,41 @@ namespace System::Numerics {
      * supports (float, double, System::Half).
      *
      * @note Equality contract (SR-AUD-042, tickets #2169 and #2170). .NET's comparer implements
-     * both `IComparer<T>` and `IEqualityComparer<T>`, defining equality as `Compare(x, y) == 0`.
-     * Each specialization here provides `Equals` and `GetHashCode` with exactly the signatures
-     * `System::Collections::Generic::IEqualityComparer<T>` declares, so the total-order semantics
-     * -- which distinguish -0 from +0 and one NaN payload from another -- are available to a
-     * caller. What is **not** available is *polymorphic binding*: these specializations do not
-     * inherit `IEqualityComparer<T>`, so they cannot be passed where that interface is required.
-     * Adding the base would grow each specialization from 8 to 16 bytes (a second vptr), a public
-     * object-layout change; it is ticket **#2170** and is gated on explicit approval. See
-     * `docs/SystemNumericsNamespaceReviewPlan.md` section 6.1 for the measurement.
+     * `IComparer<T>`, `IEqualityComparer<T>` and `IEquatable<TotalOrderIeee754Comparer<T>>`
+     * (`TotalOrderIeee754Comparer.cs:16`), defining equality as `Compare(x, y) == 0`. #2169
+     * delivered the equality *semantics*; **#2170 added `IEqualityComparer<T>` as a second base**,
+     * so a specialization can now be passed wherever that interface is required. The cost, granted
+     * per action on 2026-08-19, is a second vptr: `sizeof` 8 -> 16, with the `IEqualityComparer<T>`
+     * subobject at offset 8. Consumers must rebuild.
+     *
+     * @note The 8 -> 16 growth is a **C++ artifact with no .NET counterpart**. .NET's comparer is a
+     * `readonly struct` and implementing an interface costs a struct no storage at all, so .NET
+     * pays nothing for the same surface. In C++ the only way to obtain polymorphic binding is a
+     * base class, and a base class with virtual members is a vtable pointer.
+     *
+     * @note `IEquatable<TotalOrderIeee754Comparer<T>>` is deliberately **not** reproduced. .NET's
+     * implementation is `Equals(TotalOrderIeee754Comparer<T> other) => true` -- every instance of a
+     * stateless comparer is equal to every other -- which in C++ is what a defaulted `operator==`
+     * on an empty type already expresses. Adding a third base to say it would buy nothing and cost
+     * a third vptr.
+     *
+     * @note **`GetHashCode` diverges from .NET and the divergence is deliberate here.** .NET's is
+     * `obj.GetHashCode()` (`TotalOrderIeee754Comparer.cs:198-202`), i.e. the *value's own* hash,
+     * which `Double.GetHashCode` normalizes so that "all NaNs and both zeros have the same hash
+     * code". This port hashes the **bit pattern**, so `-0.0` and `+0.0` hash differently and so do
+     * two NaN payloads. Both satisfy the hash contract (equal implies equal hash) because equality
+     * here *is* bit-pattern identity; .NET's is merely coarser. The difference is nonetheless
+     * directly observable through this public member, and closing it would invert five shipped
+     * pins, so it is filed as its own ticket rather than bundled into #2170.
      */
     template<typename T>
     struct TotalOrderIeee754Comparer;
 
     /** @brief float specialization: totalOrder over the IEEE 754 binary32 bit pattern. */
     template<>
-    struct TotalOrderIeee754Comparer<float> : System::Collections::Generic::IComparer<float>
+    struct TotalOrderIeee754Comparer<float>
+        : System::Collections::Generic::IComparer<float>
+        , System::Collections::Generic::IEqualityComparer<float>
     {
         [[nodiscard]] SharpRuntime::intcs Compare(const float& x, const float& y) const override
         {
@@ -100,13 +120,12 @@ namespace System::Numerics {
          * Equivalent to `Compare(x, y) == 0`. Distinguishes -0 from +0 and distinct NaN payloads
          * from each other, which ordinary floating equality cannot.
          *
-         * Signature note (#2169 / #2170): this deliberately matches
-         * `System::Collections::Generic::IEqualityComparer<float>::Equals` exactly, so that adding
-         * that interface as a second base becomes a two-line change. It is intentionally
-         * **non-virtual** today: adding the base would grow this type from 8 to 16 bytes (a second
-         * vptr), a public object-layout change that needs its own approval (#2170).
+         * Signature note (#2169 / #2170): this `override`s
+         * `System::Collections::Generic::IEqualityComparer<float>::Equals`. #2169 wrote the signature
+         * to match exactly so that #2170 would be an `override` rather than a silent overload; it
+         * is now virtual, and the second vptr that buys is the 8 -> 16 growth #2170 was granted.
          */
-        [[nodiscard]] bool Equals(const float& x, const float& y) const
+        [[nodiscard]] bool Equals(const float& x, const float& y) const override
         {
             return Detail::EqualsTotalOrderInteger(std::bit_cast<int32_t>(x), std::bit_cast<int32_t>(y));
         }
@@ -115,10 +134,11 @@ namespace System::Numerics {
          * @brief Returns a hash code consistent with this comparer's equality.
          *
          * Values that compare equal under totalOrder have identical binary32 bit patterns and therefore
-         * identical hashes. -0 and +0 hash differently, and so do distinct NaN payloads. Same
-         * signature note as Equals.
+         * identical hashes. -0 and +0 hash differently, and so do distinct NaN payloads -- which is
+         * where this port and .NET part company; see the type-level note. Same signature note as
+         * Equals.
          */
-        [[nodiscard]] SharpRuntime::intcs GetHashCode(const float& obj) const
+        [[nodiscard]] SharpRuntime::intcs GetHashCode(const float& obj) const override
         {
             return Detail::HashTotalOrderInteger(std::bit_cast<int32_t>(obj));
         }
@@ -126,7 +146,9 @@ namespace System::Numerics {
 
     /** @brief double specialization: totalOrder over the IEEE 754 binary64 bit pattern. */
     template<>
-    struct TotalOrderIeee754Comparer<double> : System::Collections::Generic::IComparer<double>
+    struct TotalOrderIeee754Comparer<double>
+        : System::Collections::Generic::IComparer<double>
+        , System::Collections::Generic::IEqualityComparer<double>
     {
         [[nodiscard]] SharpRuntime::intcs Compare(const double& x, const double& y) const override
         {
@@ -139,13 +161,12 @@ namespace System::Numerics {
          * Equivalent to `Compare(x, y) == 0`. Distinguishes -0 from +0 and distinct NaN payloads
          * from each other, which ordinary floating equality cannot.
          *
-         * Signature note (#2169 / #2170): this deliberately matches
-         * `System::Collections::Generic::IEqualityComparer<double>::Equals` exactly, so that adding
-         * that interface as a second base becomes a two-line change. It is intentionally
-         * **non-virtual** today: adding the base would grow this type from 8 to 16 bytes (a second
-         * vptr), a public object-layout change that needs its own approval (#2170).
+         * Signature note (#2169 / #2170): this `override`s
+         * `System::Collections::Generic::IEqualityComparer<double>::Equals`. #2169 wrote the signature
+         * to match exactly so that #2170 would be an `override` rather than a silent overload; it
+         * is now virtual, and the second vptr that buys is the 8 -> 16 growth #2170 was granted.
          */
-        [[nodiscard]] bool Equals(const double& x, const double& y) const
+        [[nodiscard]] bool Equals(const double& x, const double& y) const override
         {
             return Detail::EqualsTotalOrderInteger(std::bit_cast<int64_t>(x), std::bit_cast<int64_t>(y));
         }
@@ -154,10 +175,11 @@ namespace System::Numerics {
          * @brief Returns a hash code consistent with this comparer's equality.
          *
          * Values that compare equal under totalOrder have identical binary64 bit patterns and therefore
-         * identical hashes. -0 and +0 hash differently, and so do distinct NaN payloads. Same
-         * signature note as Equals.
+         * identical hashes. -0 and +0 hash differently, and so do distinct NaN payloads -- which is
+         * where this port and .NET part company; see the type-level note. Same signature note as
+         * Equals.
          */
-        [[nodiscard]] SharpRuntime::intcs GetHashCode(const double& obj) const
+        [[nodiscard]] SharpRuntime::intcs GetHashCode(const double& obj) const override
         {
             return Detail::HashTotalOrderInteger(std::bit_cast<int64_t>(obj));
         }
@@ -165,7 +187,9 @@ namespace System::Numerics {
 
     /** @brief System::Half specialization: totalOrder over the IEEE 754 binary16 bit pattern. */
     template<>
-    struct TotalOrderIeee754Comparer<System::Half> : System::Collections::Generic::IComparer<System::Half>
+    struct TotalOrderIeee754Comparer<System::Half>
+        : System::Collections::Generic::IComparer<System::Half>
+        , System::Collections::Generic::IEqualityComparer<System::Half>
     {
         [[nodiscard]] SharpRuntime::intcs Compare(const System::Half& x, const System::Half& y) const override
         {
@@ -178,13 +202,12 @@ namespace System::Numerics {
          * Equivalent to `Compare(x, y) == 0`. Distinguishes -0 from +0 and distinct NaN payloads
          * from each other, which ordinary floating equality cannot.
          *
-         * Signature note (#2169 / #2170): this deliberately matches
-         * `System::Collections::Generic::IEqualityComparer<System::Half>::Equals` exactly, so that adding
-         * that interface as a second base becomes a two-line change. It is intentionally
-         * **non-virtual** today: adding the base would grow this type from 8 to 16 bytes (a second
-         * vptr), a public object-layout change that needs its own approval (#2170).
+         * Signature note (#2169 / #2170): this `override`s
+         * `System::Collections::Generic::IEqualityComparer<System::Half>::Equals`. #2169 wrote the signature
+         * to match exactly so that #2170 would be an `override` rather than a silent overload; it
+         * is now virtual, and the second vptr that buys is the 8 -> 16 growth #2170 was granted.
          */
-        [[nodiscard]] bool Equals(const System::Half& x, const System::Half& y) const
+        [[nodiscard]] bool Equals(const System::Half& x, const System::Half& y) const override
         {
             return Detail::EqualsTotalOrderInteger(static_cast<int16_t>(x.bits), static_cast<int16_t>(y.bits));
         }
@@ -193,10 +216,11 @@ namespace System::Numerics {
          * @brief Returns a hash code consistent with this comparer's equality.
          *
          * Values that compare equal under totalOrder have identical binary16 bit patterns and therefore
-         * identical hashes. -0 and +0 hash differently, and so do distinct NaN payloads. Same
-         * signature note as Equals.
+         * identical hashes. -0 and +0 hash differently, and so do distinct NaN payloads -- which is
+         * where this port and .NET part company; see the type-level note. Same signature note as
+         * Equals.
          */
-        [[nodiscard]] SharpRuntime::intcs GetHashCode(const System::Half& obj) const
+        [[nodiscard]] SharpRuntime::intcs GetHashCode(const System::Half& obj) const override
         {
             return Detail::HashTotalOrderInteger(static_cast<int16_t>(obj.bits));
         }

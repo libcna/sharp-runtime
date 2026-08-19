@@ -131,18 +131,41 @@ namespace System::Text::Json {
             return true;
         }
 
-        /** @return The raw JSON text of this element. */
         /**
-         * @return This element re-rendered as JSON text.
+         * @return This element **re-rendered** as JSON text — see the declared limitation below.
          *
-         * @note **This is NOT the source text, and cannot be** — SR-AUD-325, cause TJ-D,
-         * ticket **#2118**, blocked. The element holds a *parsed* `nlohmann` tree, not a span into
-         * the original document, so `dump()` re-renders from the parsed value. Measured and pinned
-         * by `JsonGatedBehaviourPins.PIN2118GetRawTextReRendersRatherThanReturningSourceText`:
-         * `1e+01` returns as `10.0`, `1.10` as `1.1`, `"\u0061"` as `"a"`, and insignificant
-         * whitespace is dropped. Preserving the source needs retained spans, which is an
-         * **object-layout change to `JsonDocument` and `JsonElement`** — hence blocked, not
-         * deferred.
+         * @note **DECLARED LIMITATION (SR-AUD-325, cause TJ-D, ticket #2118, decided 2026-08-19).**
+         * This member does **not** return the source text and, on this substrate, cannot.
+         *
+         * .NET's contract is unambiguous and is the opposite: `JsonElement.GetRawText()` is
+         * `_parent.GetRawValueAsString(_idx)` (`JsonElement.cs:1196-1201`), which slices the
+         * **original document bytes** and transcodes them (`JsonDocument.cs:700-704`). Nothing is
+         * re-rendered there.
+         *
+         * This port holds a *parsed* `nlohmann` tree. `nlohmann`'s DOM **retains no source spans
+         * at all**, so `dump()` can only re-render from the parsed value. Measured differences,
+         * pinned by `JsonGatedBehaviourPins.Decl2118_GetRawTextReRendersRatherThanReturningSourceText`:
+         *
+         * | source | .NET returns | this port returns |
+         * |---|---|---|
+         * | `1e+01` | `1e+01` | `10.0` |
+         * | `1.10` | `1.10` | `1.1` |
+         * | `"\u0061"` | `"\u0061"` | `"a"` |
+         * | `{ "a" : 1 }` | `{ "a" : 1 }` | `{"a":1}` |
+         *
+         * **Why this is declared rather than repaired.** Honouring the contract means `JsonDocument`
+         * retaining the original text **and every `JsonElement` carrying an offset and length into
+         * it** — an object-layout change to both types, and a parse-time and memory cost paid by
+         * **every** caller whether or not `GetRawText` is ever called. That was offered and
+         * **declined** on 2026-08-19 (`docs/StandingApprovals.md` SA-13); #2117 had already grown
+         * `JsonElement` 48 → 56 in the same session, and this would have grown it again to buy a
+         * member most callers never touch.
+         *
+         * @note The value returned is always **valid JSON that parses back to an equal element**.
+         * What is lost is the *representation*, never the *value*. A document already in the
+         * renderer's canonical form round-trips byte for byte.
+         *
+         * @note `ToString()` is the same door and must not diverge from it; that is asserted.
          */
         [[nodiscard]] std::string GetRawText() const { return checkedNode() ? node_->dump() : std::string(); }
 

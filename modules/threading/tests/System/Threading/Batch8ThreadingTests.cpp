@@ -300,6 +300,31 @@ TEST(ThreadStartExceptionTests, Fix1958_TheReasonCtorKeepsTheFixedMessage) {
     EXPECT_NE(ex.getInnerExceptionProperty(), nullptr) << "the reason is retained";
 }
 
+TEST(ThreadStartExceptionTests, Decl2390_TheConstructorsAreDeliberatelyPublic) {
+    // #2390 / docs/StandingApprovals.md SA-12. .NET makes both constructors `internal`. This port
+    // keeps them PUBLIC, deliberately, because SA-12's rule is conditional on whether a creator
+    // exists here -- and for this type none does: .NET's runtime throws it when a managed thread
+    // fails after the OS thread starts but before user code runs, a window std::thread does not
+    // have (it either constructs or throws std::system_error).
+    //
+    // This pin is the DECLARATION. If a future ticket makes them private, this fails and the
+    // change is a deliberate act rather than a drift.
+    static_assert(std::is_default_constructible_v<ThreadStartException>,
+                  "#2390/SA-12: the default constructor stays public -- no creator exists here");
+    static_assert(std::is_constructible_v<ThreadStartException, std::exception_ptr>,
+                  "#2390/SA-12: the reason constructor stays public for the same reason");
+
+    // The divergence is in ACCESSIBILITY ALONE. Everything a caller can observe is .NET's, which
+    // is what makes the divergence tolerable -- assert that here so the two halves cannot drift
+    // apart: a future change that widened the surface would have to fail one of these.
+    ThreadStartException ex;
+    EXPECT_STREQ("Thread failed to start.", ex.what());
+    EXPECT_EQ(static_cast<SharpRuntime::intcs>(0x80131525u), ex.getHResultProperty());
+    static_assert(std::is_final_v<ThreadStartException>);
+    static_assert(!std::is_constructible_v<ThreadStartException, std::string>,
+                  "#2390: 'public' must not be read as 'anything goes' -- the shape is still .NET's");
+}
+
 TEST(ThreadStartExceptionTests, Decl1958_TheTypeIsSealed) {
     // .NET: `public sealed class ThreadStartException`.
     static_assert(std::is_final_v<ThreadStartException>,

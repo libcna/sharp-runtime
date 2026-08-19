@@ -275,6 +275,55 @@ TEST(TimeZoneInfoTests, HasSameRules_SameOffset_True) {
     EXPECT_TRUE(a->HasSameRules(*b));
 }
 
+TEST(TimeZoneInfoTests, Decl2185_HasSameRulesIsOneDirectionallyPermissiveAndPermanentlySo) {
+    // PERMANENT DEVIATION, decided 2026-08-19 (docs/StandingApprovals.md SA-13). .NET's
+    // HasSameRules compares the two zones' adjustment-rule arrays element by element; this port
+    // compares the base offset and the DST flag, because it stores no rules.
+    //
+    // Closing it needs tzdata's OWN rule structures -- the TZif POSIX-TZ footer, or the full
+    // transition table with its per-era type records -- which is out of scope for this port. It is
+    // NOT closable by sampling libc at any granularity: two zones can agree on every sampled
+    // instant and still differ in rule.
+    //
+    // This test asserts the deviation itself so it is a DECLARATION, and it is written to fail the
+    // day a TZif reader lands -- which is exactly when the declaration must be withdrawn.
+    auto ny = TimeZoneInfo::FindSystemTimeZoneById("America/New_York");
+    auto havana = TimeZoneInfo::FindSystemTimeZoneById("America/Havana");
+    ASSERT_NE(ny, nullptr);
+    ASSERT_NE(havana, nullptr);
+
+    // The premise: these two really do share a base offset and a DST flag. If tzdata ever changed
+    // that, this case would stop being about SR-AUD-228 at all, so it is asserted rather than
+    // assumed -- the #2351 lesson about tests that encode an environment fact.
+    ASSERT_EQ(ny->getBaseUtcOffsetProperty(), havana->getBaseUtcOffsetProperty());
+    ASSERT_EQ(ny->getSupportsDaylightSavingTimeProperty(),
+              havana->getSupportsDaylightSavingTimeProperty());
+
+    // .NET returns FALSE here -- their transition dates differ. This port returns true.
+    EXPECT_TRUE(ny->HasSameRules(*havana))
+        << "#2185: declared permanent. If this ever returns false, a TZif reader landed and the "
+           "permanent-deviation note on HasSameRules must be withdrawn.";
+}
+
+TEST(TimeZoneInfoTests, Decl2185_TheFailureIsOneDirectional) {
+    // The half that makes the deviation safe to declare rather than merely tolerate: this method
+    // can only be too PERMISSIVE. It never returns false for a pair .NET calls the same, because
+    // the two things it does compare -- base offset and DST flag -- are both things .NET's rule
+    // comparison also distinguishes. A caller using it as a NECESSARY condition is correct; one
+    // using it as a SUFFICIENT condition is not.
+    const TimeZoneInfo& utc = TimeZoneInfo::Utc();
+    auto ny = TimeZoneInfo::FindSystemTimeZoneById("America/New_York");
+    ASSERT_NE(ny, nullptr);
+
+    // Different base offsets => false here, and false in .NET too. No false negative exists.
+    EXPECT_NE(utc.getBaseUtcOffsetProperty(), ny->getBaseUtcOffsetProperty());
+    EXPECT_FALSE(utc.HasSameRules(*ny));
+
+    // Reflexivity holds unconditionally, which is the one guarantee a permissive comparison keeps.
+    EXPECT_TRUE(ny->HasSameRules(*ny));
+    EXPECT_TRUE(utc.HasSameRules(utc));
+}
+
 TEST(TimeZoneInfoTests, HasSameRules_DiffOffset_False) {
     auto a = TimeZoneInfo::CreateCustomTimeZone("A", TimeSpan::FromHours(1), "A", "A");
     auto b = TimeZoneInfo::CreateCustomTimeZone("B", TimeSpan::FromHours(2), "B", "B");

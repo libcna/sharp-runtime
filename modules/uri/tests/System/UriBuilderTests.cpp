@@ -291,46 +291,59 @@ TEST(UriBuilderTest, HashIsObtainableWhereverEqualsSucceeds_MalformedPort) {
     expectEqualsImpliesEqualHash(b, b, "bracketed host");
 }
 
-TEST(UriBuilderTest, HashIsObtainableWhereverEqualsSucceeds_OtherUnparseableRenderings) {
-    // The three remaining measured routes: an out-of-range port, an unterminated IP literal
-    // (#1991) and an empty host (#2000). Each renders a string Uri rejects.
-    // "h:99999" left this set with #1996 G-1: it is bracketed now and parses. The other two
-    // still render strings Uri rejects -- an unterminated literal, which G-1 deliberately does
-    // NOT wrap (see setHostProperty's note), and an empty host.
+TEST(UriBuilderTest, Fix2391_AnUnparseableBuilderNowThrowsFromBothMembers) {
+    // INVERTED BY #2391. Its predecessor asserted the OPPOSITE -- that Equals and GetHashCode
+    // both answer for a builder whose rendering Uri rejects -- which was #2004's non-throwing
+    // guarantee. The user withdrew that guarantee on 2026-08-19 to take .NET's delegation
+    // (UriBuilder.cs:277-279), knowing this exact cost, so the pin records the new contract.
+    //
+    // Two measured routes survive: an unterminated IP literal (#1991), which #1996 G-1
+    // deliberately does NOT wrap, and an empty host (#2000). ("h:abc" and "h:99999" left this
+    // set with G-1: they are bracketed now and parse.)
     const char* hosts[] = {"[::1", ""};
     for (const char* host : hosts) {
         UriBuilder b;
         b.setHostProperty(host);
         EXPECT_THROW(b.getUriProperty(), UriFormatException) << host;
-        EXPECT_TRUE(b.Equals(b)) << host;
-        EXPECT_NO_THROW((void)b.GetHashCode()) << host;
+
+        // b.Equals(b) THROWS. This is the sharp edge of the decision and it is asserted rather
+        // than glossed: an object that cannot be compared to itself is exactly what #2004
+        // removed, and #2391 accepted its return in exchange for canonical identity.
+        EXPECT_THROW((void)b.Equals(b), UriFormatException) << host;
+        EXPECT_THROW((void)b.GetHashCode(), UriFormatException) << host;
+
+        // Totality is what #2004 was really protecting, and it is PRESERVED -- just over a
+        // smaller set. The two members now throw on exactly the same objects, so there is no
+        // builder that compares equal to itself yet has no obtainable hash.
         UriBuilder same;
         same.setHostProperty(host);
-        EXPECT_TRUE(b.Equals(same)) << host;
-        EXPECT_EQ(b.GetHashCode(), same.GetHashCode()) << host;
+        EXPECT_THROW((void)b.Equals(same), UriFormatException) << host;
+        EXPECT_THROW((void)same.GetHashCode(), UriFormatException) << host;
     }
 }
 
-TEST(UriBuilderTest, Decl1995_BuilderHashNoLongerMatchesTheBuiltUrisHash) {
-    // REWRITTEN by #1995. This asserted #2004's compatibility claim -- that for every builder
-    // whose rendering parses, hashing the string and hashing the built Uri give the same number.
-    // That claim rested on Uri::GetHashCode hashing absoluteUri_ verbatim, which #1995 changed:
-    // Uri now hashes a canonical identity key (folded scheme and host, resolved port, no fragment
-    // or user-info), so the two numbers legitimately differ.
-    //
-    // The builder's own hash is UNCHANGED and still hashes the rendered string, because #2004
-    // measured four ordinary setter routes where building a Uri THROWS -- see this file's
-    // GetHashCode doc-comment. Making the builder delegate to Uri, which is what .NET does
-    // (`GetHashCode() => Uri.GetHashCode()`, UriBuilder.cs:279), would reintroduce that throw.
-    // That conflict is ticket #2391, not something to resolve silently here.
+TEST(UriBuilderTest, Fix2391_BuilderHashIsTheBuiltUrisHash) {
+    // INVERTED BY #2391, and it is the second inversion of this pin in one session -- worth
+    // stating, because the two moves are not a reversal, they are a convergence.
+    //   #2004 made the builder hash its RENDERED STRING, arguing that was value-identical to
+    //         delegating, since Uri::GetHashCode then hashed absoluteUri_ verbatim.
+    //   #1995 made Uri::GetHashCode hash a CANONICAL IDENTITY KEY, which silently falsified
+    //         that argument -- this pin was rewritten to record the resulting disagreement.
+    //   #2391 restores .NET's delegation (UriBuilder.cs:279), so they agree again, by
+    //         construction rather than by coincidence.
     UriBuilder b;
     b.setHostProperty("EXAMPLE.COM");
     b.setPortProperty(80);
-    EXPECT_EQ(b.GetHashCode(), static_cast<SharpRuntime::intcs>(
-                                    std::hash<std::string>{}(b.ToString())))
-        << "the builder still hashes its rendered string";
-    EXPECT_NE(b.GetHashCode(), b.getUriProperty().GetHashCode())
-        << "and the built Uri now hashes its canonical identity instead";
+    EXPECT_EQ(b.GetHashCode(), b.getUriProperty().GetHashCode())
+        << "the builder now delegates, so this holds by construction";
+
+    // And it is NO LONGER the hash of the rendered string -- the assertion the predecessor made.
+    // Written as EXPECT_NE deliberately: unequal values may hash equally
+    // (docs/HashAssertionContractRule.md R2), but here the two numbers come from different
+    // inputs -- "http://EXAMPLE.COM:80/" against the folded, port-resolved identity key -- so a
+    // collision would be a coincidence this test is entitled to notice.
+    EXPECT_NE(b.GetHashCode(), static_cast<SharpRuntime::intcs>(
+                                    std::hash<std::string>{}(b.ToString())));
 }
 
 TEST(UriBuilderTest, EqualsAndGetHashCodeAreTotalOnTheSameSet) {
@@ -344,6 +357,10 @@ TEST(UriBuilderTest, EqualsAndGetHashCodeAreTotalOnTheSameSet) {
 }
 
 TEST(UriBuilderTest, EqualsImpliesEqualHashAcrossEveryEqualityClass) {
+    // UPDATED BY #2391. The property is unchanged -- equal builders hash equally -- but its
+    // DOMAIN shrank: the two unparseable shapes now throw from both members, so they are no
+    // longer members of any equality class and are exercised by
+    // Fix2391_AnUnparseableBuilderNowThrowsFromBothMembers instead.
     UriBuilder plain;      plain.setHostProperty("example.com");
     UriBuilder withPort;   withPort.setHostProperty("example.com");  withPort.setPortProperty(8080);
     UriBuilder withCreds;  withCreds.setHostProperty("example.com"); withCreds.setUserNameProperty("u");
@@ -351,40 +368,100 @@ TEST(UriBuilderTest, EqualsImpliesEqualHashAcrossEveryEqualityClass) {
     UriBuilder withQuery;  withQuery.setHostProperty("example.com"); withQuery.setQueryProperty("a=1");
     UriBuilder withFrag;   withFrag.setHostProperty("example.com");  withFrag.setFragmentProperty("f");
     UriBuilder emptyQuery; emptyQuery.setHostProperty("example.com");emptyQuery.setQueryProperty("");
-    UriBuilder badPort;    badPort.setHostProperty("h:abc");
-    UriBuilder emptyHost;  emptyHost.setHostProperty("");
+    UriBuilder badPort;    badPort.setHostProperty("h:abc");  // parses since #1996 G-1
     UriBuilder fileShape("file", "");  fileShape.setPathProperty("/tmp/x");
 
     const UriBuilder* shapes[] = {&plain, &withPort, &withCreds, &withQuery, &withFrag,
-                                  &emptyQuery, &badPort, &emptyHost, &fileShape};
+                                  &emptyQuery, &badPort, &fileShape};
     for (const UriBuilder* a : shapes) {
         for (const UriBuilder* b : shapes)
             expectEqualsImpliesEqualHash(*a, *b, "cross product");
-        // and against an independently built copy of the same shape
         UriBuilder copy = *a;
         EXPECT_TRUE(a->Equals(copy));
         EXPECT_EQ(a->GetHashCode(), copy.GetHashCode());
     }
+
+    // The shape that used to be in this list and no longer can be. Kept HERE, in the test whose
+    // domain it left, so the exclusion is visible at the place it was made rather than only in
+    // the ticket.
+    UriBuilder emptyHost;  emptyHost.setHostProperty("");
+    EXPECT_THROW((void)emptyHost.GetHashCode(), UriFormatException);
 }
 
-TEST(UriBuilderTest, DeliberatelyUnequalPairsStayUnequal_PinsTheGatedIdentityChange) {
-    // These are the pairs #1995 would make EQUAL. They must stay unequal until that approval
-    // lands, and this test must be updated with it — the same role
-    // UriTests.DocumentedContract_CaseDifferingUrisAreNotEqualYet plays for Uri.
+TEST(UriBuilderTest, Fix2391_TheComparandIsAStringSoAnUnparseableOTHERIsMerelyUnequal) {
+    // .NET's asymmetry, transcribed rather than tidied. UriBuilder.Equals(object) is
+    // `rparam is not null && Uri.Equals(rparam.ToString())` (UriBuilder.cs:277):
+    //   * THIS builder goes through the `Uri` property, so an unparseable SELF throws;
+    //   * the OTHER is handed over as a STRING, and Uri.Equals(string) runs
+    //     TryCreate(s, UriKind.RelativeOrAbsolute, out _) and returns FALSE when that fails.
+    // Making both sides throw would be tidier and would not be .NET. Making neither throw would
+    // be #2004, which the user withdrew.
+    UriBuilder good;   good.setHostProperty("example.com");
+    UriBuilder broken; broken.setHostProperty("[::1");
+
+    EXPECT_FALSE(good.Equals(broken)) << "an unparseable OTHER is unequal, not an error";
+    EXPECT_THROW((void)broken.Equals(good), UriFormatException)
+        << "an unparseable SELF throws, because the Uri property does";
+}
+
+TEST(UriBuilderTest, Fix2391_TheComparandKindIsRelativeOrAbsoluteAndItIsLoadBearing) {
+    // .NET's comparand branch uses UriKind.RelativeOrAbsolute, NOT Absolute
+    // (Uri.cs, the `comparand is string` branch). Absolute is the plausible wrong choice -- it is
+    // what #1997 A-3 picked for the CREATION overloads, and the two questions have different
+    // answers.
+    //
+    // A first cut of this test recorded the kind as an unobservable equivalence, reasoning that
+    // `getUriProperty()` is always absolute so a relative comparand can never be equal. MEASURED,
+    // that reasoning is wrong at its premise: this port's `Uri(std::string)` constructor ACCEPTS
+    // "://example.com/" while `TryCreate(s, UriKind::Absolute)` REJECTS it, so `self` can be a
+    // Uri the strict comparand parse would refuse -- and then the two spellings disagree.
+    UriBuilder emptyScheme;
+    emptyScheme.setSchemeProperty("");   // accepted since #1996 G-3
+    emptyScheme.setHostProperty("example.com");
+    ASSERT_EQ(emptyScheme.ToString(), "://example.com/");
+
+    // Reachability, measured: the two kinds really do disagree on a string a builder can render.
+    std::shared_ptr<System::Uri> parsed;
+    EXPECT_TRUE(System::Uri::TryCreate(emptyScheme.ToString(),
+                                       System::UriKind::RelativeOrAbsolute, parsed));
+    EXPECT_FALSE(System::Uri::TryCreate(emptyScheme.ToString(),
+                                        System::UriKind::Absolute, parsed));
+
+    // THIS is the assertion that discriminates. With RelativeOrAbsolute the comparand parses and
+    // the builder is equal to itself; with Absolute the parse fails and Equals returns false,
+    // making a builder unequal to ITSELF.
+    EXPECT_TRUE(emptyScheme.Equals(emptyScheme))
+        << "a builder must be equal to itself wherever its own Uri is obtainable";
+
+    // Still unequal to a different builder, so the case above is not passing for a trivial reason.
+    UriBuilder good; good.setHostProperty("example.com");
+    EXPECT_FALSE(emptyScheme.Equals(good));
+    EXPECT_FALSE(good.Equals(emptyScheme));
+}
+
+TEST(UriBuilderTest, Fix2391_TheseFormerlyUnequalPairsAreNowEqual) {
+    // INVERTED BY #2391, exactly as its predecessor said it must be: "these are the pairs #1995
+    // would make EQUAL. They must stay unequal until that approval lands, and this test must be
+    // updated with it."
+    //
+    // #1995 gave Uri canonical identity; it did NOT reach UriBuilder, because the builder still
+    // compared rendered text. #2391 made the builder delegate, so the canonicalisation finally
+    // arrives here -- which is why this inversion belongs to #2391 and not to #1995.
     UriBuilder lower;  lower.setHostProperty("example.com");
     UriBuilder upperHost; upperHost.setHostProperty("EXAMPLE.COM");
-    // #1996 G-2 lower-cases the scheme in the SETTER, so this builder is no longer a
-    // case-differing one at all -- it is "http" the moment it is set. The scheme row therefore
-    // moved out of this pin and into Fix1996G2 below; what #1995 would still make equal is the
-    // HOST case and the default port.
     UriBuilder defaultPort; defaultPort.setHostProperty("example.com"); defaultPort.setPortProperty(80);
 
-    EXPECT_FALSE(lower.Equals(upperHost));
-    EXPECT_FALSE(lower.Equals(defaultPort));
-    // The three matching hash inequalities were removed by #2284. They restated the gate on a
-    // channel that does not carry it: unequal values are permitted to hash equally
-    // (docs/HashAssertionContractRule.md R2), so only the Equals assertions above are the pin,
-    // and only they have to be updated when #1995 lands.
+    EXPECT_TRUE(lower.Equals(upperHost)) << "host case is folded by Uri's identity key";
+    EXPECT_TRUE(lower.Equals(defaultPort)) << "an explicit default port resolves to the same key";
+    EXPECT_EQ(lower.GetHashCode(), upperHost.GetHashCode());
+    EXPECT_EQ(lower.GetHashCode(), defaultPort.GetHashCode());
+
+    // Not everything collapsed: identity is canonical, not blind. A different host is still a
+    // different builder, and a NON-default port is still significant.
+    UriBuilder otherHost; otherHost.setHostProperty("example.org");
+    UriBuilder port8080;  port8080.setHostProperty("example.com"); port8080.setPortProperty(8080);
+    EXPECT_FALSE(lower.Equals(otherHost));
+    EXPECT_FALSE(lower.Equals(port8080));
 }
 
 TEST(UriBuilderTest, Fix1995_UriIdentityIsNowCanonical) {

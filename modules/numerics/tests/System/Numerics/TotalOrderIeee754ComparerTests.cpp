@@ -3,7 +3,11 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <limits>
+#include <type_traits>
+#include <utility>
 
+#include "System/Collections/Generic/IComparer.hpp"
+#include "System/Collections/Generic/IEqualityComparer.hpp"
 #include "System/Half.hpp"
 #include "System/Numerics/DivisionRounding.hpp"
 #include "System/Numerics/TotalOrderIeee754Comparer.hpp"
@@ -92,17 +96,70 @@ double NaNWithPayloadD(uint64_t payload) {
 
 } // namespace
 
-TEST(TotalOrderIeee754ComparerTests, LayoutIsUnchangedByTheEqualitySubpart) {
-    // #2169 delivers the equality SEMANTICS with no layout change; #2170 -- adding
-    // IEqualityComparer<T> as a second base -- would make these 16. Measured in
-    // build-probe/2167_probe2_layout.log. If this assertion ever fails, an
-    // approval-gated change landed without its approval.
-    static_assert(sizeof(TotalOrderIeee754Comparer<float>) == 8);
-    static_assert(sizeof(TotalOrderIeee754Comparer<double>) == 8);
-    static_assert(sizeof(TotalOrderIeee754Comparer<Half>) == 8);
+TEST(TotalOrderIeee754ComparerTests, Fix2170_TheSecondBaseCostsExactlyOneVptr) {
+    // INVERTED BY #2170. The predecessor asserted 8 and said "if this assertion ever fails, an
+    // approval-gated change landed without its approval" -- the approval was granted per action on
+    // 2026-08-19, so the pin now records what was BOUGHT rather than what was withheld.
+    static_assert(sizeof(TotalOrderIeee754Comparer<float>) == 16);
+    static_assert(sizeof(TotalOrderIeee754Comparer<double>) == 16);
+    static_assert(sizeof(TotalOrderIeee754Comparer<Half>) == 16);
     static_assert(alignof(TotalOrderIeee754Comparer<float>) == 8);
-    EXPECT_FALSE((std::is_base_of_v<System::Collections::Generic::IEqualityComparer<float>,
-                                    TotalOrderIeee754Comparer<float>>));
+
+    // Asserted as a RELATIONSHIP, not as a literal: the growth is one pointer, so a future
+    // platform with a different pointer width keeps this pin meaningful.
+    static_assert(sizeof(TotalOrderIeee754Comparer<float>)
+                  == 8 + sizeof(void*));
+
+    EXPECT_TRUE((std::is_base_of_v<System::Collections::Generic::IEqualityComparer<float>,
+                                   TotalOrderIeee754Comparer<float>>));
+    EXPECT_TRUE((std::is_base_of_v<System::Collections::Generic::IComparer<float>,
+                                   TotalOrderIeee754Comparer<float>>));
+
+    // The IEqualityComparer subobject sits at offset 8, after IComparer's. Measured, and pinned
+    // because it is the half a bare sizeof cannot express: a single base that merely grew would
+    // give the same 16.
+    TotalOrderIeee754Comparer<float> cmp;
+    const auto* asEquality =
+        static_cast<const System::Collections::Generic::IEqualityComparer<float>*>(&cmp);
+    const auto* asCompare =
+        static_cast<const System::Collections::Generic::IComparer<float>*>(&cmp);
+    EXPECT_EQ(reinterpret_cast<const char*>(asCompare) - reinterpret_cast<const char*>(&cmp), 0);
+    EXPECT_EQ(reinterpret_cast<const char*>(asEquality) - reinterpret_cast<const char*>(&cmp), 8);
+}
+
+TEST(TotalOrderIeee754ComparerTests, Fix2170_BindsPolymorphicallyAsIEqualityComparer) {
+    // THIS IS WHAT #2170 BUYS, and it is the one thing #2169 explicitly could not deliver: the
+    // comparer can be passed where the INTERFACE is required. Before the second base this function
+    // could not be called with it at all -- the failure was a compile error, not a wrong answer.
+    const auto throughInterface =
+        [](const System::Collections::Generic::IEqualityComparer<double>& eq,
+           double a, double b) {
+            return std::pair<bool, SharpRuntime::intcs>{eq.Equals(a, b), eq.GetHashCode(a)};
+        };
+
+    TotalOrderIeee754Comparer<double> cmp;
+    // Total order distinguishes the signed zeros, and the interface call must see THAT semantic
+    // rather than ordinary floating equality -- i.e. the override really is dispatched.
+    const auto zeros = throughInterface(cmp, -0.0, 0.0);
+    EXPECT_FALSE(zeros.first);
+    EXPECT_TRUE(cmp.Equals(3.5, 3.5));
+    EXPECT_TRUE(throughInterface(cmp, 3.5, 3.5).first);
+
+    // Dispatched, not sliced: the interface call and the direct call agree on every answer.
+    EXPECT_EQ(throughInterface(cmp, 1.5, 1.5).second, cmp.GetHashCode(1.5));
+
+    // And the other base still works from the same object.
+    const System::Collections::Generic::IComparer<double>& asCompare = cmp;
+    EXPECT_LT(asCompare.Compare(-0.0, 0.0), 0);
+}
+
+TEST(TotalOrderIeee754ComparerTests, Decl2170_IEquatableIsNotReproduced) {
+    // .NET also implements IEquatable<TotalOrderIeee754Comparer<T>> with `=> true`
+    // (TotalOrderIeee754Comparer.cs:204). Deliberately NOT reproduced: a third base would cost a
+    // third vptr to express what a stateless empty type already means. Pinned so its absence is a
+    // decision rather than an oversight, and so a future addition is a deliberate act.
+    static_assert(sizeof(TotalOrderIeee754Comparer<float>) == 16,
+                  "a third base would make this 24");
     SUCCEED();
 }
 

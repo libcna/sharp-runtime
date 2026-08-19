@@ -304,6 +304,79 @@ derivable under SA-5 and will be taken from the reference rather than asked.
 
 ---
 
+## 4i. SA-12 — how this port represents .NET's `internal` members (ticket #2390)
+
+Granted 2026-08-19. **A general rule, not a decision about one type**, and it applies to every
+ported type with `internal` constructors or members.
+
+C++ has no `internal`, and the mechanical translations are not equivalent to it, so the rule is
+**conditional on whether this port has a real creator**:
+
+| Situation | Representation |
+|---|---|
+| This port **has** a creator — some type here really does construct it | make the members **`private`** and **`friend`** that creator. This is the shape #2298 already used for `LocalDataStoreSlot` with `Thread`. |
+| This port has **no** creator — the window in which .NET's runtime would construct it does not exist here | keep the members **public** and **record the accessibility divergence in the header**. |
+
+**Why the second row is not a cop-out.** Two mechanical alternatives were offered and declined,
+each for a stated reason:
+
+* *`private` with no friend* makes the type impossible to instantiate at all. That is arguably a
+  .NET user's exact position, but it leaves dead code and costs the tests that verify the type's
+  fixed message and HResult — the only observable content such a type has.
+* *`private` + a friend that never constructs it* is a **dead friend declaration**: it looks
+  faithful and grants access to a class that will never use it.
+
+The divergence in the second row is in **accessibility only**. The parameter lists, message,
+HResult and `final`-ness still match .NET exactly, so a caller who writes what .NET allows gets
+what .NET gives.
+
+**Worked example — `System::Threading::ThreadStartException` (#1958 / SR-AUD-196, #2390).** .NET
+makes both constructors `internal`; the runtime throws it when a managed thread fails *after* the
+OS thread starts but *before* user code runs. That window does not exist in this port —
+`std::thread` either constructs or throws `std::system_error` — so no code here can ever throw it.
+Second row: the constructors stay public and the header says so.
+
+---
+
+## 4j. SA-13 — eleven decisions taken on 2026-08-19
+
+Recorded here for the same reason as SA-11: each settles a ticket that repository evidence could
+not, and each must survive a context reset. Ordered by ticket number.
+
+| Ticket | Question | Decision |
+|---|---|---|
+| **#1896** | may `JsonNode` and `XContainer` grow so the ownership guard stops walking the ancestor chain? | **approved** — the 2026-07-31 refusal is **withdrawn**. The guard must get *faster, not weaker*: it keeps rejecting exactly what it rejects today |
+| **#1899** | X15/X17 cannot be made unreachable — what instead? | **leave the contract documented**, as #1898 left it, and close #1899 carrying its own impossibility proof |
+| **#2118** | `JsonElement::GetRawText` re-renders instead of returning source text | **declare the limitation and pin it** (the #2202 shape). Retaining source spans was declined: paid at parse time and in memory by every caller, called or not |
+| **#2155** | may `Timers::Timer` derive from `System::Object` so `Elapsed` reports a sender? | **approved** — `sizeof` 104 → 112 **and a new vtable**, accepted knowingly |
+| **#2170** | may `TotalOrderIeee754Comparer` grow 8 → 16 for `IEqualityComparer<T>`? | **approved** — second vptr, on the measurement that it has zero users outside its own tests |
+| **#2185** | is tzdata rule parsing in scope, so `HasSameRules` can distinguish rule sets? | **out of scope** — SR-AUD-228 becomes a **permanent deviation**, "not closable" rather than "not yet closed" |
+| **#2199** | XObject notification: layout, and how does removal identify a registration? | **both granted**: `sizeof(XObject)` 16 → 24, and `add_*` returns a **registration token** that `remove_*` takes |
+| **#2366** | may `cna`'s two `SetEnvironmentVariable(name, "")` sites be edited? | **yes**, per-action, those two sites only, **no commit** |
+| **#2377** | may `cna`'s six GamerServices sites be edited? | **yes**, per-action, that repair only, **no commit**. Reverting #2323 was offered and declined |
+| **#2390** | how to represent .NET's `internal`? | **SA-12 above** |
+| **#2391** | should `UriBuilder::Equals`/`GetHashCode` delegate to `Uri` as .NET does? | **yes** — #2004's non-throwing guarantee is **withdrawn** |
+
+**Three of these have consequences that were stated before the decision and accepted with it, and
+must not be quietly softened later.**
+
+*#2391 withdraws a guarantee this port measured and chose.* After it, `UriBuilder::Equals` and
+`GetHashCode` **both throw** for a builder whose rendering does not parse — including
+`b.Equals(b)`. The four routes are ordinary setters. #2004's tests are to be **inverted**, not
+deleted, and its doc-comment rewritten to say the guarantee was given up for parity.
+
+*#2155 and #1896 were taken against the recommendation on the record.* Both were recommended for
+refusal — #2155 because a new vtable on a public type is the most expensive break available, #1896
+because it speeds up working code rather than adding a missing feature. Both were granted anyway;
+that is the user's call and the reasoning above is preserved so the trade is visible, not so it is
+relitigated.
+
+*#2185 closes a finding permanently.* SR-AUD-228 joins the reflection deviations, carrying two
+measurements: the finding is **not closable by sampling libc at any granularity**, and the failure
+is **one-directional** — this port can only be too permissive, never too strict.
+
+---
+
 ## 4d. SA-7 — the `NotifyFilters` → inotify mapping (ticket #2346)
 
 > Answer the five priced questions of `docs/SystemIONamespaceReviewPlan.md` §21.11 as

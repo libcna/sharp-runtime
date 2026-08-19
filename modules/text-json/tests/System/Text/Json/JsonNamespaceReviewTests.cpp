@@ -838,26 +838,56 @@ TEST(JsonEmbeddedNulTests, THEDELIBERATEEXCEPTIONJsonNodeParseStillHasNoDepthBou
 // names the ticket that owns it. None of them endorses the behaviour; each of them fails the
 // day it changes, which is exactly when the owning ticket needs re-reading.
 
-TEST(JsonGatedBehaviourPins, PIN2118GetRawTextReRendersRatherThanReturningSourceText) {
-    // SR-AUD-325 / cause TJ-D, blocked: GetRawText calls dump() on the parsed tree, so it
-    // re-renders. Every class the plan measured is pinned here with its CURRENT output.
-    struct Case { const char* source; const char* rendered; };
+TEST(JsonGatedBehaviourPins, Decl2118_GetRawTextReRendersRatherThanReturningSourceText) {
+    // RENAMED AND RE-ROLED BY #2118 on 2026-08-19: this was a GATED pin ("a defect knowingly still
+    // present"); it is now a DECLARATION. The user decided against retaining source spans, so the
+    // re-rendering is the documented contract of this port rather than an unfixed defect.
+    //
+    // .NET's GetRawText is `_parent.GetRawValueAsString(_idx)` (JsonElement.cs:1196-1201), which
+    // slices the ORIGINAL document bytes (JsonDocument.cs:700-704). nlohmann's DOM retains no
+    // source spans at all, so dump() can only re-render.
+    //
+    // WRITTEN TO FAIL THE MOMENT THE LIMITATION LIFTS. If a future change ever does retain spans,
+    // every row below breaks and this test is the notice that the declaration must be withdrawn.
+    struct Case { const char* source; const char* rendered; const char* dotnetWouldReturn; };
     const Case cases[] = {
-        {"{\"a\":1e+01}",   "{\"a\":10.0}"},      // exponent form lost
-        {"{\"a\":1.10}",    "{\"a\":1.1}"},       // trailing zero lost
-        {"{\"a\":\"\\u0061\"}", "{\"a\":\"a\"}"}, // escape resolved
-        {"{ \"a\" : 1 }",   "{\"a\":1}"},         // insignificant whitespace lost
+        {"{\"a\":1e+01}",       "{\"a\":10.0}",  "{\"a\":1e+01}"},       // exponent form lost
+        {"{\"a\":1.10}",        "{\"a\":1.1}",   "{\"a\":1.10}"},        // trailing zero lost
+        {"{\"a\":\"\\u0061\"}", "{\"a\":\"a\"}",   "{\"a\":\"\\u0061\"}"},  // escape resolved
+        {"{ \"a\" : 1 }",       "{\"a\":1}",     "{ \"a\" : 1 }"},       // whitespace lost
     };
     for (const auto& c : cases) {
         auto doc = JsonDocument::Parse(c.source);
         EXPECT_EQ(doc->getRootElementProperty().GetRawText(), c.rendered)
-            << "#2118 owns this; if it changed, the ticket's premise did too. Source: " << c.source;
+            << "#2118 declares this; if it changed, the declaration must be withdrawn. Source: "
+            << c.source;
+        EXPECT_NE(doc->getRootElementProperty().GetRawText(), c.dotnetWouldReturn)
+            << "and this is what .NET would have returned, recorded so the gap is explicit";
         // ToString is the same door and must not diverge from it.
         EXPECT_EQ(doc->getRootElementProperty().ToString(),
                   doc->getRootElementProperty().GetRawText());
     }
     // What DOES round-trip: a document already in the renderer's canonical form.
     EXPECT_EQ(JsonDocument::Parse("{\"a\":1}")->getRootElementProperty().GetRawText(), "{\"a\":1}");
+}
+
+TEST(JsonGatedBehaviourPins, Decl2118_TheValueSurvivesEvenThoughTheRepresentationDoesNot) {
+    // The half that makes the limitation tolerable, and it is asserted rather than asserted-about:
+    // GetRawText always returns VALID JSON that parses back to an EQUAL element. What is lost is
+    // the representation, never the value. A caller using GetRawText as a value carrier is
+    // unaffected; only one reading it as source text is.
+    const char* sources[] = {"{\"a\":1e+01}", "{\"a\":1.10}", "{\"a\":\"\\u0061\"}", "{ \"a\" : 1 }"};
+    for (const char* src : sources) {
+        auto first = JsonDocument::Parse(src);
+        const std::string rendered = first->getRootElementProperty().GetRawText();
+
+        auto second = JsonDocument::Parse(rendered);
+        EXPECT_EQ(second->getRootElementProperty().GetRawText(), rendered)
+            << "re-rendering is IDEMPOTENT: a second pass changes nothing. Source: " << src;
+        EXPECT_EQ(second->getRootElementProperty().GetProperty("a").GetRawText(),
+                  first->getRootElementProperty().GetProperty("a").GetRawText())
+            << "and the value carried is the same one. Source: " << src;
+    }
 }
 
 TEST(JsonGatedBehaviourPins, Fix2117_DisposalReachesElementsHandedOutEarlier) {

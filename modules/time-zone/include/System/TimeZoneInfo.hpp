@@ -32,8 +32,10 @@ namespace System {
      *   it only ever describes the process-local zone -- so the two surfaces deliberately
      *   differ. See docs/SystemTimeZoneNamespaceReviewPlan.md section 12.
      * - GetAdjustmentRules() returns an empty array, and HasSameRules() therefore cannot
-     *   distinguish two zones that share a base offset and a DST flag (SR-AUD-228, ticket
-     *   #2185: the repair needs stored rules, an object-layout change).
+     *   distinguish two zones that share a base offset and a DST flag. **This is a PERMANENT
+     *   deviation** (SR-AUD-228, ticket #2185, decided 2026-08-19): closing it needs a TZif
+     *   reader, which is out of scope. See HasSameRules for the two measurements. The failure is
+     *   one-directional — this port can only be too permissive, never too strict.
      * - Serialisation (ToSerializedString / FromSerializedString) is not implemented.
      * - DisplayName is the raw identifier for a system zone; producing .NET's
      *   "(UTC+01:00) ..." text needs CLDR display data this repository does not carry.
@@ -582,11 +584,31 @@ namespace System {
          * C++ counterpart of .NET TimeZoneInfo.HasSameRules(TimeZoneInfo), which additionally
          * compares the two zones' adjustment-rule arrays.
          *
-         * **Known divergence (SR-AUD-228, ticket #2185).** This type stores no adjustment
-         * rules, so it cannot return false where .NET does: America/New_York and
-         * America/Havana share a standard offset and a DST flag but not their rules, and this
-         * method reports them as same-rule zones. Repairing it means storing the rules, which
-         * grows the object, so it is recorded and gated rather than guessed at.
+         * @note **PERMANENT DEVIATION (SR-AUD-228, ticket #2185, decided 2026-08-19).** This type
+         * stores no adjustment rules, so it cannot return false where .NET does: America/New_York
+         * and America/Havana share a standard offset and a DST flag but **not** their transition
+         * dates, and this method reports them as same-rule zones. .NET compares the two zones'
+         * adjustment-rule arrays element by element.
+         *
+         * This is recorded as **not closable**, not as *not yet closed*, and the distinction rests
+         * on two measurements rather than on an unwillingness to pay:
+         *
+         * 1. **The finding cannot be closed by sampling libc at any granularity.** An earlier
+         *    design proposed deriving rules from the year scan this port already performs. That
+         *    recovers *offsets on sampled dates*, not *rules*: two zones can agree on every sampled
+         *    instant and still differ in rule, and no finer sampling turns one into the other.
+         *    Closing it needs tzdata's **own** rule structures — the TZif POSIX-TZ footer, or the
+         *    full transition table with its per-era type records — i.e. a TZif reader. That is
+         *    materially larger than the ticket described and is **out of scope for this port**.
+         * 2. **The failure is one-directional.** This method can only be too **permissive**, never
+         *    too strict: it returns `true` for some pairs .NET calls different, and never `false`
+         *    for a pair .NET calls the same. A caller using it as a *necessary* condition is
+         *    correct; one using it as a *sufficient* condition is not.
+         *
+         * The object-layout cost the ticket measured (`sizeof(TimeZoneInfo)` 160 → 184) is real but
+         * is **not** what blocks this, and is not paid, because the repair is not taken.
+         *
+         * Pinned by `TimeZoneInfoTests.Decl2185_*`.
          */
         [[nodiscard]] bool HasSameRules(const TimeZoneInfo& other) const {
             return baseUtcOffset_ == other.baseUtcOffset_ &&

@@ -14,8 +14,27 @@
 //
 // What this suite deliberately does NOT do: use a borrowed view after its owner has been
 // destroyed. That is probe cases X15 and X17, it is the undefined behaviour the contract exists
-// to describe, and turning it into a test would only pin an ASan report. Making it impossible
-// rather than merely documented is ticket #1899, blocked on one approval question (section 42.8).
+// to describe, and turning it into a test would only pin an ASan report.
+//
+// TICKET #1899 IS CLOSED (2026-08-19) AND THE CONTRACT STAYS AS #1898 LEFT IT. #1899 existed to
+// make X15/X17 unreachable rather than merely documented. Its design was completed and it proves
+// the ORIGINAL REQUIREMENT IMPOSSIBLE, for two INDEPENDENT reasons -- either alone is sufficient:
+//
+//   1. An owning handle to an object no shared_ptr owns cannot be manufactured. The TOPMOST
+//      ancestor has no parent to own it, so there is nothing to hand out a share of.
+//   2. XElement, XDocument and XContainer are routinely AUTOMATIC-STORAGE objects -- 51 such
+//      declarations in this repository's own tests alone -- so they have no control block, and
+//      std::enable_shared_from_this would throw std::bad_weak_ptr rather than rescue the caller.
+//      It would convert a latent use-after-free into a guaranteed throw at a correct call site.
+//
+// The alternative offered was to change Ancestors/AncestorsAndSelf's public signature to a
+// non-owning view type that cannot outlive the tree -- a public source break under SA-2/SA-10.
+// That was DECLINED on 2026-08-19 (docs/StandingApprovals.md SA-13).
+//
+// The proof is recorded HERE, beside the contract it justifies, so #1899 is not reopened from the
+// same direction by a future reader who sees only "documented, not enforced" and assumes nobody
+// tried. Decl1899_* below pins the two premises, because a proof whose premises silently stop
+// being true is not a proof.
 
 #include <gtest/gtest.h>
 #include <memory>
@@ -225,4 +244,53 @@ TEST(XLinqBorrowedViewTests, Attributes_AndAttributesProperty_AgreeOnContent) {
     const auto owned = el->Attributes();
     ASSERT_EQ(borrowed.size(), owned.size());
     for (size_t i = 0; i < owned.size(); ++i) EXPECT_EQ(borrowed[i], owned[i]);
+}
+
+// ---------------------------------------------------------------------------------------------
+// #1899 closed 2026-08-19: the two premises of its impossibility proof, pinned.
+//
+// A proof whose premises silently stop being true is not a proof. These two cases fail the day
+// either premise does, which is exactly when #1899 would be worth reopening.
+// ---------------------------------------------------------------------------------------------
+
+TEST(XLinqBorrowedViewTests, Decl1899_AutomaticStorageNodesHaveNoControlBlockToShareFrom) {
+    // PREMISE 2. XElement/XDocument/XContainer are routinely automatic-storage objects, so
+    // enable_shared_from_this could not rescue a borrowed view: there is no control block, and
+    // shared_from_this() would throw std::bad_weak_ptr at a CORRECT call site. This would trade a
+    // latent use-after-free for a guaranteed throw, not for safety.
+    //
+    // Asserted structurally rather than by trying it: the type does NOT derive from
+    // enable_shared_from_this, and an automatic-storage instance is legal and usable.
+    static_assert(!std::is_base_of_v<std::enable_shared_from_this<XElement>, XElement>,
+                  "#1899: adding this base would make automatic-storage XElements throw, not "
+                  "make borrowed views safe");
+
+    XElement automatic(XName("root"));            // legal, and the shape the premise is about
+    automatic.Add(std::shared_ptr<XNode>(std::make_shared<XElement>(XName("child"))));
+    EXPECT_EQ(automatic.getNameProperty().getLocalNameProperty(), "root");
+    EXPECT_EQ(automatic.Elements().size(), 1u);
+}
+
+TEST(XLinqBorrowedViewTests, Decl1899_TheTopmostAncestorHasNoParentToOwnIt) {
+    // PREMISE 1. Ancestors() cannot return owning handles because the LAST element it yields has
+    // no parent -- there is no object holding a shared_ptr to it that a share could be taken from.
+    // The root here is deliberately held by a shared_ptr, so this is not passing merely because
+    // the whole tree is automatic: even with an owned root, the OWNER is the caller's local
+    // variable, not anything inside the tree.
+    auto root = std::make_shared<XElement>(XName("root"));
+    auto mid = std::make_shared<XElement>(XName("mid"));
+    auto leaf = std::make_shared<XElement>(XName("leaf"));
+    root->Add(std::shared_ptr<XNode>(mid));
+    mid->Add(std::shared_ptr<XNode>(leaf));
+
+    std::vector<std::shared_ptr<XNode>> src{leaf};
+    const auto chain = Extensions::Ancestors(src);
+    ASSERT_FALSE(chain.empty());
+    EXPECT_EQ(chain.back()->getNameProperty().getLocalNameProperty(), "root");
+    EXPECT_EQ(chain.back()->getParentProperty(), nullptr)
+        << "#1899 premise 1: the topmost ancestor has no parent, so nothing inside the tree owns "
+           "it and no owning handle to it can be manufactured";
+
+    // And the views really are raw pointers -- the shape the contract describes.
+    static_assert(std::is_same_v<std::remove_const_t<decltype(chain)>, std::vector<XElement*>>);
 }

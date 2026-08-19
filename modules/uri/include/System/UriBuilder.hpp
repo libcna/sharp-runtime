@@ -381,45 +381,73 @@ namespace System {
         [[nodiscard]] Uri getUriProperty() const { return Uri(ToString()); }
 
         /**
-         * @brief Returns true if @p other builds an equal URI string.
-         * C++ counterpart of .NET UriBuilder.Equals(object).
+         * @brief Returns true if @p other builds an equal URI.
+         *
+         * C++ counterpart of .NET `UriBuilder.Equals(object)`, which is
+         * `rparam is not null && Uri.Equals(rparam.ToString())` (`UriBuilder.cs:277`).
+         *
+         * **Ticket #2391 (2026-08-19) adopted .NET's delegation and, in doing so, WITHDREW the
+         * non-throwing guarantee ticket #2004 gave this pair.** The reasoning is recorded because
+         * the trade was stated before the decision and must not be quietly softened:
+         *
+         * - .NET compares **canonically**, through a built `Uri`, not by rendered text. Two
+         *   builders differing only in scheme case, or in a default port written explicitly, are
+         *   equal in .NET and were **not** equal here.
+         * - The price is that a builder whose rendering does not parse now **throws** from
+         *   `Equals` -- including `b.Equals(b)` -- because the `Uri` property throws. That is
+         *   .NET's behaviour too. The four routes are ordinary setters:
+         *     `setHostProperty("h:abc")`, `("h:99999")`, `("[::1")` and `("")`.
+         *
+         * @note **The asymmetry is .NET's and is deliberate.** *This* builder is built through the
+         * `Uri` property, so an unparseable *self* throws; the *other* is compared as a **string**,
+         * and `Uri.Equals(string)` runs `TryCreate(s, UriKind.RelativeOrAbsolute, out _)` and
+         * **returns false** when it fails (`Uri.cs`, the `comparand is string` branch). So an
+         * unparseable *other* is merely unequal. Reproducing only one half would be tidier and
+         * would not be .NET.
+         *
+         * @note `UriKind::RelativeOrAbsolute`, not `Absolute` -- .NET's comparand branch uses it,
+         * so a relative other is parsed rather than rejected.
+         *
+         * @throws System::UriFormatException if *this* builder's rendering is not a valid URI, or
+         *         if `ToString()` itself throws (empty UserName with a non-empty Password).
          */
         [[nodiscard]] bool Equals(const UriBuilder& other) const {
-            return ToString() == other.ToString();
+            const Uri self = getUriProperty();
+            std::shared_ptr<Uri> parsed;
+            if (!Uri::TryCreate(other.ToString(), UriKind::RelativeOrAbsolute, parsed) || !parsed) {
+                return false;
+            }
+            return self == *parsed;
         }
 
         /**
-         * @brief Returns a hash code based on the built URI string.
+         * @brief Returns a hash code for the built URI.
          *
-         * C++ counterpart of .NET UriBuilder.GetHashCode().
+         * C++ counterpart of .NET `UriBuilder.GetHashCode()`, which is `Uri.GetHashCode()`
+         * (`UriBuilder.cs:279`).
          *
-         * Ticket #2004: this used to be `getUriProperty().GetHashCode()`, which built a whole
-         * `Uri` from `ToString()` purely to hash it. Equals() compares the rendered strings
-         * directly and never parses, so for any builder whose rendering is not a parseable
-         * URI the two disagreed at the worst possible place: `b.Equals(b)` returned `true`
-         * while `b.GetHashCode()` **threw**, leaving an object that compares equal to itself
-         * with no obtainable hash. Measured routes, all through ordinary setters:
-         *   setHostProperty("h:abc")  -> "http://h:abc/"  -> throws (invalid port)
-         *   setHostProperty("h:99999")-> "http://h:99999/"-> throws (port out of range)
-         *   setHostProperty("[::1")   -> "http://[::1/"   -> throws (invalid IP literal)
-         *   setHostProperty("")       -> "http:///"       -> throws (no host, #2000)
+         * **Ticket #2391 restored this delegation, reversing ticket #2004.** #2004 removed it for
+         * a real reason -- the pair disagreed at the worst possible place, `b.Equals(b)` returning
+         * `true` while `b.GetHashCode()` threw -- and the repair it chose was to make *hashing*
+         * stop parsing. #2391 closes the same gap from the other side: **both** members now go
+         * through the built `Uri`, so they are total on exactly the same set of objects and the
+         * `Equals => same hash` implication holds over the whole of that set. What changed is
+         * which set: it is now the parseable builders rather than all of them.
          *
-         * Hashing the rendered string directly is **value-identical** wherever the old code
-         * returned at all: `Uri::parse` assigns `absoluteUri_ = uriString` on every branch it
-         * accepts, and `Uri::GetHashCode` hashes exactly that, so
-         * `Uri(s).GetHashCode() == std::hash<std::string>{}(s)` for every `s` a `Uri` accepts.
-         * The only change is that the throw is gone, which is what restores
-         * `a.Equals(b) => a.GetHashCode() == b.GetHashCode()` for the whole domain of
-         * Equals(). Identity itself is unchanged and stays raw rendered text — narrowing it
-         * to URI semantics is SR-AUD-142/SR-AUD-140, approval-gated as ticket #1995.
+         * @note **#2004's stated justification became false earlier the same session and this is
+         * the correction.** Its doc-comment argued that hashing the rendered string was
+         * *value-identical* to delegating, because "`Uri::parse` assigns `absoluteUri_ = uriString`
+         * on every branch it accepts, and `Uri::GetHashCode` hashes exactly that". **Ticket #1995
+         * made `Uri::GetHashCode` hash the canonical identity key instead** -- folded scheme,
+         * folded host, resolved default port, path and query, with fragment and user-info excluded
+         * -- so the two stopped agreeing. Keeping #2004 would therefore have meant a builder and
+         * the `Uri` it builds hashing differently, which is precisely the defect #2004 existed to
+         * prevent, one level up.
          *
-         * @throws System::UriFormatException only where ToString() itself throws, i.e. when
-         *         UserName is empty and Password is not — the same condition, and the same
-         *         exception, that Equals() raises. The two are now total on exactly the same
-         *         set of objects.
+         * @throws System::UriFormatException under exactly the same conditions as Equals().
          */
         [[nodiscard]] intcs GetHashCode() const {
-            return static_cast<intcs>(std::hash<std::string>{}(ToString()));
+            return getUriProperty().GetHashCode();
         }
     };
 
