@@ -830,3 +830,43 @@ TEST(ConditionalWeakTableTests, ScalarKeys_StillExpireWhenTheLastOwnerDrops) {
     while (e->MoveNext()) ++enumerated;
     EXPECT_EQ(enumerated, 0) << "an expired scalar key was still enumerated";
 }
+
+// ===========================================================================
+// #1980 group G-1 -- SR-AUD-159. ExternalException's (message, errorCode)
+// constructor, ErrorCode and ToString.
+// ===========================================================================
+
+TEST(ExternalExceptionTests, Fix1980G1_ErrorCodeIsTheHResultAndNeedsNoField) {
+    // .NET's is `public virtual int ErrorCode => HResult;` -- an ALIAS, not separate state. The
+    // finding's implication that it is a second field does not survive the reference, and this
+    // row is what says so: setting one moves the other.
+    ExternalException withCode("boom", static_cast<SharpRuntime::intcs>(0x80070005));
+    EXPECT_EQ(withCode.getErrorCodeProperty(), static_cast<SharpRuntime::intcs>(0x80070005));
+    EXPECT_EQ(withCode.getHResultProperty(), withCode.getErrorCodeProperty());
+
+    // The other constructors keep E_FAIL, which is the whole point of the new overload existing.
+    EXPECT_EQ(ExternalException().getErrorCodeProperty(),
+              static_cast<SharpRuntime::intcs>(0x80004005));
+    EXPECT_EQ(ExternalException("m").getErrorCodeProperty(),
+              static_cast<SharpRuntime::intcs>(0x80004005));
+}
+
+// #1980 G-1 deliberately did NOT land ToString(), and this pins the absence so it cannot be
+// added without the decision. It was implemented and then removed on the downstream measurement:
+// cna derives from ExternalException in THREE types, and a statically resolved type name would
+// have misnamed every one -- #2323's own rule, that a message naming the wrong type is a lie
+// where an empty one is merely an absence. Ticket #2387.
+//
+// The parameter is DEPENDENT because gcc evaluates a non-dependent `requires` eagerly and
+// hard-errors instead of yielding false (#2299, recorded in CLAUDE.md).
+template <typename T> concept HasToString = requires(const T& e) { e.ToString(); };
+
+TEST(ExternalExceptionTests, Decl1980G1_ToStringIsAbsentUntilItsTypeNameQuestionIsAnswered) {
+    static_assert(!HasToString<ExternalException>,
+                  "#2387: ToString() landed without resolving the derived-type name -- three cna "
+                  "types derive from this class and a static name misnames all of them.");
+    // The two members that DID land are unaffected and stay reachable.
+    ExternalException ex("boom", static_cast<SharpRuntime::intcs>(0x80070005));
+    EXPECT_EQ(ex.getErrorCodeProperty(), static_cast<SharpRuntime::intcs>(0x80070005));
+    SUCCEED();
+}

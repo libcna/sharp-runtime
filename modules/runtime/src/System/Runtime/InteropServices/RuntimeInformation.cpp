@@ -2,6 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Runtime/InteropServices/RuntimeInformation.hpp"
+#include "System/AppContext.hpp"
+#include <any>
+#include <string>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -12,6 +15,16 @@
 #endif
 
 namespace System::Runtime::InteropServices {
+
+std::string RuntimeInformation::getRuntimeIdentifierProperty() {
+    // RuntimeInformation.cs:20-21 -- AppContext.GetData("RUNTIME_IDENTIFIER") as string ?? "unknown".
+    // The `as string` is a TYPE TEST, not a coercion: an entry of another type falls through to
+    // the literal rather than being rendered, exactly as AppContext's own base-directory lookup
+    // does (#2255).
+    const std::any data = System::AppContext::GetData("RUNTIME_IDENTIFIER");
+    if (const auto* text = std::any_cast<std::string>(&data)) return *text;
+    return "unknown";
+}
 
 Architecture RuntimeInformation::getProcessArchitectureProperty() {
 #if defined(__x86_64__) || defined(_M_X64)

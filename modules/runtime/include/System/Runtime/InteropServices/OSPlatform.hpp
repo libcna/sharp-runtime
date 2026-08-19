@@ -27,6 +27,19 @@ namespace System::Runtime::InteropServices {
         }
 
     public:
+        /**
+         * @brief Creates the default OSPlatform, whose name is empty.
+         *
+         * #1980 group G-1 (SR-AUD-152). .NET's `OSPlatform` is a `readonly struct`, so
+         * `default(OSPlatform)` has always been reachable and its `Name` is null; this port's
+         * only constructor was private, so the value had no spelling at all.
+         *
+         * @note The asymmetry with `Create("")` is .NET's, not an oversight here: `Create` rejects
+         * an empty name with `ArgumentException` while the default value carries one. `Create` is
+         * a factory that validates its argument; the default is the absence of an argument.
+         */
+        OSPlatform() = default;
+
         /** @brief Creates a new OSPlatform instance. Consider caching the result if called frequently. */
         [[nodiscard]] static OSPlatform Create(const std::string& osPlatform) {
             if (osPlatform.empty()) {

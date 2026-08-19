@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/AppContext.hpp"
 #include <vector>
 #include <algorithm>
 #include "System/ArgumentException.hpp"
@@ -118,4 +119,44 @@ TEST(RuntimeInformationTests, Fix1983_TheProcessArchitectureIsTheCompilationTarg
 #else
     SUCCEED() << "no assertion for this target; the #error guarantees the list covers it";
 #endif
+}
+
+// ===========================================================================
+// #1980 group G-1 -- SR-AUD-152 (OSPlatform default) and SR-AUD-153
+// (RuntimeIdentifier). The ticket calls G-1 "purely ADDITIVE ... cannot break a
+// consumer", which is what makes it ordinary SA-5 work rather than an approval.
+// ===========================================================================
+
+TEST(RuntimeInformationTests, Fix1980G1_OSPlatformHasAReachableDefault) {
+    // .NET's OSPlatform is a readonly struct, so default(OSPlatform) has always been reachable
+    // and its Name is null. This port's only constructor was private, so the value had no
+    // spelling at all.
+    OSPlatform def;
+    EXPECT_TRUE(def.ToString().empty());
+    EXPECT_TRUE(def == OSPlatform());
+
+    // The asymmetry with Create("") is .NET's: the factory validates its argument, the default
+    // is the absence of one. Both rows are asserted so neither can be "tidied" into the other.
+    EXPECT_THROW((void)OSPlatform::Create(""), System::ArgumentException);
+    EXPECT_FALSE(def == OSPlatform::Create("LINUX"));
+}
+
+TEST(RuntimeInformationTests, Fix1980G1_RuntimeIdentifierIsAnAppContextLookupWithALiteralFallback) {
+    // RuntimeInformation.cs:20-21 -- AppContext.GetData("RUNTIME_IDENTIFIER") as string ??
+    // "unknown". Nothing is derived from the platform, which is why this is reproducible at all.
+    EXPECT_EQ(RuntimeInformation::getRuntimeIdentifierProperty(), "unknown");
+
+    System::AppContext::SetData("RUNTIME_IDENTIFIER", std::string("linux-x64"));
+    EXPECT_EQ(RuntimeInformation::getRuntimeIdentifierProperty(), "linux-x64");
+
+    // `as string` is a TYPE TEST, not a coercion: a non-string entry falls through to the
+    // literal rather than being rendered. The row that fails if the lookup casts blindly.
+    System::AppContext::SetData("RUNTIME_IDENTIFIER", 42);
+    EXPECT_EQ(RuntimeInformation::getRuntimeIdentifierProperty(), "unknown");
+
+    System::AppContext::SetData("RUNTIME_IDENTIFIER", std::string());
+    EXPECT_EQ(RuntimeInformation::getRuntimeIdentifierProperty(), "")
+        << "an entry that IS a string is returned even when empty -- `as string` succeeds";
+
+    System::AppContext::SetData("RUNTIME_IDENTIFIER", std::string("unknown"));
 }
