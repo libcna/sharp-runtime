@@ -103,15 +103,98 @@ TEST(CharUnicodeInfoClassificationTests, SurrogateCategory_AgreesWithCharIsSurro
     EXPECT_EQ(disagreements, 0) << "first disagreement at U+" << std::hex << firstDisagreement;
 }
 
-// The char16_t and std::u16string overloads reach the same answer as the code-point one.
+// The single-character overloads still report a surrogate as a surrogate. The (string, index)
+// one no longer does for a PAIRED high surrogate -- see Fix2385_* below, which inverted the two
+// rows that used to be here.
 TEST(CharUnicodeInfoClassificationTests, SurrogateCategory_ReachedByEveryOverload) {
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(static_cast<SharpRuntime::charcs>(0xD800)),
               UnicodeCategory::Surrogate);
-    const std::u16string s{static_cast<char16_t>(0xD83D), static_cast<char16_t>(0xDE00)};
-    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(s, 0), UnicodeCategory::Surrogate);
-    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(s, 1), UnicodeCategory::Surrogate);
     EXPECT_EQ(Char::GetUnicodeCategory(static_cast<SharpRuntime::charcs>(0xDBFF)),
               UnicodeCategory::Surrogate);
+    // A charcs cannot hold a supplementary code point, so these overloads have no pair to
+    // combine and .NET's `char` overloads have exactly the same limit.
+    const std::u16string lone{static_cast<char16_t>(0xD83D)};
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(lone, 0), UnicodeCategory::Surrogate);
+}
+
+// ===========================================================================
+// #2385 — the (string, index) overloads read a code POINT, not a code unit
+// ===========================================================================
+
+TEST(CharUnicodeInfoClassificationTests, Fix2385_ASurrogatePairIsCombinedAtTheHighHalf) {
+    // U+1F600 GRINNING FACE. Index 0 sees the CHARACTER; index 1 sees the low surrogate,
+    // because .NET's GetCodePoint only ever looks FORWARD (CharUnicodeInfo.cs:436-465). Looking
+    // backwards from the low half would be the "helpful" version .NET does not have.
+    const std::u16string emoji{static_cast<char16_t>(0xD83D), static_cast<char16_t>(0xDE00)};
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(emoji, 0), UnicodeCategory::OtherSymbol);
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(emoji, 1), UnicodeCategory::Surrogate);
+
+    // The numeric trio combines through the same helper, which is the half #2336 made
+    // observable: U+1D7CE MATHEMATICAL BOLD DIGIT ZERO is D835 DFCE.
+    const std::u16string boldZero{static_cast<char16_t>(0xD835), static_cast<char16_t>(0xDFCE)};
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(boldZero, 0), UnicodeCategory::DecimalDigitNumber);
+    EXPECT_EQ(CharUnicodeInfo::GetDecimalDigitValue(boldZero, 0), 0);
+    EXPECT_EQ(CharUnicodeInfo::GetDigitValue(boldZero, 0), 0);
+    EXPECT_DOUBLE_EQ(CharUnicodeInfo::GetNumericValue(boldZero, 0), 0.0);
+
+    // ...and at the low half all four report the surrogate, i.e. no value.
+    EXPECT_EQ(CharUnicodeInfo::GetDecimalDigitValue(boldZero, 1), -1);
+    EXPECT_EQ(CharUnicodeInfo::GetDigitValue(boldZero, 1), -1);
+    EXPECT_DOUBLE_EQ(CharUnicodeInfo::GetNumericValue(boldZero, 1), -1.0);
+}
+
+TEST(CharUnicodeInfoClassificationTests, Fix2385_AnUnpairedSurrogateAnswersAsItself) {
+    // .NET combines only when ALL THREE conditions hold: a high surrogate at the index, an
+    // in-range successor, and a LOW surrogate there. Each row below fails one of them, and each
+    // must answer Surrogate rather than a fabricated supplementary character.
+    const auto hi = static_cast<char16_t>(0xD83D);
+    const auto lo = static_cast<char16_t>(0xDE00);
+
+    const std::u16string highAtEnd{u'a', hi};                       // no successor
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(highAtEnd, 1), UnicodeCategory::Surrogate);
+
+    const std::u16string highThenLetter{hi, u'a'};                  // successor is not low
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(highThenLetter, 0), UnicodeCategory::Surrogate);
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(highThenLetter, 1), UnicodeCategory::LowercaseLetter);
+
+    const std::u16string highThenHigh{hi, hi};                      // successor is high, not low
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(highThenHigh, 0), UnicodeCategory::Surrogate);
+
+    const std::u16string loneLow{lo, u'a'};                         // low first is never combined
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(loneLow, 0), UnicodeCategory::Surrogate);
+
+    // The reversed pair: low then high is two lone surrogates, not a character.
+    const std::u16string reversed{lo, hi};
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(reversed, 0), UnicodeCategory::Surrogate);
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(reversed, 1), UnicodeCategory::Surrogate);
+
+    // TWO LOW SURROGATES is the row that discriminates "high surrogate at the index" from
+    // "either kind of surrogate at the index". It was added after a mutation that made the
+    // index-side test accept a low surrogate went UNCAUGHT by every row above: with a low
+    // surrogate first, the only successor that would then combine is another low one, and no
+    // other case in this file has that shape.
+    const std::u16string twoLows{lo, lo};
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(twoLows, 0), UnicodeCategory::Surrogate);
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(twoLows, 1), UnicodeCategory::Surrogate);
+}
+
+TEST(CharUnicodeInfoClassificationTests, Fix2385_BmpAndBoundsBehaviourIsUnmoved) {
+    // Every BMP index must answer exactly what the single-character overload does, or this
+    // change would have moved answers it had no business touching. Swept, not sampled.
+    std::u16string one(1, u'\0');
+    for (int cp = 0; cp <= 0xFFFF; ++cp) {
+        one[0] = static_cast<char16_t>(cp);
+        ASSERT_EQ(CharUnicodeInfo::GetUnicodeCategory(one, 0),
+                  CharUnicodeInfo::GetUnicodeCategory(static_cast<SharpRuntime::charcs>(cp)))
+            << "U+" << std::hex << cp;
+    }
+    // Bounds checking is unchanged and still runs before anything reads the string.
+    const std::u16string s{static_cast<char16_t>(0xD83D), static_cast<char16_t>(0xDE00)};
+    EXPECT_THROW((void)CharUnicodeInfo::GetUnicodeCategory(s, -1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)CharUnicodeInfo::GetUnicodeCategory(s, 2), System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)CharUnicodeInfo::GetNumericValue(s, 2), System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)CharUnicodeInfo::GetDigitValue(s, 2), System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)CharUnicodeInfo::GetDecimalDigitValue(s, 2), System::ArgumentOutOfRangeException);
 }
 
 // Naming the surrogates changes no predicate built on top of the category: measured over

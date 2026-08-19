@@ -54,6 +54,47 @@ class CharUnicodeInfo {
         }
     }
 
+    /**
+     * @brief The code POINT at @p index, combining a surrogate pair. Ticket #2385.
+     *
+     * `CharUnicodeInfo.GetCodePoint` (`CharUnicodeInfo.cs:436-465`), transcribed. All four
+     * `(string, index)` overloads route through it in .NET, and none of them did here -- each
+     * indexed a code UNIT and handed a lone surrogate to the single-character overload.
+     *
+     * The gap was **invisible until #2315 and #2336 landed**: while every non-ASCII code point
+     * answered `OtherNotAssigned` and every one answered `-1`, a supplementary character and a
+     * lone surrogate gave the same answer, so nothing could observe the difference.
+     *
+     * @par Three conditions, all of them .NET's
+     * A pair is combined only when the unit at @p index is a **high** surrogate, `index + 1` is
+     * in range, and the unit there is a **low** surrogate. Otherwise the unit itself is returned
+     * -- so a lone high surrogate, a lone low surrogate, a high surrogate at the end of the
+     * string, and the **low half of a valid pair** all answer as that surrogate. The last is
+     * easy to get wrong by "helpfully" looking backwards; .NET does not, and neither does this.
+     */
+    /*
+     * HONEST NOTE ON THE EVIDENCE: a mutation removing the `i + 1 < s.size()` bound below is
+     * NOT caught, and it is a genuine equivalence rather than a gap in the tests. `CheckIndex`
+     * has already established `i < s.size()`, so `i + 1 <= s.size()`, and
+     * `std::basic_string::operator[](size())` is *specified* to return a reference to a null
+     * character -- it is defined behaviour, not a read past the end. A `u'\0'` successor makes
+     * `low` underflow well clear of `0x3FF`, so no pair is combined either way.
+     *
+     * The bound is kept because it is .NET's, and because resting the correctness of a
+     * surrogate scan on `operator[]`'s null-terminator guarantee is a subtler contract than a
+     * bounds test -- one that would silently become wrong if this ever moved to a span.
+     */
+    static uint32_t GetCodePointAt(const std::u16string& s, intcs index) {
+        const auto i = static_cast<size_t>(index);
+        uint32_t codePoint = s[i];
+        const uint32_t high = codePoint - 0xD800u;
+        if (high <= 0x3FFu && i + 1 < s.size()) {
+            const uint32_t low = static_cast<uint32_t>(s[i + 1]) - 0xDC00u;
+            if (low <= 0x3FFu) codePoint = (high << 10) + low + 0x10000u;
+        }
+        return codePoint;
+    }
+
 public:
     CharUnicodeInfo() = delete;
 
@@ -83,7 +124,8 @@ public:
      */
     static intcs GetDecimalDigitValue(const std::u16string& s, intcs index) {
         CheckIndex(s, index);
-        return GetDecimalDigitValue(s[static_cast<size_t>(index)]);
+        // #2385: a code POINT, so a surrogate pair is combined as .NET's GetCodePoint does.
+        return detail::LookupDecimalDigitValue(GetCodePointAt(s, index));
     }
 
     /**
@@ -119,7 +161,8 @@ public:
      */
     static intcs GetDigitValue(const std::u16string& s, intcs index) {
         CheckIndex(s, index);
-        return GetDigitValue(s[static_cast<size_t>(index)]);
+        // #2385: a code POINT, so a surrogate pair is combined as .NET's GetCodePoint does.
+        return detail::LookupDigitValue(GetCodePointAt(s, index));
     }
 
     /**
@@ -150,7 +193,8 @@ public:
      */
     static double GetNumericValue(const std::u16string& s, intcs index) {
         CheckIndex(s, index);
-        return GetNumericValue(s[static_cast<size_t>(index)]);
+        // #2385: a code POINT, so a surrogate pair is combined as .NET's GetCodePoint does.
+        return detail::LookupNumericValue(GetCodePointAt(s, index));
     }
 
     /**
@@ -174,7 +218,8 @@ public:
      */
     static UnicodeCategory GetUnicodeCategory(const std::u16string& s, intcs index) {
         CheckIndex(s, index);
-        return GetUnicodeCategory(s[static_cast<size_t>(index)]);
+        // #2385: a code POINT, so a surrogate pair is combined as .NET's GetCodePoint does.
+        return detail::LookupUnicodeCategory(GetCodePointAt(s, index));
     }
 
     /**
