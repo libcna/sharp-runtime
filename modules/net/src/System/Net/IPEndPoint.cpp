@@ -83,6 +83,16 @@ namespace System::Net {
     bool IPEndPoint::TryParse(const std::string& s, IPEndPoint& result) {
         std::string addressPart;
         std::string portPart;
+        // #2045. "no colon at all" and "a colon with nothing after it" both leave portPart
+        // empty, and they are NOT the same input: the first is a bare address and means port 0,
+        // the second asserts that a port follows and none does. Without this flag the second
+        // silently became port 0 -- a value the caller never wrote.
+        //
+        // .NET distinguishes them structurally rather than with a flag: `addressLength ==
+        // s.Length` means no port field was found, and otherwise it runs `uint.TryParse` over
+        // `s.Slice(addressLength + 1)`, which REJECTS an empty span under NumberStyles.None
+        // (IPEndPoint.cs:120-148). A flag is the same distinction in this parser's shape.
+        bool hasPortField = false;
 
         if (!s.empty() && s.front() == '[') {
             // "[ipv6]" or "[ipv6]:port" form.
@@ -103,7 +113,8 @@ namespace System::Net {
             const size_t afterBracket = closeBracket + 1;
             if (afterBracket < s.size()) {
                 if (s[afterBracket] != ':') return false;
-                portPart = s.substr(afterBracket + 1);
+                portPart     = s.substr(afterBracket + 1);
+                hasPortField = true;
             }
         } else {
             size_t lastColon = s.rfind(':');
@@ -115,8 +126,9 @@ namespace System::Net {
                 if (firstColon != lastColon) {
                     addressPart = s;
                 } else {
-                    addressPart = s.substr(0, lastColon);
-                    portPart = s.substr(lastColon + 1);
+                    addressPart  = s.substr(0, lastColon);
+                    portPart     = s.substr(lastColon + 1);
+                    hasPortField = true;
                 }
             }
         }
@@ -125,7 +137,18 @@ namespace System::Net {
         if (!IPAddress::TryParse(addressPart, address)) return false;
 
         intcs port = 0;
-        if (!portPart.empty()) {
+        if (hasPortField) {
+            // An empty port field is a rejection, not a zero. This is the whole of #2045, and it
+            // is why the guard is `hasPortField` rather than `!portPart.empty()`.
+            //
+            // HONEST NOTE: a mutation deleting THIS line is not caught, and it is a proven
+            // equivalence rather than a gap -- the digit loop below runs zero times and
+            // `std::stoul("")` throws `std::invalid_argument`, which the `catch (...)` already
+            // turns into `return false` (verified by probe). It is kept because .NET's
+            // `uint.TryParse` RETURNS false rather than throwing, so an explicit rejection is
+            // the shape of the reference, and because resting a parser's correctness on an
+            // exception thrown by a conversion function is a subtler contract than a test.
+            if (portPart.empty()) return false;
             for (char c : portPart) {
                 if (!std::isdigit(static_cast<unsigned char>(c))) return false;
             }

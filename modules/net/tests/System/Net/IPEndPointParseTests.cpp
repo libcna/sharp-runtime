@@ -85,14 +85,35 @@ TEST(IPEndPointParseTests, BracketedForms_Unchanged) {
     expectParsesAs("[::]:0", "[::]:0");
 }
 
-TEST(IPEndPointParseTests, BracketedTrailingColonWithNoPort_StillAccepted) {
-    // Deliberately UNCHANGED by this ticket. "[::1]:" and "1.2.3.4:" both yield port 0 today,
-    // in both branches, so it is not "text between ']' and ':'" and it is not this finding.
-    // It is carried by its own inactive ticket rather than absorbed here, and pinned so that
-    // ticket cannot land silently.
-    expectParsesAs("[::1]:", "[::1]:0");
-    expectParsesAs("1.2.3.4:", "1.2.3.4:0");
+TEST(IPEndPointParseTests, Fix2045_ATrailingColonWithNoPortIsRejected) {
+    // INVERTED by #2045, whose gate was "the .NET reference tree is absent here so the intended
+    // behaviour cannot be established" -- and the reference is present, so it is established:
+    // IPEndPoint.cs:120-148 finds the port field structurally (`addressLength == s.Length`
+    // means there is none) and otherwise runs `uint.TryParse(s.Slice(addressLength + 1), ...)`
+    // with NumberStyles.None, which REJECTS an empty span. The ticket's inference was right.
+    expectRejected("[::1]:");
+    expectRejected("1.2.3.4:");
+
+    // THE DISTINCTION THAT MAKES THIS A REPAIR AND NOT A NARROWING: no colon at all is a bare
+    // address and still means port 0. Both shapes leave the port text empty, which is exactly
+    // why the guard had to become "was a port field present" rather than "is the port text
+    // non-empty" -- a mutation that reverts it is caught by these two rows together.
     expectParsesAs("1.2.3.4", "1.2.3.4:0");
+    expectParsesAs("[::1]", "[::1]:0");
+    expectParsesAs("::1", "[::1]:0");
+    expectParsesAs("fe80::1%7", "[fe80::1%7]:0");
+
+    // NumberStyles.None also means no sign and no whitespace, which this parser's digit loop
+    // already enforced; asserted here so the port field's grammar is stated in one place.
+    expectRejected("1.2.3.4:+80");
+    expectRejected("1.2.3.4: 80");
+    expectRejected("1.2.3.4:80 ");
+    expectRejected("[::1]:+80");
+
+    // A colon at position 0 is not a port separator: .NET requires `lastColonPos > 0`, and here
+    // the empty address fails to parse, so both reject for their own reason and agree.
+    expectRejected(":80");
+    expectRejected(":");
 }
 
 TEST(IPEndPointParseTests, UnbracketedForms_Unchanged) {
