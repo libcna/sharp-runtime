@@ -993,3 +993,146 @@ TEST(BarrierPostPhaseReadabilityTests, Fix1957_TheOtherMembersStillRefuseReentra
     EXPECT_EQ(phase.load(), 0);
     EXPECT_EQ(participants.load(), 1);
 }
+
+// =============================================================================================
+// Ticket #1957 / SR-AUD-204 — a waiting writer blocks subsequent readers.
+//
+// The read-admission predicate was `!writerActive_` alone, with no waiting-writer term, so a
+// steady stream of new readers entered past a writer already blocked in TryEnterWriteLock and
+// could starve it INDEFINITELY.
+//
+// .NET keeps the same signal packed into its single `_owners` word: WaitOnEvent sets
+// WAITING_WRITERS as soon as the first writer begins waiting, under the comment "Setting these
+// bits will prevent new readers from getting in" (ReaderWriterLockSlim.cs:1005-1010). Both that
+// bit and WAITING_UPGRADER sit above MAX_READER, so .NET's single admission test
+// `_owners < MAX_READER` refuses a new reader whenever a writer holds the lock OR is waiting.
+//
+// Landed under SA-5, with SA-3's layout condition discharged as layout-neutral:
+// sizeof(ReaderWriterLockSlim) is 120 before and after (build-probe/1957_probe3_rwls.cpp).
+//
+// THIS IS A FAIRNESS CHANGE: a reader-heavy workload that never blocked can now block. That is
+// the point -- it is what stops the writer starving -- and it is .NET's documented behaviour.
+//
+// EVERY probing reader below runs on ITS OWN THREAD. The default LockRecursionPolicy is
+// NoRecursion, so a second read acquisition on the thread that already holds one throws
+// LockRecursionException rather than testing admission -- an earlier draft did exactly that and
+// took the executable down with `terminate called without an active exception`, because the
+// escaping exception left two std::threads joinable.
+// =============================================================================================
+
+namespace {
+    /// Tries to take a read lock on a fresh thread and reports whether it got in.
+    bool ReaderOnItsOwnThreadCanEnter(System::Threading::ReaderWriterLockSlim& lock,
+                                      SharpRuntime::intcs timeoutMs) {
+        std::atomic<bool> entered{false};
+        std::thread probe([&] {
+            if (lock.TryEnterReadLock(timeoutMs)) {
+                entered.store(true);
+                lock.ExitReadLock();
+            }
+        });
+        probe.join();
+        return entered.load();
+    }
+}
+
+TEST(ReaderWriterWriterPreferenceTests, Decl1957_TheWaitingWriterCountIsLayoutNeutral) {
+    static_assert(sizeof(System::Threading::ReaderWriterLockSlim) == 120,
+                  "#1957/SR-AUD-204 must not change ReaderWriterLockSlim's layout");
+    static_assert(alignof(System::Threading::ReaderWriterLockSlim) == 8);
+    EXPECT_EQ(sizeof(System::Threading::ReaderWriterLockSlim), 120u);
+}
+
+TEST(ReaderWriterWriterPreferenceTests, Fix1957_ANewReaderWaitsBehindABlockedWriter) {
+    // THE DEFECT. A reader holds the lock; a writer blocks behind it; a NEW reader arrives on
+    // another thread. Before the repair that reader walked straight in, so an endless supply of
+    // readers starved the writer.
+    System::Threading::ReaderWriterLockSlim lock;
+    std::atomic<bool> writerWaiting{false};
+    std::atomic<bool> writerAcquired{false};
+
+    lock.EnterReadLock();   // first reader, held by this thread
+
+    std::thread writer([&] {
+        writerWaiting.store(true);
+        lock.EnterWriteLock();
+        writerAcquired.store(true);
+        lock.ExitWriteLock();
+    });
+
+    while (!writerWaiting.load()) std::this_thread::yield();
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    ASSERT_FALSE(writerAcquired.load()) << "the writer must still be blocked behind the reader";
+
+    EXPECT_FALSE(ReaderOnItsOwnThreadCanEnter(lock, 200))
+        << "a new reader entered past a waiting writer -- the starvation this ticket removes";
+
+    lock.ExitReadLock();    // release the original reader; the writer now gets in
+    writer.join();
+    EXPECT_TRUE(writerAcquired.load());
+
+    // ...and once the writer is done, readers flow again.
+    EXPECT_TRUE(ReaderOnItsOwnThreadCanEnter(lock, 1000));
+}
+
+TEST(ReaderWriterWriterPreferenceTests, Fix1957_ATimedOutWriterStopsBlockingReaders) {
+    // .NET clears its bit in WaitOnEvent's `finally` (ReaderWriterLockSlim.cs:1039-1042), so a
+    // writer that gives up must stop holding readers back. A guard that decremented only on
+    // success would wedge every future reader -- the failure mode is permanent, not transient.
+    System::Threading::ReaderWriterLockSlim lock;
+    lock.EnterReadLock();
+
+    std::thread writer([&] {
+        EXPECT_FALSE(lock.TryEnterWriteLock(100)) << "the writer cannot get in past the reader";
+    });
+    writer.join();
+
+    EXPECT_TRUE(ReaderOnItsOwnThreadCanEnter(lock, 1000))
+        << "a timed-out writer must stop blocking readers";
+    lock.ExitReadLock();
+}
+
+TEST(ReaderWriterWriterPreferenceTests, Fix1957_TheUncontendedPathsAreUnchanged) {
+    // Writer preference must cost nothing when no writer is waiting.
+    System::Threading::ReaderWriterLockSlim lock;
+    EXPECT_TRUE(lock.TryEnterReadLock(0));
+    lock.ExitReadLock();
+    EXPECT_TRUE(lock.TryEnterWriteLock(0));
+    lock.ExitWriteLock();
+    lock.EnterReadLock();
+    lock.ExitReadLock();
+    lock.EnterWriteLock();
+    lock.ExitWriteLock();
+    EXPECT_TRUE(ReaderOnItsOwnThreadCanEnter(lock, 0));
+}
+
+TEST(ReaderWriterWriterPreferenceTests, Fix1957_AnUpgraderWaitingForWriteAlsoBlocksNewReaders) {
+    // .NET sets WAITING_UPGRADER for the upgrade-to-write case as well, and it too sits above
+    // MAX_READER -- so BOTH kinds of writer block new readers. Counting only plain writers would
+    // leave the upgrade path starvable, which is the easy half to miss.
+    System::Threading::ReaderWriterLockSlim lock;
+    std::atomic<bool> upgraderWaiting{false};
+    std::atomic<bool> upgraded{false};
+
+    lock.EnterReadLock();   // a reader the upgrader must wait to drain
+
+    std::thread upgrader([&] {
+        lock.EnterUpgradeableReadLock();
+        upgraderWaiting.store(true);
+        lock.EnterWriteLock();      // waits for readers_ == 0
+        upgraded.store(true);
+        lock.ExitWriteLock();
+        lock.ExitUpgradeableReadLock();
+    });
+
+    while (!upgraderWaiting.load()) std::this_thread::yield();
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    ASSERT_FALSE(upgraded.load()) << "the upgrader must still be waiting for the reader";
+
+    EXPECT_FALSE(ReaderOnItsOwnThreadCanEnter(lock, 200))
+        << "a new reader entered past an upgrader waiting for the write lock";
+
+    lock.ExitReadLock();
+    upgrader.join();
+    EXPECT_TRUE(upgraded.load());
+}

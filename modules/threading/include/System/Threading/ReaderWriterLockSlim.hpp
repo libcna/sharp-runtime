@@ -89,6 +89,23 @@ namespace System::Threading {
         mutable std::mutex stateMtx_;
         mutable std::condition_variable cv_;
         intcs readers_ = 0;
+        // Ticket #1957 / SR-AUD-204, cause T-E/2. Without this the read-admission predicate was
+        // `!writerActive_` alone, so a steady stream of new readers could enter past a writer
+        // already blocked in TryEnterWriteLock and starve it INDEFINITELY.
+        //
+        // .NET keeps the same signal, packed into its single `_owners` word: WaitOnEvent sets
+        // WAITING_WRITERS (and WAITING_UPGRADER) as soon as the first writer begins waiting,
+        // under the comment "Setting these bits will prevent new readers from getting in"
+        // (ReaderWriterLockSlim.cs:1005-1010). Both bits sit above MAX_READER, so .NET's single
+        // admission test `_owners < MAX_READER` refuses a new reader whenever a writer holds the
+        // lock OR is waiting for it. This counter is that bit, spelled separately because this
+        // port keeps its state in named fields rather than one packed word.
+        //
+        // BOTH kinds of writer count, exactly as both .NET bits do: a plain writer and an
+        // upgrade-to-write. .NET clears each in WaitOnEvent's `finally`
+        // (ReaderWriterLockSlim.cs:1039-1042), so a writer that TIMES OUT stops blocking readers;
+        // the RAII guard in TryEnterWriteLock does the same here.
+        intcs waitingWriters_ = 0;
         bool writerActive_ = false;
         bool upgradeableActive_ = false;
         // Ticket #1955 / cause T-A of docs/ThreadingNamespaceReviewPlan.md. This was an
@@ -215,7 +232,13 @@ namespace System::Threading {
             }
 
             std::unique_lock<std::mutex> lk(stateMtx_);
-            if (!waitFor(lk, millisecondsTimeout, [&] { return !writerActive_; })) return false;
+            // #1957/SR-AUD-204: `waitingWriters_ == 0` is the new term. A thread that already
+            // holds the read, write or upgrade lock never reaches here -- every one of those
+            // cases returned above -- so writer preference can only delay a genuinely NEW
+            // reader, which is precisely .NET's contract and cannot deadlock a recursive one.
+            if (!waitFor(lk, millisecondsTimeout,
+                         [&] { return !writerActive_ && waitingWriters_ == 0; }))
+                return false;
             ++readers_;
             counts.reader = 1;
             counts.readerCountsTowardGlobal = true;
@@ -271,6 +294,24 @@ namespace System::Threading {
                     "lock. If an upgrade is necessary, use an upgrade lock in place of the read lock.");
 
             std::unique_lock<std::mutex> lk(stateMtx_);
+
+            // Announce the wait BEFORE waiting, so readers arriving from now on are refused --
+            // .NET sets its bit at the same point, before the wait rather than after it. The
+            // guard decrements on every exit (acquired, timed out, or thrown) and wakes the
+            // readers it was holding back, which is what .NET's `finally` does via
+            // ClearWritersWaiting + ExitAndWakeUpAppropriateReadWaiters.
+            //
+            // Declared after `lk` so it is destroyed BEFORE the lock is released: the decrement
+            // and the notify both happen under the mutex.
+            ++waitingWriters_;
+            struct WaitingWriterGuard {
+                intcs&                   count;
+                std::condition_variable& cv;
+                ~WaitingWriterGuard() {
+                    if (--count == 0) cv.notify_all();
+                }
+            } waitingWriterGuard{waitingWriters_, cv_};
+
             bool acquired = upgradingToWrite
                 ? waitFor(lk, millisecondsTimeout, [&] { return readers_ == 0; })
                 : waitFor(lk, millisecondsTimeout, [&] { return !writerActive_ && readers_ == 0 && !upgradeableActive_; });
