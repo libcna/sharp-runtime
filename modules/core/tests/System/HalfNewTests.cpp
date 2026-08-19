@@ -138,7 +138,7 @@ TEST(HalfNewTests, Epsilon_ToSingle_HasCorrectMagnitude) {
 }
 TEST(HalfNewTests, MaxSubnormal_ToSingle_HasCorrectMagnitude) {
     // bits 0x03FF: largest subnormal, value = 1023 * 2^-24.
-    Half h(0x03FF);
+    Half h = Half::FromBits(0x03FF);
     EXPECT_NEAR(h.ToSingle(), 1023.0f * std::pow(2.0f, -24.0f), 1e-12f);
 }
 TEST(HalfNewTests, SubnormalRoundTrip_FromSingle) {

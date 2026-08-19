@@ -13,6 +13,7 @@
 #include <cstring>
 #include <bit>
 #include <gtest/gtest.h>
+#include "System/Decimal.hpp"
 #include "System/ArithmeticException.hpp"
 #include "System/Half.hpp"
 #include <array>
@@ -176,8 +177,8 @@ TEST(BFloat16RoundingTests, ArithmeticResultsRoundRatherThanTruncate) {
     // 0x3F81 (1.0078125) + 0x3F82 (1.015625) is 2.0234375, whose float bits are
     // 0x40018000: the exact midpoint above odd payload 0x4001, so the sum must
     // round to even 0x4002. Truncation returned 0x4001.
-    const BFloat16 a(std::uint16_t(0x3F81u));
-    const BFloat16 b(std::uint16_t(0x3F82u));
+    const BFloat16 a = BFloat16::FromBits(0x3F81u);
+    const BFloat16 b = BFloat16::FromBits(0x3F82u);
     EXPECT_EQ((a + b).getBitsProperty(), std::uint16_t(0x4002u));
 
     // The same sum reached the other way round must agree.
@@ -212,16 +213,16 @@ TEST(BFloat16RoundingTests, LayoutIsUnchanged) {
 // ===========================================================================
 
 TEST(BFloat16SurfaceTests, Fix2382_ClassificationCoversTheWholeDomain) {
-    const BFloat16 zero      = BFloat16(uint16_t(0x0000));
-    const BFloat16 negZero    = BFloat16(uint16_t(0x8000));
-    const BFloat16 subnormal  = BFloat16(uint16_t(0x0001));   // the largest-magnitude one is 0x007F
-    const BFloat16 maxSubnorm = BFloat16(uint16_t(0x007F));
-    const BFloat16 minNormal  = BFloat16(uint16_t(0x0080));
-    const BFloat16 one        = BFloat16(uint16_t(0x3F80));
-    const BFloat16 inf        = BFloat16(uint16_t(0x7F80));
-    const BFloat16 negInf     = BFloat16(uint16_t(0xFF80));
-    const BFloat16 nan        = BFloat16(uint16_t(0x7FC0));
-    const BFloat16 negNan     = BFloat16(uint16_t(0xFFC0));
+    const BFloat16 zero      = BFloat16::FromBits(uint16_t(0x0000));
+    const BFloat16 negZero    = BFloat16::FromBits(uint16_t(0x8000));
+    const BFloat16 subnormal  = BFloat16::FromBits(uint16_t(0x0001));   // the largest-magnitude one is 0x007F
+    const BFloat16 maxSubnorm = BFloat16::FromBits(uint16_t(0x007F));
+    const BFloat16 minNormal  = BFloat16::FromBits(uint16_t(0x0080));
+    const BFloat16 one        = BFloat16::FromBits(uint16_t(0x3F80));
+    const BFloat16 inf        = BFloat16::FromBits(uint16_t(0x7F80));
+    const BFloat16 negInf     = BFloat16::FromBits(uint16_t(0xFF80));
+    const BFloat16 nan        = BFloat16::FromBits(uint16_t(0x7FC0));
+    const BFloat16 negNan     = BFloat16::FromBits(uint16_t(0xFFC0));
 
     // IsFinite
     for (const BFloat16& v : {zero, negZero, subnormal, maxSubnorm, minNormal, one})
@@ -252,7 +253,7 @@ TEST(BFloat16SurfaceTests, Fix2382_ClassificationCoversTheWholeDomain) {
 
     // ...and every value is in exactly one of the four INumberBase classes.
     for (uint16_t raw = 0;; ++raw) {
-        const BFloat16 v = BFloat16(raw);
+        const BFloat16 v = BFloat16::FromBits(raw);
         const int classes = int(BFloat16::IsZero(v)) + int(BFloat16::IsSubnormal(v))
                           + int(BFloat16::IsNormal(v)) + int(!BFloat16::IsFinite(v));
         ASSERT_EQ(classes, 1) << "bit pattern 0x" << std::hex << raw << " is in " << classes;
@@ -263,20 +264,20 @@ TEST(BFloat16SurfaceTests, Fix2382_ClassificationCoversTheWholeDomain) {
 TEST(BFloat16SurfaceTests, Fix2382_IsNegativeIsASignBitTestNotAComparison) {
     // BFloat16.cs:181-185 is `(short)(value._value) < 0`. So negative zero and a negative
     // NaN are both negative, which `v < BFloat16()` would report as false for both.
-    EXPECT_TRUE(BFloat16::IsNegative(BFloat16(uint16_t(0x8000))));   // -0
-    EXPECT_FALSE(BFloat16::IsNegative(BFloat16(uint16_t(0x0000))));  // +0
-    EXPECT_TRUE(BFloat16::IsNegative(BFloat16(uint16_t(0xFFC0))));   // -NaN
-    EXPECT_FALSE(BFloat16::IsNegative(BFloat16(uint16_t(0x7FC0))));  // +NaN
-    EXPECT_TRUE(BFloat16::IsNegative(BFloat16(uint16_t(0xFF80))));   // -Infinity
+    EXPECT_TRUE(BFloat16::IsNegative(BFloat16::FromBits(uint16_t(0x8000))));   // -0
+    EXPECT_FALSE(BFloat16::IsNegative(BFloat16::FromBits(uint16_t(0x0000))));  // +0
+    EXPECT_TRUE(BFloat16::IsNegative(BFloat16::FromBits(uint16_t(0xFFC0))));   // -NaN
+    EXPECT_FALSE(BFloat16::IsNegative(BFloat16::FromBits(uint16_t(0x7FC0))));  // +NaN
+    EXPECT_TRUE(BFloat16::IsNegative(BFloat16::FromBits(uint16_t(0xFF80))));   // -Infinity
     EXPECT_TRUE(BFloat16::IsNegative(BFloat16(-1.0f)));
     EXPECT_FALSE(BFloat16::IsNegative(BFloat16(1.0f)));
 }
 
 TEST(BFloat16SurfaceTests, Fix2382_TheIdentityTrioIsFloatsNotHalfs) {
-    const BFloat16 nan  = BFloat16(uint16_t(0x7FC0));
-    const BFloat16 nan2 = BFloat16(uint16_t(0xFFC0));
-    const BFloat16 zero = BFloat16(uint16_t(0x0000));
-    const BFloat16 negZero = BFloat16(uint16_t(0x8000));
+    const BFloat16 nan  = BFloat16::FromBits(uint16_t(0x7FC0));
+    const BFloat16 nan2 = BFloat16::FromBits(uint16_t(0xFFC0));
+    const BFloat16 zero = BFloat16::FromBits(uint16_t(0x0000));
+    const BFloat16 negZero = BFloat16::FromBits(uint16_t(0x8000));
 
     // Equals is NOT operator== : NaN equals NaN, and the two zeros are equal.
     EXPECT_TRUE(nan.Equals(nan));
@@ -346,18 +347,18 @@ TEST(BFloat16SurfaceTests, Fix2382_FormattingAndTryFormat) {
     // the one that would have failed.
     for (const char* fmt : {"F2", "E3", "G", "R", ""}) {
         SCOPED_TRACE(fmt);
-        EXPECT_EQ(BFloat16(uint16_t(0x7FC0)).ToString(fmt), "NaN");
-        EXPECT_EQ(BFloat16(uint16_t(0x7F80)).ToString(fmt), "Infinity");
-        EXPECT_EQ(BFloat16(uint16_t(0xFF80)).ToString(fmt), "-Infinity");
+        EXPECT_EQ(BFloat16::FromBits(uint16_t(0x7FC0)).ToString(fmt), "NaN");
+        EXPECT_EQ(BFloat16::FromBits(uint16_t(0x7F80)).ToString(fmt), "Infinity");
+        EXPECT_EQ(BFloat16::FromBits(uint16_t(0xFF80)).ToString(fmt), "-Infinity");
     }
-    EXPECT_EQ(BFloat16(uint16_t(0x7FC0)).ToString(), "NaN");
-    EXPECT_EQ(BFloat16(uint16_t(0x7F80)).ToString(), "Infinity");
-    EXPECT_EQ(BFloat16(uint16_t(0xFF80)).ToString(), "-Infinity");
+    EXPECT_EQ(BFloat16::FromBits(uint16_t(0x7FC0)).ToString(), "NaN");
+    EXPECT_EQ(BFloat16::FromBits(uint16_t(0x7F80)).ToString(), "Infinity");
+    EXPECT_EQ(BFloat16::FromBits(uint16_t(0xFF80)).ToString(), "-Infinity");
 
     // ...and there is now ONE formatter, which is what stops the two drifting apart again:
     // every bit pattern formats identically through the default and the empty format.
     for (uint32_t r = 0;; ++r) {
-        const BFloat16 v = BFloat16(static_cast<uint16_t>(r));
+        const BFloat16 v = BFloat16::FromBits(static_cast<uint16_t>(r));
         ASSERT_EQ(v.ToString(), v.ToString("")) << "bit pattern 0x" << std::hex << r;
         if (r == 0xFFFF) break;
     }
@@ -447,26 +448,26 @@ TEST(Fix2384Unit1, AbsAndCopySignAreBitOperationsNotFloatRoundTrips) {
     using System::Numerics::BFloat16;
 
     // A NaN with a payload bit that a float round-trip in this port would canonicalise.
-    const Half halfNaN(static_cast<uint16_t>(0x7E01u));
+    const Half halfNaN = Half::FromBits(static_cast<uint16_t>(0x7E01u));
     // A SIGNALLING NaN, deliberately. The first cut used 0x7FC1, which is already QUIET, so a
     // float round-trip returned it unchanged and the mutation that replaces masking with
     // std::fabs went UNCAUGHT. Measured over all 65,536 patterns, the two forms differ on
     // exactly 126 -- every one a signalling NaN, which fromFloat quiets by OR-ing in 0x0040.
-    const BFloat16 bfNaN(static_cast<uint16_t>(0x7F81u));
+    const BFloat16 bfNaN = BFloat16::FromBits(static_cast<uint16_t>(0x7F81u));
     ASSERT_TRUE(Half::IsNaN(halfNaN));
     ASSERT_TRUE(BFloat16::IsNaN(bfNaN));
 
     EXPECT_EQ(Half::Abs(halfNaN).bits, 0x7E01u) << "#2384: Abs masks, it does not round-trip";
-    EXPECT_EQ(Half::Abs(Half(static_cast<uint16_t>(0xFE01u))).bits, 0x7E01u);
+    EXPECT_EQ(Half::Abs(Half::FromBits(static_cast<uint16_t>(0xFE01u))).bits, 0x7E01u);
     EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::Abs(bfNaN)), 0x7F81u)
         << "#2384: Abs MASKS, so a signalling NaN stays signalling; a float round-trip would "
            "quiet it to 0x7FC1";
-    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::Abs(BFloat16(static_cast<uint16_t>(0xFF81u)))),
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::Abs(BFloat16::FromBits(static_cast<uint16_t>(0xFF81u)))),
               0x7F81u) << "and the sign is cleared without disturbing the payload";
 
     // Ordinary magnitudes, both signs, and the signed zeros -- Abs(-0.0) is +0.0 by masking.
     EXPECT_EQ(Half::Abs(Half::FromSingle(-2.5f)).bits, Half::FromSingle(2.5f).bits);
-    EXPECT_EQ(Half::Abs(Half(static_cast<uint16_t>(0x8000u))).bits, 0x0000u);
+    EXPECT_EQ(Half::Abs(Half::FromBits(static_cast<uint16_t>(0x8000u))).bits, 0x0000u);
     EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::Abs(BFloat16(-2.5f))),
               std::bit_cast<uint16_t>(BFloat16(2.5f)));
 
@@ -480,9 +481,9 @@ TEST(Fix2384Unit1, AbsAndCopySignAreBitOperationsNotFloatRoundTrips) {
     EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::CopySign(BFloat16(2.5f), BFloat16(-1.0f))), std::bit_cast<uint16_t>(BFloat16(-2.5f)));
 
     // Signed zero: CopySign(+0, -x) is -0, which no comparison can see -- so the BITS are asserted.
-    EXPECT_EQ(Half::CopySign(Half(static_cast<uint16_t>(0x0000u)),
+    EXPECT_EQ(Half::CopySign(Half::FromBits(static_cast<uint16_t>(0x0000u)),
                              Half::FromSingle(-1.0f)).bits, 0x8000u);
-    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::CopySign(BFloat16(uint16_t(0x0000u)), BFloat16(-1.0f))), 0x8000u);
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::CopySign(BFloat16::FromBits(uint16_t(0x0000u)), BFloat16(-1.0f))), 0x8000u);
 }
 
 TEST(Fix2384Unit1, BitIncrementAndBitDecrementTranscribeTheirEdges) {
@@ -493,13 +494,13 @@ TEST(Fix2384Unit1, BitIncrementAndBitDecrementTranscribeTheirEdges) {
     using System::Numerics::BFloat16;
 
     // -0.0 -> Epsilon, NOT +0.0.
-    EXPECT_EQ(Half::BitIncrement(Half(static_cast<uint16_t>(0x8000u))).bits, Half::Epsilon.bits);
-    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::BitIncrement(BFloat16(uint16_t(0x8000u)))), std::bit_cast<uint16_t>(BFloat16::Epsilon()));
+    EXPECT_EQ(Half::BitIncrement(Half::FromBits(static_cast<uint16_t>(0x8000u))).bits, Half::Epsilon.bits);
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::BitIncrement(BFloat16::FromBits(uint16_t(0x8000u)))), std::bit_cast<uint16_t>(BFloat16::Epsilon()));
 
     // +0.0 -> -Epsilon.
-    EXPECT_EQ(Half::BitDecrement(Half(static_cast<uint16_t>(0x0000u))).bits,
+    EXPECT_EQ(Half::BitDecrement(Half::FromBits(static_cast<uint16_t>(0x0000u))).bits,
               static_cast<uint16_t>(Half::Epsilon.bits | 0x8000u));
-    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::BitDecrement(BFloat16(uint16_t(0x0000u)))),
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::BitDecrement(BFloat16::FromBits(uint16_t(0x0000u)))),
               static_cast<uint16_t>(std::bit_cast<uint16_t>(BFloat16::Epsilon()) | 0x8000u));
 
     // -Infinity increments to MinValue; +Infinity decrements to MaxValue.
@@ -598,8 +599,8 @@ TEST(Fix2384Unit2a, TheNumberFamilyTreatsPositiveZeroAsLargerThanNegativeZero) {
     // else in this file.
     using System::Half;
     using System::Numerics::BFloat16;
-    const Half posZero(static_cast<uint16_t>(0x0000u));
-    const Half negZero(static_cast<uint16_t>(0x8000u));
+    const Half posZero = Half::FromBits(static_cast<uint16_t>(0x0000u));
+    const Half negZero = Half::FromBits(static_cast<uint16_t>(0x8000u));
     ASSERT_EQ(posZero.ToSingle(), negZero.ToSingle()) << "they compare equal, which is the point";
 
     EXPECT_EQ(Half::MaxNumber(posZero, negZero).bits, 0x0000u);
@@ -607,8 +608,8 @@ TEST(Fix2384Unit2a, TheNumberFamilyTreatsPositiveZeroAsLargerThanNegativeZero) {
     EXPECT_EQ(Half::MinNumber(posZero, negZero).bits, 0x8000u);
     EXPECT_EQ(Half::MinNumber(negZero, posZero).bits, 0x8000u);
 
-    const BFloat16 bPos(static_cast<uint16_t>(0x0000u));
-    const BFloat16 bNeg(static_cast<uint16_t>(0x8000u));
+    const BFloat16 bPos = BFloat16::FromBits(static_cast<uint16_t>(0x0000u));
+    const BFloat16 bNeg = BFloat16::FromBits(static_cast<uint16_t>(0x8000u));
     EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::MaxNumber(bPos, bNeg)), 0x0000u);
     EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::MinNumber(bNeg, bPos)), 0x8000u);
 
@@ -633,9 +634,9 @@ TEST(Fix2384Unit2a, SignThrowsOnNaNAndReturnsZeroForBothSignedZeros) {
     EXPECT_THROW((void)Half::Sign(Half::NaN), System::ArithmeticException);
     EXPECT_THROW((void)BFloat16::Sign(BFloat16::NaN()), System::ArithmeticException);
 
-    EXPECT_EQ(Half::Sign(Half(static_cast<uint16_t>(0x0000u))), 0);
-    EXPECT_EQ(Half::Sign(Half(static_cast<uint16_t>(0x8000u))), 0) << "-0.0 is ZERO, not negative";
-    EXPECT_EQ(BFloat16::Sign(BFloat16(static_cast<uint16_t>(0x8000u))), 0);
+    EXPECT_EQ(Half::Sign(Half::FromBits(static_cast<uint16_t>(0x0000u))), 0);
+    EXPECT_EQ(Half::Sign(Half::FromBits(static_cast<uint16_t>(0x8000u))), 0) << "-0.0 is ZERO, not negative";
+    EXPECT_EQ(BFloat16::Sign(BFloat16::FromBits(static_cast<uint16_t>(0x8000u))), 0);
 
     EXPECT_EQ(Half::Sign(Half::FromSingle(2.5f)), 1);
     EXPECT_EQ(Half::Sign(Half::FromSingle(-2.5f)), -1);
@@ -907,44 +908,152 @@ TEST(Fix2384Unit3, EveryFromConversionIsExplicit) {
     SUCCEED();
 }
 
-TEST(Fix2384Unit3, Decl2395_TheToDirectionWouldHijackEveryIntegerLiteral) {
-    // THE MEASUREMENT THAT BLOCKED THE OTHER HALF OF THIS UNIT, pinned as a live demonstration
-    // rather than as prose -- it reads as theoretical until it is shown.
+TEST(Fix2395, ABitPatternAndANumberNowHaveDifferentSpellings) {
+    // INVERTED BY #2395 (2026-08-19). Its predecessor,
+    // Decl2384Unit3/Decl2395_TheToDirectionWouldHijackEveryIntegerLiteral, pinned the collision
+    // as a live demonstration: `Half(uint16_t)` was the RAW BIT PATTERN, and .NET spends that
+    // signature on `explicit operator Half(ushort)`, which is `(Half)(float)value` -- a NUMBER.
     //
-    // `Half(uint16_t)` is the RAW BIT PATTERN. Adding .NET's `explicit operator Half(int)` as a
-    // constructor makes C++ prefer it for an INT LITERAL, because an exact match beats an
-    // int -> uint16_t conversion. So `Half(0x7BFF)` would silently stop meaning "these bits" and
-    // start meaning "the number 31743". This type's OWN constants are written that way, and
-    // landing the constructors turned 44 shipped tests red -- Half::MaxValue and
-    // Half::NegativeInfinity among them.
+    // THE DANGEROUS PART OF THIS MIGRATION IS THAT IT COMPILES EITHER WAY. `Half(0x3C00)` is
+    // valid under both readings and means 1.0 under one and 15360.0 under the other, so an
+    // unmigrated site changes meaning SILENTLY. That is why the rename landed FIRST, with no
+    // value-taking constructor present, so the compiler had to name every site; and why this
+    // case asserts MEANING rather than constructibility.
     using System::Half;
     using System::Numerics::BFloat16;
 
-    // What the raw-bits constructor means TODAY, from an int literal. THIS is the pin: if a
-    // value-taking constructor is ever added, these two assertions flip, and #2395's decision
-    // must have been taken first.
-    EXPECT_EQ(Half(0x3C00).bits, 0x3C00u) << "an int literal reaches the RAW-BITS constructor";
-    EXPECT_FLOAT_EQ(Half(0x3C00).ToSingle(), 1.0f) << "...so 0x3C00 is the number 1.0, not 15360";
+    // The bit pattern.
+    EXPECT_EQ(Half::FromBits(0x3C00).bits, 0x3C00u);
+    EXPECT_FLOAT_EQ(Half::FromBits(0x3C00).ToSingle(), 1.0f);
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::FromBits(0x3F80)), 0x3F80u);
+    EXPECT_FLOAT_EQ(static_cast<float>(BFloat16::FromBits(0x3F80)), 1.0f);
+
+    // The number, through the signature the rename freed.
+    EXPECT_FLOAT_EQ(Half(static_cast<SharpRuntime::ushortcs>(0x3C00)).ToSingle(), 15360.0f);
+    EXPECT_FLOAT_EQ(static_cast<float>(BFloat16(static_cast<SharpRuntime::ushortcs>(0x3F80))),
+                    16256.0f);
+
+    // The port's OWN constants are the sites that would have broken silently, so they are
+    // asserted here and not only in their own file.
     EXPECT_EQ(Half::One.bits, 0x3C00u);
     EXPECT_EQ(Half::MaxValue.bits, 0x7BFFu);
     EXPECT_EQ(Half::NegativeInfinity.bits, 0xFC00u);
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::One()), 0x3F80u);
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::NegativeInfinity()), 0xFF80u);
+}
 
-    // A SECOND MEASURED DIFFERENCE, found by writing this case rather than by reading the types:
-    // the raw-bits constructor already accepts ANY integer that converts to uint16_t, so
-    // `Half(someSByte)` compiles TODAY and means raw bits. So "is it constructible" cannot be the
-    // pin -- only the MEANING can be, which is what the assertions above check.
-    static_assert(std::is_constructible_v<Half, SharpRuntime::sbytecs>,
-                  "the raw-bits constructor already accepts a narrower integer");
-    EXPECT_EQ(Half(static_cast<SharpRuntime::sbytecs>(3)).bits, 3u)
-        << "and it means BITS -- .NET's value conversion would give 0x4200 (3.0)";
+TEST(Fix2395, ByteAndSByteAreExplicitHereWhereDotNetMakesThemImplicit) {
+    using System::Half;
+    using System::Numerics::BFloat16;
+    // .NET writes `public static implicit operator Half(byte)` (Half.cs:980) and the same for
+    // sbyte (:986). This port cannot: C++ permits a standard conversion BEFORE a user-defined
+    // one where C# does not, so an implicit converting constructor from bytecs makes EVERY
+    // integer argument ambiguous -- measured while landing this. What is lost is the
+    // IMPLICITNESS, never the conversion.
+    static_assert(!std::is_convertible_v<SharpRuntime::bytecs, Half>);
+    static_assert(!std::is_convertible_v<SharpRuntime::sbytecs, Half>);
+    static_assert(std::is_constructible_v<Half, SharpRuntime::bytecs>);
+    static_assert(std::is_constructible_v<Half, SharpRuntime::sbytecs>);
+    static_assert(!std::is_convertible_v<SharpRuntime::bytecs, BFloat16>);
+    static_assert(!std::is_convertible_v<SharpRuntime::sbytecs, BFloat16>);
+    static_assert(std::is_constructible_v<BFloat16, SharpRuntime::bytecs>);
+    static_assert(std::is_constructible_v<BFloat16, SharpRuntime::sbytecs>);
 
-    // AND A THIRD, which is a real difference between the port's two 16-bit floats: BFloat16 has
-    // BOTH a uint16_t and a float constructor, so an int literal is AMBIGUOUS there and does not
-    // compile at all -- while on Half it silently picks raw bits. The hazard therefore has
-    // different shapes on the two types, and #2395 must decide for both.
-    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16(static_cast<uint16_t>(0x3F80))), 0x3F80u);
-    EXPECT_FLOAT_EQ(static_cast<float>(BFloat16(static_cast<uint16_t>(0x3F80))), 1.0f);
-    static_assert(!std::is_constructible_v<BFloat16, int>,
-                  "#2395: an int literal is AMBIGUOUS on BFloat16 (uint16_t vs float ctor), where "
-                  "on Half it silently picks raw bits -- the same decision, two different shapes");
+    // And they convert the VALUE, which is the half that must survive being explicit.
+    EXPECT_FLOAT_EQ(Half(static_cast<SharpRuntime::sbytecs>(3)).ToSingle(), 3.0f)
+        << "before #2395 this compiled and meant the BITS 0x0003";
+    EXPECT_FLOAT_EQ(static_cast<float>(BFloat16(static_cast<SharpRuntime::bytecs>(3))), 3.0f);
+}
+
+TEST(Fix2395, EveryToConversionIsExplicitAndBothTypesMoveInStep) {
+    using System::Half;
+    using System::Numerics::BFloat16;
+    // #2340: the two 16-bit floats move in step in SURFACE. Each type gets what .NET gives it,
+    // which is why this asserts the SAME scalar list on both rather than identical bodies.
+    static_assert(std::is_constructible_v<Half, SharpRuntime::charcs>);
+    static_assert(std::is_constructible_v<Half, SharpRuntime::shortcs>);
+    static_assert(std::is_constructible_v<Half, SharpRuntime::intcs>);
+    static_assert(std::is_constructible_v<Half, SharpRuntime::uintcs>);
+    static_assert(std::is_constructible_v<Half, SharpRuntime::longcs>);
+    static_assert(std::is_constructible_v<Half, SharpRuntime::ulongcs>);
+    static_assert(std::is_constructible_v<Half, float>);
+    static_assert(std::is_constructible_v<Half, double>);
+    static_assert(!std::is_convertible_v<SharpRuntime::intcs, Half>);
+    static_assert(!std::is_convertible_v<float, Half>);
+    static_assert(!std::is_convertible_v<double, Half>);
+
+    static_assert(std::is_constructible_v<BFloat16, SharpRuntime::charcs>);
+    static_assert(std::is_constructible_v<BFloat16, SharpRuntime::shortcs>);
+    static_assert(std::is_constructible_v<BFloat16, SharpRuntime::intcs>);
+    static_assert(std::is_constructible_v<BFloat16, SharpRuntime::uintcs>);
+    static_assert(std::is_constructible_v<BFloat16, SharpRuntime::longcs>);
+    static_assert(std::is_constructible_v<BFloat16, SharpRuntime::ulongcs>);
+    static_assert(std::is_constructible_v<BFloat16, float>);
+    static_assert(std::is_constructible_v<BFloat16, double>);
+    static_assert(!std::is_convertible_v<SharpRuntime::intcs, BFloat16>);
+    static_assert(!std::is_convertible_v<double, BFloat16>);
+
+    // Neither type declares Decimal, Int128, nint or nuint IN EITHER DIRECTION. Pinned so that a
+    // later unit "completing" one direction has to justify the asymmetry.
+    static_assert(!std::is_constructible_v<Half, System::Decimal>);
+    static_assert(!std::is_constructible_v<BFloat16, System::Decimal>);
+
+    EXPECT_FLOAT_EQ(Half(static_cast<SharpRuntime::intcs>(-3)).ToSingle(), -3.0f);
+    EXPECT_FLOAT_EQ(static_cast<float>(BFloat16(static_cast<SharpRuntime::longcs>(-3))), -3.0f);
+}
+
+TEST(Fix2395, BFloat16RoundsIntegersDirectlyWhereHalfGoesThroughFloat) {
+    using System::Half;
+    using System::Numerics::BFloat16;
+    // .NET writes `(BFloat16)(float)value` for short/ushort but RoundFromSigned/RoundFromUnsigned
+    // for int/long/uint/ulong (BFloat16.cs:560-646), and Half gets `(Half)(float)value` for ALL
+    // of them. The reason is arithmetic, not style: BFloat16 keeps only 8 significand bits, so a
+    // 32- or 64-bit integer routed through a 24-bit float ROUNDS TWICE.
+    //
+    // This is the input that proves the port took .NET's path and not the easy one. Checked by
+    // hand: 1119879149 = 1.0429... x 2^30, so the significand field is 5 and the biased exponent
+    // 157, giving 0x4E85. The float round-trip gives 0x4E86 -- one ulp out.
+    const SharpRuntime::intcs doubleRounded = 1119879149;
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16(doubleRounded)), 0x4E85u)
+        << "#2395: BFloat16's integer conversions must round ONCE";
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16(static_cast<float>(doubleRounded))), 0x4E86u)
+        << "...and this is what routing through float would have produced";
+
+    // THE 64-BIT PATH IS A SEPARATE TEMPLATE INSTANTIATION and needs its own witness -- a
+    // mutation routing only `long` through float went uncaught until this row existed.
+    const SharpRuntime::longcs doubleRounded64 = 3485786034122340516LL;
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16(doubleRounded64)), 0x5E41u);
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16(static_cast<float>(doubleRounded64))), 0x5E42u)
+        << "...and this is the float route, again one ulp out";
+
+    // ROUND-HALF-TO-EVEN, NOT ROUND-HALF-AWAY. 65792 is 1.0000000_1 x 2^16: the discarded part is
+    // EXACTLY half and the kept significand is EVEN, so the tie must round DOWN. Every ordinary
+    // value agrees under both rules, so without this row a mutation deleting .NET's
+    // "when upper is even, the midpoint ties to no increment" adjustment passes everything.
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16(static_cast<SharpRuntime::intcs>(65792))), 0x4780u)
+        << "#2395: an exact tie above an even significand rounds DOWN; away-from-zero gives 0x4781";
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16(static_cast<SharpRuntime::intcs>(65536))), 0x4780u)
+        << "...the value it ties down TO";
+    // ...and a tie above an ODD significand rounds UP, so the rule is not simply "always down".
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16(static_cast<SharpRuntime::intcs>(66816))), 0x4782u);
+
+    // Probed over 400,000 random values of each width: 4 int32 and 2 int64 inputs differ. Rare,
+    // but every one of them is a wrong answer, and the ordinary values must be untouched.
+    for (SharpRuntime::intcs v : {0, 1, -1, 2, 3, 256, -256, 1000000}) {
+        EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16(v)),
+                  std::bit_cast<uint16_t>(BFloat16(static_cast<float>(v))))
+            << "an ordinary value must agree with the float route, v=" << v;
+    }
+    // Zero is answered directly. .NET relies on C#'s shift-count MASKING to let the zero case
+    // fall out of the FPU path; C++ leaves `x << 32` UNDEFINED. No value assertion can catch a
+    // mutation removing this guard, because x86 masks the shift count in hardware and the answer
+    // still comes out 0x0000 -- it is undefined behaviour that happens to work. Verified under
+    // UBSan instead (build-probe/2395_probe3_ubsan.cpp): with the guard removed, the mutated
+    // build reports "shift exponent 32 is too large for 32-bit type" at the shift, and the
+    // unmutated build is silent.
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16(static_cast<SharpRuntime::intcs>(0))), 0x0000u);
+
+    // Half is deliberately NOT given the same treatment, because .NET does not give it one.
+    EXPECT_FLOAT_EQ(Half(static_cast<SharpRuntime::intcs>(1119879149)).ToSingle(),
+                    Half::FromSingle(static_cast<float>(1119879149)).ToSingle());
 }

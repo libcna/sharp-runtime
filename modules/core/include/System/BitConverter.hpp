@@ -145,7 +145,7 @@ namespace System {
         /** @brief Returns a half-precision floating-point number converted from two bytes at a specified position. */
         [[nodiscard]] static Half     ToHalf   (const bytecs* v, intcs i) { Half     r; std::memcpy(&r, v+i, 2); return r; }
         /** @brief Returns a BFloat16 value converted from two bytes at a specified position. */
-        [[nodiscard]] static BFloat16 ToBFloat16(const bytecs* v, intcs i) { uint16_t raw; std::memcpy(&raw, v+i, 2); return BFloat16(raw); }
+        [[nodiscard]] static BFloat16 ToBFloat16(const bytecs* v, intcs i) { uint16_t raw; std::memcpy(&raw, v+i, 2); return BFloat16::FromBits(raw); }
 #if SHARP_RUNTIME_HAS_NATIVE_INT128
         /** @brief Returns a 128-bit signed integer converted from sixteen bytes at a specified position. */
         [[nodiscard]] static Int128   ToInt128  (const bytecs* v, intcs i) { Int128   r; std::memcpy(&r, v+i, 16); return r; }
@@ -221,19 +221,19 @@ namespace System {
         /** @brief Returns the specified half-precision float value as a 16-bit signed integer bit pattern. */
         [[nodiscard]] static shortcs HalfToInt16Bits  (Half value)   { return static_cast<shortcs>(value.bits); }
         /** @brief Returns a half-precision float converted from the specified 16-bit signed integer bit pattern. */
-        [[nodiscard]] static Half    Int16BitsToHalf  (shortcs value) { return Half{static_cast<uint16_t>(value)}; }
+        [[nodiscard]] static Half    Int16BitsToHalf  (shortcs value) { return Half::FromBits(static_cast<uint16_t>(value)); }
         /** @brief Returns the specified half-precision float value as a 16-bit unsigned integer bit pattern. */
         [[nodiscard]] static ushortcs HalfToUInt16Bits(Half value)   { return value.bits; }
         /** @brief Returns a half-precision float converted from the specified 16-bit unsigned integer bit pattern. */
-        [[nodiscard]] static Half    UInt16BitsToHalf (ushortcs value){ return Half{value}; }
+        [[nodiscard]] static Half    UInt16BitsToHalf (ushortcs value){ return Half::FromBits(value); }
         /** @brief Returns the specified BFloat16 value as a 16-bit signed integer bit pattern. */
         [[nodiscard]] static shortcs  BFloat16ToInt16Bits (BFloat16 value) { return static_cast<shortcs>(value.getBitsProperty()); }
         /** @brief Returns a BFloat16 value converted from the specified 16-bit signed integer bit pattern. */
-        [[nodiscard]] static BFloat16 Int16BitsToBFloat16 (shortcs value)  { return BFloat16(static_cast<uint16_t>(value)); }
+        [[nodiscard]] static BFloat16 Int16BitsToBFloat16 (shortcs value)  { return BFloat16::FromBits(static_cast<uint16_t>(value)); }
         /** @brief Returns the specified BFloat16 value as a 16-bit unsigned integer bit pattern. */
         [[nodiscard]] static ushortcs BFloat16ToUInt16Bits(BFloat16 value) { return value.getBitsProperty(); }
         /** @brief Returns a BFloat16 value converted from the specified 16-bit unsigned integer bit pattern. */
-        [[nodiscard]] static BFloat16 UInt16BitsToBFloat16(ushortcs value) { return BFloat16(value); }
+        [[nodiscard]] static BFloat16 UInt16BitsToBFloat16(ushortcs value) { return BFloat16::FromBits(value); }
 
         // -----------------------------------------------------------------------
         // ToString — bytes → hex string

@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+
+#include <bit>
 #include <algorithm>
 #include "System/ArithmeticException.hpp"
 #include "System/MathF.hpp"
@@ -70,6 +72,64 @@ class BFloat16 {
      * rounding bias to a NaN can carry into the exponent and produce that same
      * silent infinity, so a NaN keeps its sign and is made quiet directly.
      */
+    /**
+     * .NET's `RoundMidpointToEven<TInteger>` (BFloat16.cs:518-533), done in the unsigned type so
+     * that C#'s `>>>` is C++'s `>>`.
+     */
+    template <class TUnsigned>
+    static constexpr TUnsigned roundMidpointToEven(TUnsigned value, int trailingLength) {
+        TUnsigned lower = value & ((TUnsigned(1) << trailingLength) - TUnsigned(1));
+        TUnsigned upper = value >> trailingLength;
+        // When upper is even the midpoint ties to no increment, which is a decrement of lower.
+        const TUnsigned lowerShift =
+            static_cast<TUnsigned>(~upper) & (lower >> (trailingLength - 1)) & TUnsigned(1);
+        lower -= lowerShift;
+        upper += lower >> (trailingLength - 1);
+        return upper;
+    }
+
+    /** The shared tail of .NET's RoundFromSigned/RoundFromUnsigned (:541-554, :602-615). */
+    template <class TUnsigned>
+    static uint16_t roundFromMagnitude(TUnsigned abs, bool sign) {
+        // .NET relies on C#'s shift-count masking to make the zero case fall out of the FPU
+        // path; in C++ `abs << (width)` is undefined, so zero is answered directly.
+        if (abs == 0) return static_cast<uint16_t>(sign ? 0x8000u : 0x0000u);
+
+        constexpr int width = static_cast<int>(sizeof(TUnsigned)) * 8;
+        constexpr int significandLength = 8;   // TrailingSignificandLength 7 + 1
+        const int scale = std::countl_zero(abs);
+        const TUnsigned aligned = static_cast<TUnsigned>(abs << scale);
+        const TUnsigned significandBits =
+            roundMidpointToEven<TUnsigned>(aligned, width - significandLength);
+
+        // "Leverage FPU to calculate significandBits * 2^(width-SignificandLength-scale), for
+        // proper handling of 0 and carrying" -- .NET's own comment.
+        const float significand = static_cast<float>(static_cast<int32_t>(significandBits));
+        const uint32_t scaleBits =
+            (sign ? 0x80000000u : 0u)
+            | (static_cast<uint32_t>(width - significandLength - scale + 127) << 23);
+        const float scaleFactor = std::bit_cast<float>(scaleBits);
+        const uint32_t roundedBits = std::bit_cast<uint32_t>(significand * scaleFactor);
+        return static_cast<uint16_t>(roundedBits >> 16);
+    }
+
+    /** .NET's `RoundFromSigned<TInteger>` (BFloat16.cs:535-555). */
+    template <class TUnsigned, class TSigned>
+    static uint16_t roundFromSigned(TSigned value) {
+        const bool sign = value < 0;
+        // The magnitude is taken in the UNSIGNED type, so the most negative value -- whose
+        // negation overflows -- is handled rather than being undefined.
+        const TUnsigned abs = sign ? static_cast<TUnsigned>(~static_cast<TUnsigned>(value) + 1u)
+                                   : static_cast<TUnsigned>(value);
+        return roundFromMagnitude<TUnsigned>(abs, sign);
+    }
+
+    /** .NET's `RoundFromUnsigned<TInteger>` (BFloat16.cs:599-616). */
+    template <class TUnsigned, class TValue>
+    static uint16_t roundFromUnsigned(TValue value, bool) {
+        return roundFromMagnitude<TUnsigned>(static_cast<TUnsigned>(value), false);
+    }
+
     static uint16_t fromFloat(float f) {
         uint32_t u;
         std::memcpy(&u, &f, 4);
@@ -96,28 +156,42 @@ public:
     /** Constructs BFloat16 with value 0. */
     constexpr BFloat16() : bits_(0) {}
     /** Constructs BFloat16 from raw 16-bit pattern (no conversion). */
-    constexpr explicit BFloat16(uint16_t rawBits) : bits_(rawBits) {}
+    /**
+     * @brief Constructs a BFloat16 from its raw bit pattern.
+     *
+     * @note **Named since ticket #2395 (2026-08-19)**, in step with `System::Half` (#2340). This
+     * was `explicit BFloat16(uint16_t)`, which is the signature .NET spends on
+     * `explicit operator BFloat16(ushort)` -- a NUMERIC conversion. The hazard had a DIFFERENT
+     * SHAPE here than on Half and both had to be handled: this type also has a `float`
+     * constructor, so an int literal was AMBIGUOUS and did not compile at all, where on Half it
+     * silently picked raw bits.
+     */
+    [[nodiscard]] static constexpr BFloat16 FromBits(uint16_t rawBits) noexcept {
+        BFloat16 b;
+        b.bits_ = rawBits;
+        return b;
+    }
     /** Converts a float to BFloat16, rounding to nearest with ties to even. */
     explicit BFloat16(float v) : bits_(fromFloat(v)) {}
 
     /** @return BFloat16 representation of 0. */
-    static BFloat16 Zero()             { return BFloat16(uint16_t(0)); }
+    static BFloat16 Zero()             { return BFloat16::FromBits(uint16_t(0)); }
     /** @return BFloat16 representation of 1. */
-    static BFloat16 One()              { return BFloat16(uint16_t(0x3F80u)); }
+    static BFloat16 One()              { return BFloat16::FromBits(uint16_t(0x3F80u)); }
     /** @return BFloat16 representation of -1. */
-    static BFloat16 NegativeOne()      { return BFloat16(uint16_t(0xBF80u)); }
+    static BFloat16 NegativeOne()      { return BFloat16::FromBits(uint16_t(0xBF80u)); }
     /** @return The largest finite BFloat16 value (~3.39×10³⁸). */
-    static BFloat16 MaxValue()         { return BFloat16(uint16_t(0x7F7Fu)); }
+    static BFloat16 MaxValue()         { return BFloat16::FromBits(uint16_t(0x7F7Fu)); }
     /** @return The most negative finite BFloat16 value (~−3.39×10³⁸). */
-    static BFloat16 MinValue()         { return BFloat16(uint16_t(0xFF7Fu)); }
+    static BFloat16 MinValue()         { return BFloat16::FromBits(uint16_t(0xFF7Fu)); }
     /** @return The smallest positive BFloat16 value greater than zero (~9.18×10⁻⁴¹). */
-    static BFloat16 Epsilon()          { return BFloat16(uint16_t(0x0001u)); }
+    static BFloat16 Epsilon()          { return BFloat16::FromBits(uint16_t(0x0001u)); }
     /** @return A BFloat16 Not-a-Number (NaN) value. */
-    static BFloat16 NaN()              { return BFloat16(uint16_t(0xFFC0u)); }
+    static BFloat16 NaN()              { return BFloat16::FromBits(uint16_t(0xFFC0u)); }
     /** @return Positive infinity. */
-    static BFloat16 PositiveInfinity() { return BFloat16(uint16_t(0x7F80u)); }
+    static BFloat16 PositiveInfinity() { return BFloat16::FromBits(uint16_t(0x7F80u)); }
     /** @return Negative infinity. */
-    static BFloat16 NegativeInfinity() { return BFloat16(uint16_t(0xFF80u)); }
+    static BFloat16 NegativeInfinity() { return BFloat16::FromBits(uint16_t(0xFF80u)); }
 
     /** @return The raw 16-bit bit pattern. */
     [[nodiscard]] uint16_t getBitsProperty() const { return bits_; }
@@ -134,6 +208,52 @@ public:
     // -----------------------------------------------------------------------------------
 
     /** @brief Converts to `char16_t`, truncating toward zero. */
+    // ---------------------------------------------------------------------------------------
+    // #2384 unit 3, the `to` direction -- unblocked by #2395.
+    //
+    // In C++ a conversion INTO a class type must be a constructor, so each of these IS .NET's
+    // `explicit operator BFloat16(T)`.
+    //
+    // THE BODIES ARE NOT ALL THE SAME, AND THAT IS .NET'S DOING (BFloat16.cs:446-646). The
+    // narrow types go through `float`, but int/long go through RoundFromSigned and uint/ulong
+    // through RoundFromUnsigned -- because BFloat16 keeps only 8 significand bits, so converting
+    // a 32- or 64-bit integer through a 24-bit float ROUNDS TWICE and can land a ulp away from
+    // the correctly-rounded result. Half does not need this and .NET does not give it one:
+    // `(Half)(float)value` is what it writes there. This is #2382's rule again -- the two 16-bit
+    // types move in step in SURFACE, never blindly in BODY.
+    //
+    // `byte`/`sbyte` are IMPLICIT in .NET and explicit here: C++ permits a standard conversion
+    // before a user-defined one where C# does not, so the implicit form makes every integer
+    // argument ambiguous. Measured. `nint`, `nuint`, `decimal`, `Int128` and `UInt128` have no
+    // counterpart in this type's `from` set either, so neither direction declares them.
+    // ---------------------------------------------------------------------------------------
+
+    /** @brief .NET: `explicit operator BFloat16(char)`. */
+    explicit BFloat16(SharpRuntime::charcs value)  : bits_(fromFloat(static_cast<float>(value))) {}
+    /** @brief .NET's is IMPLICIT; see the note above. */
+    explicit BFloat16(SharpRuntime::bytecs value)  : bits_(fromFloat(static_cast<float>(value))) {}
+    /** @brief .NET's is IMPLICIT; see the note above. */
+    explicit BFloat16(SharpRuntime::sbytecs value) : bits_(fromFloat(static_cast<float>(value))) {}
+    /** @brief .NET: `explicit operator BFloat16(short)` -- via float, as .NET writes it. */
+    explicit BFloat16(SharpRuntime::shortcs value) : bits_(fromFloat(static_cast<float>(value))) {}
+    /** @brief .NET: `explicit operator BFloat16(ushort)`. This is the signature #2395 freed. */
+    explicit BFloat16(SharpRuntime::ushortcs value): bits_(fromFloat(static_cast<float>(value))) {}
+    /** @brief .NET: `explicit operator BFloat16(int)` -- RoundFromSigned, NOT via float. */
+    explicit BFloat16(SharpRuntime::intcs value)   : bits_(roundFromSigned<uint32_t>(value)) {}
+    /** @brief .NET: `explicit operator BFloat16(long)` -- RoundFromSigned, NOT via float. */
+    explicit BFloat16(SharpRuntime::longcs value)  : bits_(roundFromSigned<uint64_t>(value)) {}
+    /** @brief .NET: `explicit operator BFloat16(uint)` -- RoundFromUnsigned, NOT via float. */
+    explicit BFloat16(SharpRuntime::uintcs value)  : bits_(roundFromUnsigned<uint32_t>(value, false)) {}
+    /** @brief .NET: `explicit operator BFloat16(ulong)` -- RoundFromUnsigned, NOT via float. */
+    explicit BFloat16(SharpRuntime::ulongcs value) : bits_(roundFromUnsigned<uint64_t>(value, false)) {}
+    /**
+     * @brief .NET: `explicit operator BFloat16(double)`.
+     *
+     * Narrows via an intermediate float, which is the deviation `System::Half::FromDouble`
+     * already declares for itself: it can double-round differently right at an exact tie.
+     */
+    explicit BFloat16(double value) : bits_(fromFloat(static_cast<float>(value))) {}
+
     explicit operator SharpRuntime::charcs()  const { return static_cast<SharpRuntime::charcs>(toFloat(bits_)); }
     /** @brief Converts to an 8-bit unsigned value, truncating toward zero. */
     explicit operator SharpRuntime::bytecs()  const { return static_cast<SharpRuntime::bytecs>(toFloat(bits_)); }
@@ -165,7 +285,7 @@ public:
     /** Division via float promotion. */
     BFloat16 operator/(const BFloat16& o) const { return BFloat16(toFloat(bits_) / toFloat(o.bits_)); }
     /** Unary negation (flips the sign bit). */
-    BFloat16 operator-()                  const { return BFloat16(static_cast<uint16_t>(bits_ ^ 0x8000u)); }
+    BFloat16 operator-()                  const { return BFloat16::FromBits(static_cast<uint16_t>(bits_ ^ 0x8000u)); }
 
     /** IEEE 754 equality via float promotion (NaN != NaN; +0 == -0). */
     bool operator==(const BFloat16& o) const { return toFloat(bits_) == toFloat(o.bits_); }
@@ -235,14 +355,14 @@ public:
     /** @brief The absolute value. .NET: `value._value & ~SignMask` (`BFloat16.cs:1396`) -- a BIT
      *  MASK, not a float round-trip, so a NaN keeps its payload. */
     [[nodiscard]] static BFloat16 Abs(BFloat16 value) noexcept {
-        return BFloat16(static_cast<uint16_t>(value.bits_ & 0x7FFFu));
+        return BFloat16::FromBits(static_cast<uint16_t>(value.bits_ & 0x7FFFu));
     }
 
     /** @brief Copies the sign of @p sign onto the magnitude of @p value. .NET:
      *  `BFloat16.cs:1300-1310`, bitwise because -- in its own comment -- the method "is required
      *  to work for all inputs, including NaN". */
     [[nodiscard]] static BFloat16 CopySign(BFloat16 value, BFloat16 sign) noexcept {
-        return BFloat16(static_cast<uint16_t>((value.bits_ & 0x7FFFu) | (sign.bits_ & 0x8000u)));
+        return BFloat16::FromBits(static_cast<uint16_t>((value.bits_ & 0x7FFFu) | (sign.bits_ & 0x8000u)));
     }
 
     /** @brief The next representable value greater than @p x. .NET: `BFloat16.cs:1134-1164`.
@@ -255,7 +375,7 @@ public:
         }
         if (bits == 0x8000u) return Epsilon();           // -0.0 -> Epsilon
         if (IsNegative(x)) --bits; else ++bits;
-        return BFloat16(bits);
+        return BFloat16::FromBits(bits);
     }
 
     /** @brief The next representable value less than @p x. .NET: `BFloat16.cs:1101-1131`.
@@ -266,10 +386,10 @@ public:
             return (bits == 0x7F80u) ? MaxValue() : x;   // +Infinity -> MaxValue
         }
         if (bits == 0x0000u) {
-            return BFloat16(static_cast<uint16_t>(Epsilon().bits_ | 0x8000u));  // +0.0 -> -Epsilon
+            return BFloat16::FromBits(static_cast<uint16_t>(Epsilon().bits_ | 0x8000u));  // +0.0 -> -Epsilon
         }
         if (IsNegative(x)) ++bits; else --bits;
-        return BFloat16(bits);
+        return BFloat16::FromBits(bits);
     }
 
     /** @brief Clamps @p value to [@p min, @p max]. .NET: `(BFloat16)Math.Clamp((float)...)`

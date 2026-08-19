@@ -1642,3 +1642,29 @@ step around the resolver.
 before the reference was read. The wrong order is not a compile error waiting to happen — it
 compiles perfectly well as an *addition*, and would leave this port with two spellings where
 .NET has one. A behavioural test cannot see it, because both orders confine correctly.
+
+---
+
+## 24. Ticket #2395 — the 16-bit float conversion fixture (2026-08-19)
+
+`test/consumer/core_sixteen_bit_float_conversions_negative.cpp`, **5 sites**, component
+`Core.Base`. Running total: **48 fixtures / 245 sites**, measured by the checker.
+
+### 24.1 The fixture that says what it cannot do
+
+#2395 renamed the raw-bits constructor on `System::Half` and `System::Numerics::BFloat16` to a
+named `FromBits`, freeing the constructor signature for .NET's value conversions. That is a public
+source break — and it is the **dangerous** kind, because `Half(0x3C00)` is valid under both
+readings: `1.0` as a bit pattern, `15360.0` as a number. **No compile-time check can see it.**
+
+So this fixture cannot pin the outlawed spelling, and its own header says so rather than leaving a
+reader to infer that the migration was fully guarded. What guarded the migration was **sequencing**
+— the rename landed first with no value-taking constructor present, so the compiler had to name
+every site — not this file.
+
+What the file does pin is the part that *is* a compile-time guarantee: every conversion into either
+type is **explicit**, including `byte` and `sbyte`, which .NET makes implicit
+(`Half.cs:980,986`; `BFloat16.cs:824,830`). This port cannot: C++ permits a standard conversion
+before a user-defined one where C# does not, so the implicit form makes every integer argument
+ambiguous. Site 5 additionally pins that `FromBits` is the only bit-pattern door — the types have
+user-declared constructors, so aggregate initialisation cannot re-acquire the old meaning.

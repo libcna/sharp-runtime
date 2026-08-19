@@ -1171,8 +1171,8 @@ TEST(BFloat16Tests, Equality_NaNIsNeverEqualToItself) {
 }
 
 TEST(BFloat16Tests, Equality_PositiveAndNegativeZeroAreEqual) {
-    BFloat16 posZero(uint16_t(0x0000u));
-    BFloat16 negZero(uint16_t(0x8000u));
+    BFloat16 posZero = BFloat16::FromBits(0x0000u);
+    BFloat16 negZero = BFloat16::FromBits(0x8000u);
     EXPECT_TRUE(posZero == negZero);
     EXPECT_FALSE(posZero != negZero);
 }

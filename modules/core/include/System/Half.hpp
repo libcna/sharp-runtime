@@ -61,7 +61,25 @@ namespace System {
         /** @brief Initializes a new Half with zero value. */
         Half() = default;
         /** @brief Initializes a new Half from a raw 16-bit bit pattern. */
-        explicit Half(uint16_t rawBits) : bits(rawBits) {}
+        /**
+         * @brief Constructs a Half from its raw IEEE 754 binary16 bit pattern.
+         *
+         * @note **Named since ticket #2395 (2026-08-19).** This was `explicit Half(uint16_t)`,
+         * and that signature is .NET's `explicit operator Half(ushort)` -- which is
+         * `(Half)(float)value`, a NUMERIC conversion, not a bit pattern. `ushortcs` and
+         * `uint16_t` are the same C++ type, so the two could not coexist, and the collision was
+         * worse than one overload: an exact `int` match beats `int -> uint16_t`, so adding ANY
+         * value-taking integer constructor made `Half(0x7BFF)` silently stop meaning "these
+         * bits" and start meaning "the number 31743". Measured by #2384 unit 3: 44 shipped tests
+         * turned red, `Half::MaxValue` and `Half::NegativeInfinity` among them.
+         *
+         * A bit pattern and a number are different things, so they now have different spellings.
+         */
+        [[nodiscard]] static constexpr Half FromBits(uint16_t rawBits) noexcept {
+            Half h;
+            h.bits = rawBits;
+            return h;
+        }
 
         /** @brief Converts a 32-bit float to the nearest representable Half (round to nearest, ties to even). */
         [[nodiscard]] static Half FromSingle(float value) noexcept {
@@ -72,17 +90,17 @@ namespace System {
 
             if (absF > 0x7F800000u) {
                 // NaN: canonical quiet NaN, sign preserved. See class-level deviation note.
-                return Half(static_cast<uint16_t>(sign16 | 0x7E00u));
+                return Half::FromBits(static_cast<uint16_t>(sign16 | 0x7E00u));
             }
             if (absF >= 0x7F800000u) {
-                return Half(static_cast<uint16_t>(sign16 | 0x7C00u)); // Infinity
+                return Half::FromBits(static_cast<uint16_t>(sign16 | 0x7C00u)); // Infinity
             }
             if (absF == 0u) {
-                return Half(static_cast<uint16_t>(sign16)); // signed zero
+                return Half::FromBits(static_cast<uint16_t>(sign16)); // signed zero
             }
             if (absF < 0x00800000u) {
                 // Float subnormal input: far smaller than Half's smallest subnormal -> zero.
-                return Half(static_cast<uint16_t>(sign16));
+                return Half::FromBits(static_cast<uint16_t>(sign16));
             }
 
             const int32_t exp = static_cast<int32_t>((absF >> 23) & 0xFFu) - 127;
@@ -90,7 +108,7 @@ namespace System {
 
             const int32_t targetExp = exp + 15;
             if (targetExp >= 31) {
-                return Half(static_cast<uint16_t>(sign16 | 0x7C00u)); // definite overflow
+                return Half::FromBits(static_cast<uint16_t>(sign16 | 0x7C00u)); // definite overflow
             }
 
             int32_t dropBits;
@@ -104,7 +122,7 @@ namespace System {
             }
 
             if (dropBits >= 25) {
-                return Half(static_cast<uint16_t>(sign16)); // underflows to zero
+                return Half::FromBits(static_cast<uint16_t>(sign16)); // underflows to zero
             }
 
             const uint32_t dropMask = (1u << dropBits) - 1u;
@@ -125,10 +143,10 @@ namespace System {
             }
 
             if (finalExpField >= 31) {
-                return Half(static_cast<uint16_t>(sign16 | 0x7C00u)); // rounding overflow
+                return Half::FromBits(static_cast<uint16_t>(sign16 | 0x7C00u)); // rounding overflow
             }
 
-            return Half(static_cast<uint16_t>(sign16 | (static_cast<uint32_t>(finalExpField) << 10) | mantissaField));
+            return Half::FromBits(static_cast<uint16_t>(sign16 | (static_cast<uint32_t>(finalExpField) << 10) | mantissaField));
         }
 
         /** @brief Converts this Half to its exactly-equal 32-bit float value (widening is always exact). */
@@ -209,6 +227,52 @@ namespace System {
         // two must be `explicit`: what is lost is the IMPLICITNESS, never the conversion.
         // -----------------------------------------------------------------------------------
 
+        // -----------------------------------------------------------------------------------
+        // #2384 unit 3, the `to` direction -- unblocked by #2395.
+        //
+        // In C++ a conversion INTO a class type must be a constructor of that type, so each of
+        // these IS .NET's `explicit operator Half(T)`. Every body is `(Half)(float)value`, which
+        // is what .NET writes for all of them (Half.cs:562-807, 980-986).
+        //
+        // .NET makes `byte` and `sbyte` IMPLICIT (:980, :986) and this port cannot: C++ permits a
+        // standard conversion BEFORE a user-defined one where C# does not, so an implicit
+        // converting constructor from `bytecs` makes EVERY integer argument ambiguous. Measured.
+        // What is lost is the IMPLICITNESS, never the conversion.
+        //
+        // `nint`, `nuint` and `decimal` have no counterpart here: this port declares no `nint`
+        // type at all, and neither direction of the Decimal conversion exists -- #2384's `from`
+        // set omits it too, so adding one direction alone would make the pair asymmetric.
+        // -----------------------------------------------------------------------------------
+
+        /** @brief Converts a `char16_t` to its nearest Half. .NET: `explicit operator Half(char)`. */
+        explicit Half(SharpRuntime::charcs value) noexcept  : Half(FromSingle(static_cast<float>(value))) {}
+        /** @brief Converts a `bytecs`. .NET's is IMPLICIT; see the note above. */
+        explicit Half(SharpRuntime::bytecs value) noexcept  : Half(FromSingle(static_cast<float>(value))) {}
+        /** @brief Converts an `sbytecs`. .NET's is IMPLICIT; see the note above. */
+        explicit Half(SharpRuntime::sbytecs value) noexcept : Half(FromSingle(static_cast<float>(value))) {}
+        /** @brief .NET: `explicit operator Half(short)`. */
+        explicit Half(SharpRuntime::shortcs value) noexcept : Half(FromSingle(static_cast<float>(value))) {}
+        /** @brief .NET: `explicit operator Half(ushort)`. This is the signature #2395 freed. */
+        explicit Half(SharpRuntime::ushortcs value) noexcept: Half(FromSingle(static_cast<float>(value))) {}
+        /** @brief .NET: `explicit operator Half(int)`. */
+        explicit Half(SharpRuntime::intcs value) noexcept   : Half(FromSingle(static_cast<float>(value))) {}
+        /** @brief .NET: `explicit operator Half(uint)`. */
+        explicit Half(SharpRuntime::uintcs value) noexcept  : Half(FromSingle(static_cast<float>(value))) {}
+        /** @brief .NET: `explicit operator Half(long)`. */
+        explicit Half(SharpRuntime::longcs value) noexcept  : Half(FromSingle(static_cast<float>(value))) {}
+        /** @brief .NET: `explicit operator Half(ulong)`. */
+        explicit Half(SharpRuntime::ulongcs value) noexcept : Half(FromSingle(static_cast<float>(value))) {}
+        /** @brief .NET: `explicit operator Half(float)`. */
+        explicit Half(float value) noexcept  : Half(FromSingle(value)) {}
+        /**
+         * @brief .NET: `explicit operator Half(double)`.
+         *
+         * Routed through FromDouble(), so it carries that member's already-declared deviation:
+         * it narrows via an intermediate float rounding rather than rounding directly, which can
+         * double-round differently right at an exact tie boundary.
+         */
+        explicit Half(double value) noexcept : Half(FromDouble(value)) {}
+
         /** @brief Converts to `char16_t`, truncating toward zero. .NET: `explicit operator char(Half)`. */
         explicit operator SharpRuntime::charcs()  const noexcept { return static_cast<SharpRuntime::charcs>(ToSingle()); }
         /** @brief Converts to an 8-bit unsigned value, truncating toward zero. */
@@ -267,7 +331,7 @@ namespace System {
          * canonicalise them (see this type's own note on NaN payloads).
          */
         [[nodiscard]] static Half Abs(Half value) noexcept {
-            return Half(static_cast<uint16_t>(value.bits & 0x7FFFu));
+            return Half::FromBits(static_cast<uint16_t>(value.bits & 0x7FFFu));
         }
 
         /**
@@ -279,7 +343,7 @@ namespace System {
          * than expressed through `std::copysign` on a converted `float`.
          */
         [[nodiscard]] static Half CopySign(Half value, Half sign) noexcept {
-            return Half(static_cast<uint16_t>((value.bits & 0x7FFFu) | (sign.bits & 0x8000u)));
+            return Half::FromBits(static_cast<uint16_t>((value.bits & 0x7FFFu) | (sign.bits & 0x8000u)));
         }
 
         /**
@@ -299,7 +363,7 @@ namespace System {
             if (bits == 0x8000u) return Epsilon;   // -0.0 -> Epsilon
             // Negative values are decremented, positive values incremented.
             if (IsNegative(x)) --bits; else ++bits;
-            return Half(bits);
+            return Half::FromBits(bits);
         }
 
         /**
@@ -317,10 +381,10 @@ namespace System {
             }
             if (bits == 0x0000u) {
                 // +0.0 -> -Epsilon
-                return Half(static_cast<uint16_t>(Epsilon.bits | 0x8000u));
+                return Half::FromBits(static_cast<uint16_t>(Epsilon.bits | 0x8000u));
             }
             if (IsNegative(x)) ++bits; else --bits;
-            return Half(bits);
+            return Half::FromBits(bits);
         }
 
         /**
@@ -721,7 +785,7 @@ namespace System {
         /** @brief Unary plus. C++ counterpart of .NET Half.operator+(Half). */
         Half operator+() const noexcept { return *this; }
         /** @brief Unary negation. C++ counterpart of .NET Half.operator-(Half). */
-        Half operator-() const noexcept { return Half(static_cast<uint16_t>(bits ^ 0x8000u)); }
+        Half operator-() const noexcept { return Half::FromBits(static_cast<uint16_t>(bits ^ 0x8000u)); }
 
         /** @brief Pre-increment by one. C++ counterpart of .NET Half.operator++(Half). */
         Half& operator++() noexcept { *this = FromSingle(ToSingle() + 1.0f); return *this; }
@@ -733,13 +797,13 @@ namespace System {
         Half operator--(int) noexcept { Half tmp = *this; --(*this); return tmp; }
     };
 
-    inline const Half Half::Zero             = Half(0x0000);
-    inline const Half Half::One              = Half(0x3C00);
-    inline const Half Half::NegativeOne      = Half(0xBC00);
-    inline const Half Half::NegativeZero     = Half(0x8000);
-    inline const Half Half::NaN              = Half(0xFE00);
-    inline const Half Half::PositiveInfinity = Half(0x7C00);
-    inline const Half Half::NegativeInfinity = Half(0xFC00);
+    inline const Half Half::Zero             = Half::FromBits(0x0000);
+    inline const Half Half::One              = Half::FromBits(0x3C00);
+    inline const Half Half::NegativeOne      = Half::FromBits(0xBC00);
+    inline const Half Half::NegativeZero     = Half::FromBits(0x8000);
+    inline const Half Half::NaN              = Half::FromBits(0xFE00);
+    inline const Half Half::PositiveInfinity = Half::FromBits(0x7C00);
+    inline const Half Half::NegativeInfinity = Half::FromBits(0xFC00);
     // #2384 unit 2a definitions.
     inline Half Half::Ceiling(Half x) noexcept  { return FromSingle(System::MathF::Ceiling(x.ToSingle())); }
     inline Half Half::Floor(Half x) noexcept    { return FromSingle(System::MathF::Floor(x.ToSingle())); }
@@ -805,11 +869,11 @@ namespace System {
         return FromSingle(System::MathF::MinMagnitude(x.ToSingle(), y.ToSingle()));
     }
 
-    inline const Half Half::MaxValue         = Half(0x7BFF);  //  65504
-    inline const Half Half::MinValue         = Half(0xFBFF);  // -65504
-    inline const Half Half::Epsilon          = Half(0x0001);  //  ~5.96e-8
-    inline const Half Half::E                = Half(0x4170);  //  ~2.71875
-    inline const Half Half::Pi               = Half(0x4248);  //  ~3.140625
-    inline const Half Half::Tau              = Half(0x4648);  //  ~6.28125
+    inline const Half Half::MaxValue         = Half::FromBits(0x7BFF);  //  65504
+    inline const Half Half::MinValue         = Half::FromBits(0xFBFF);  // -65504
+    inline const Half Half::Epsilon          = Half::FromBits(0x0001);  //  ~5.96e-8
+    inline const Half Half::E                = Half::FromBits(0x4170);  //  ~2.71875
+    inline const Half Half::Pi               = Half::FromBits(0x4248);  //  ~3.140625
+    inline const Half Half::Tau              = Half::FromBits(0x4648);  //  ~6.28125
 
 } // namespace System
