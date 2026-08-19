@@ -35,10 +35,10 @@ namespace System::IO::Compression {
             }
         }
 
+        // #2150: one definition, shared with the other two encoders and the three stream options
+        // constructors.
         intcs ResolveGZipWindowBits(intcs windowLog) {
-            if (windowLog == -1) windowLog = DefaultWindowLog;
-            windowLog = std::max(windowLog, static_cast<intcs>(9));
-            return windowLog + 16;
+            return Detail::ResolveWindowBits(windowLog, Detail::CompressionFormat::GZip);
         }
 
         // Ticket #2149 (SR-AUD-259): the strategy is a parameter now. It used to be hard-coded to

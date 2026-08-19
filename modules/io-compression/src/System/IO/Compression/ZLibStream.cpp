@@ -75,6 +75,38 @@ ZLibStream::ZLibStream(Stream* stream, CompressionMode mode, bool leaveOpen)
     state_->initialized = true;
 }
 
+// ---------------------------------------------------------------------------
+// Ticket #2150 (SR-AUD-259, cause C-C) -- the ZLibCompressionOptions constructor.
+//
+// .NET's is ZLibStream(Stream, ZLibCompressionOptions, bool leaveOpen = false), and it implies
+// Compress: the overload carries no mode because every option it holds describes compression.
+//
+// The window bits and memLevel come from Detail::ResolveWindowBits / ResolveDeflateMemLevel --
+// the SAME definitions the three encoders use -- rather than from a fourth copy of the format
+// arithmetic. Before this ticket each encoder had its own copy and the streams had none, because
+// they had no options constructor to need one.
+// ---------------------------------------------------------------------------
+ZLibStream::ZLibStream(Stream* stream, const ZLibCompressionOptions& options, bool leaveOpen)
+    : inner_(stream), mode_(CompressionMode::Compress), leaveOpen_(leaveOpen),
+      state_(std::make_unique<ZlibZLibState>())
+{
+    // Same order as the mode constructor above, and for the same reason: the null check runs
+    // before deflateInit2 allocates anything, so a rejected argument cannot leak zlib state.
+    if (stream == nullptr) throw System::ArgumentNullException("stream");
+
+    const intcs level    = options.getCompressionLevelProperty();
+    const intcs strategy = Detail::ResolveZLibStrategy(options.getCompressionStrategyProperty());
+    const intcs bits     = Detail::ResolveWindowBits(options.getWindowLogProperty(),
+                                                     Detail::CompressionFormat::ZLib);
+    const intcs memLevel = Detail::ResolveDeflateMemLevel(level);
+
+    if (deflateInit2(&state_->zs, static_cast<int>(level), Z_DEFLATED,
+                     static_cast<int>(bits), static_cast<int>(memLevel),
+                     static_cast<int>(strategy)) != Z_OK)
+        throw System::IO::IOException("ZLibStream: deflateInit2 failed");
+    state_->initialized = true;
+}
+
 // Best-effort, non-throwing (audit finding A-02, 2026-07-14) -- see DeflateStream::~DeflateStream's
 // identical doc-comment for the full rationale and confirmed std::terminate repro.
 ZLibStream::~ZLibStream() { try { Close(); } catch (...) {} }

@@ -34,8 +34,11 @@ namespace System::IO::Compression {
         }
 
         // Unlike Deflate/GZip, ZLib format does not clamp windowLog to a minimum of 9.
+        // #2150: one definition, shared with the other two encoders and the three stream options
+        // constructors. The ZLib arm is the one that does NOT clamp to 9, and the shared resolver
+        // preserves that asymmetry rather than smoothing it away.
         intcs ResolveZLibWindowBits(intcs windowLog) {
-            return windowLog == -1 ? DefaultWindowLog : windowLog;
+            return Detail::ResolveWindowBits(windowLog, Detail::CompressionFormat::ZLib);
         }
 
         // Ticket #2149 (SR-AUD-259): the strategy is a parameter now. It used to be hard-coded to

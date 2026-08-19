@@ -4,6 +4,7 @@
 #pragma once
 #include "System/IO/Stream.hpp"
 #include "System/IO/Compression/CompressionMode.hpp"
+#include "System/IO/Compression/ZLibCompressionOptions.hpp"
 #include <memory>
 
 namespace System::IO::Compression {
@@ -47,6 +48,36 @@ namespace System::IO::Compression {
          * @throws System::IO::IOException if zlib initialisation fails.
          */
         GZipStream(Stream* stream, CompressionMode mode, bool leaveOpen = false);
+
+        /**
+         * @brief Constructs a compressing GZipStream using the given compression options.
+         *
+         * C++ counterpart of .NET's `GZipStream(Stream, ZLibCompressionOptions, bool)`. **This
+         * constructor implies `CompressionMode::Compress`** — .NET's own comment above the
+         * `CompressionLevel` overloads says *"Implies mode = Compress"*, and the options
+         * overload has no mode parameter for the same reason: every option it carries describes
+         * compression.
+         *
+         * The options are honoured in full: `CompressionLevel` becomes zlib's level,
+         * `CompressionStrategy` its strategy, and `WindowLog` its window size, resolved for
+         * the gzip container by `Detail::ResolveWindowBits`. `memLevel` follows .NET's rule — 7 at
+         * quality 0, otherwise 8.
+         *
+         * @param stream    The stream to which compressed data is written.
+         * @param options   The compression options. Validated by `ZLibCompressionOptions`'
+         *                  own setters, so an out-of-range value cannot reach here.
+         * @param leaveOpen When @c true the inner stream is not closed on destruction.
+         *
+         * @throws System::ArgumentNullException if @p stream is null.
+         * @throws System::IO::IOException if zlib initialisation fails.
+         *
+         * @note Ticket **#2150**. Adding this overload cannot change the meaning of any existing
+         * call: `CompressionMode` is a scoped enumeration and `ZLibCompressionOptions` has no
+         * converting constructor, so no argument can bind to both this and the
+         * `(Stream*, CompressionMode, bool)` overload. That is asserted, not assumed, by
+         * `CompressionOptionsConstructorTests.Decl2150_TheAdditionCannotRebindAnExistingCall`.
+         */
+        GZipStream(Stream* stream, const ZLibCompressionOptions& options, bool leaveOpen = false);
 
         ~GZipStream() override;
 

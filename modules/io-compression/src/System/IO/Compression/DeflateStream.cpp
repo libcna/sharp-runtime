@@ -76,6 +76,38 @@ DeflateStream::DeflateStream(Stream* stream, CompressionMode mode, bool leaveOpe
     state_->initialized = true;
 }
 
+// ---------------------------------------------------------------------------
+// Ticket #2150 (SR-AUD-259, cause C-C) -- the ZLibCompressionOptions constructor.
+//
+// .NET's is DeflateStream(Stream, ZLibCompressionOptions, bool leaveOpen = false), and it implies
+// Compress: the overload carries no mode because every option it holds describes compression.
+//
+// The window bits and memLevel come from Detail::ResolveWindowBits / ResolveDeflateMemLevel --
+// the SAME definitions the three encoders use -- rather than from a fourth copy of the format
+// arithmetic. Before this ticket each encoder had its own copy and the streams had none, because
+// they had no options constructor to need one.
+// ---------------------------------------------------------------------------
+DeflateStream::DeflateStream(Stream* stream, const ZLibCompressionOptions& options, bool leaveOpen)
+    : inner_(stream), mode_(CompressionMode::Compress), leaveOpen_(leaveOpen),
+      state_(std::make_unique<ZlibDeflateState>())
+{
+    // Same order as the mode constructor above, and for the same reason: the null check runs
+    // before deflateInit2 allocates anything, so a rejected argument cannot leak zlib state.
+    if (stream == nullptr) throw System::ArgumentNullException("stream");
+
+    const intcs level    = options.getCompressionLevelProperty();
+    const intcs strategy = Detail::ResolveZLibStrategy(options.getCompressionStrategyProperty());
+    const intcs bits     = Detail::ResolveWindowBits(options.getWindowLogProperty(),
+                                                     Detail::CompressionFormat::Deflate);
+    const intcs memLevel = Detail::ResolveDeflateMemLevel(level);
+
+    if (deflateInit2(&state_->zs, static_cast<int>(level), Z_DEFLATED,
+                     static_cast<int>(bits), static_cast<int>(memLevel),
+                     static_cast<int>(strategy)) != Z_OK)
+        throw System::IO::IOException("DeflateStream: deflateInit2 failed");
+    state_->initialized = true;
+}
+
 // Best-effort, non-throwing (audit finding A-02, 2026-07-14): Close() can propagate the inner
 // stream's I/O failure (e.g. a broken pipe or full disk during the final deflate flush) -- the
 // correct behavior for an EXPLICIT Close() call, but destructors are implicitly noexcept in

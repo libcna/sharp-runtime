@@ -23,10 +23,11 @@ namespace System::IO::Compression {
         constexpr intcs Deflate_DefaultMemLevel = 8;
         constexpr intcs Deflate_NoCompressionMemLevel = 7;
 
+        // #2150 replaced this function's body with the shared resolver. The three encoders each
+        // carried their own copy of the format arithmetic; there is now one definition, in
+        // Detail::ResolveWindowBits, which the three STREAM options constructors also use.
         intcs ResolveDeflateWindowBits(intcs windowLog) {
-            if (windowLog == -1) windowLog = DefaultWindowLog;
-            windowLog = std::max(windowLog, static_cast<intcs>(9));
-            return -windowLog;
+            return Detail::ResolveWindowBits(windowLog, Detail::CompressionFormat::Deflate);
         }
     }
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include <algorithm>
 #include "System/IO/Compression/CompressionArgumentValidation.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
@@ -59,6 +60,32 @@ namespace System::IO::Compression::Detail {
             case ZLibCompressionStrategy::Fixed:             return Z_FIXED;
         }
         throw System::ArgumentOutOfRangeException("strategy", "Value must be between Default and Fixed.");
+    }
+
+    namespace {
+        // ZLibCompressionOptions publishes these as MinWindowLog/MaxWindowLog/DefaultWindowLog;
+        // they are restated locally so this translation unit does not depend on that header for
+        // two integers.
+        constexpr intcs DefaultWindowLog             = 15;
+        constexpr intcs Deflate_DefaultMemLevel      = 8;
+        constexpr intcs Deflate_NoCompressionMemLevel = 7;
+    }
+
+    intcs ResolveWindowBits(intcs windowLog, CompressionFormat format) {
+        if (windowLog == -1) windowLog = DefaultWindowLog;
+        // Deflate and GZip clamp; ZLib deliberately does not. See the header for .NET's reason.
+        if (format != CompressionFormat::ZLib)
+            windowLog = std::max(windowLog, static_cast<intcs>(9));
+        switch (format) {
+            case CompressionFormat::Deflate: return -windowLog;
+            case CompressionFormat::ZLib:    return windowLog;
+            case CompressionFormat::GZip:    return windowLog + 16;
+        }
+        throw System::ArgumentOutOfRangeException("format");
+    }
+
+    intcs ResolveDeflateMemLevel(intcs quality) {
+        return quality == 0 ? Deflate_NoCompressionMemLevel : Deflate_DefaultMemLevel;
     }
 
 } // namespace System::IO::Compression::Detail

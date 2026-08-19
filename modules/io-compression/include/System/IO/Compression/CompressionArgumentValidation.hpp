@@ -219,4 +219,45 @@ namespace System::IO::Compression::Detail {
      */
     [[nodiscard]] intcs ResolveZLibStrategy(ZLibCompressionStrategy strategy);
 
+    /**
+     * @brief The three zlib container formats this component encodes.
+     *
+     * C++ counterpart of .NET's internal `System.IO.Compression.CompressionFormat`
+     * (`CompressionFormat.cs:9-17`). It exists for the same reason: window bits are the one
+     * parameter whose meaning depends on the container, so resolving them needs the format as
+     * an argument rather than three near-identical local functions.
+     */
+    enum class CompressionFormat { Deflate, ZLib, GZip };
+
+    /**
+     * @brief Resolves a `WindowLog` (8..15, or -1 for the default) to zlib's `windowBits`.
+     *
+     * Transcribed from .NET's `CompressionFormatHelper.ResolveWindowBits`
+     * (`CompressionFormat.cs:30-48`), including both of its asymmetries:
+     *
+     * * `-1` resolves to **15**, the default window log;
+     * * **Deflate and GZip clamp to a minimum of 9, and ZLib does not.** .NET's own comment
+     *   gives the reason — *"zlib-ng rejects windowBits 8 for raw deflate and gzip; classic zlib
+     *   silently upgrades to 9"* — so the clamp reproduces classic zlib's behaviour on both
+     *   implementations. A resolver that clamped uniformly would change what a `WindowLog` of 8
+     *   means for `ZLibStream`.
+     *
+     * The sign and offset are then the container: raw deflate is negative, zlib is positive,
+     * gzip is positive plus 16.
+     *
+     * Defined once here so the three encoders and the three stream types share one definition.
+     * Before ticket #2150 each encoder carried its own copy in an anonymous namespace, and the
+     * streams had none at all because they had no options constructor to need one.
+     */
+    [[nodiscard]] intcs ResolveWindowBits(intcs windowLog, CompressionFormat format);
+
+    /**
+     * @brief Resolves the zlib `memLevel` for a compression quality.
+     *
+     * Transcribed from .NET's `DeflateEncoder` (`DeflateEncoder.cs:75-77, 95-97`): quality 0
+     * ("no compression") uses memLevel **7**, every other quality uses **8**. The rule is the
+     * same for all three containers, so it takes no format.
+     */
+    [[nodiscard]] intcs ResolveDeflateMemLevel(intcs quality);
+
 } // namespace System::IO::Compression::Detail

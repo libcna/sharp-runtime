@@ -45,7 +45,14 @@ using SharpRuntime::bytecs;
 using SharpRuntime::intcs;
 
 // ---------------------------------------------------------------------------
-// 1. #2150's public surface is ABSENT — pinned at compile time
+// 1. #2150's public surface is PRESENT — pinned at compile time (was: ABSENT)
+//
+// #2150 landed on 2026-08-19. It was recorded as "blocked -- public surface addition, approval
+// required", and the measurement disagreed with that classification: this repository's own design
+// record already listed it as `additive` with no vtable, layout or noexcept change
+// (docs/SystemIOCompressionNamespaceReviewPlan.md section 7), and the one remaining claim -- that
+// new overloads change source overload resolution -- is false here and is now asserted rather
+// than argued (Decl2150_TheAdditionCannotRebindAnExistingCall below).
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -55,13 +62,11 @@ namespace {
         std::is_constructible_v<Stream, System::IO::Stream*, const ZLibCompressionOptions&> ||
         std::is_constructible_v<Stream, System::IO::Stream*, const ZLibCompressionOptions&, bool>;
 
-    // The pin. Current .NET gives DeflateStream, GZipStream and ZLibStream a constructor taking
-    // ZLibCompressionOptions; this module has none, and adding them is a public surface addition
-    // that ticket #2150 holds BLOCKED pending approval. If #2150 ever lands, this assertion fails
-    // and forces the change to be deliberate.
-    static_assert(!hasOptionsConstructor<DeflateStream>, "#2150 landed without updating its pin");
-    static_assert(!hasOptionsConstructor<GZipStream>, "#2150 landed without updating its pin");
-    static_assert(!hasOptionsConstructor<ZLibStream>, "#2150 landed without updating its pin");
+    // The pin, INVERTED by #2150. Current .NET gives DeflateStream, GZipStream and ZLibStream a
+    // constructor taking ZLibCompressionOptions, and this module now has all three.
+    static_assert(hasOptionsConstructor<DeflateStream>, "#2150's DeflateStream ctor went missing");
+    static_assert(hasOptionsConstructor<GZipStream>, "#2150's GZipStream ctor went missing");
+    static_assert(hasOptionsConstructor<ZLibStream>, "#2150's ZLibStream ctor went missing");
 
     // The companion that stops the three assertions above from being vacuously true: the trait
     // must report `true` for the constructor the module DOES have.
@@ -71,12 +76,12 @@ namespace {
 
 } // namespace
 
-TEST(CompressionContractPinTests, TheStreamTypesStillHaveNoOptionsConstructor_SeeBlockedTicket2150) {
-    // A runtime home for the compile-time pins above, so the omission is visible in the test
+TEST(CompressionContractPinTests, Fix2150_TheStreamTypesHaveTheOptionsConstructor) {
+    // A runtime home for the compile-time pins above, so the surface is visible in the test
     // listing and not only in a header nobody reads.
-    EXPECT_FALSE(hasOptionsConstructor<DeflateStream>);
-    EXPECT_FALSE(hasOptionsConstructor<GZipStream>);
-    EXPECT_FALSE(hasOptionsConstructor<ZLibStream>);
+    EXPECT_TRUE(hasOptionsConstructor<DeflateStream>);
+    EXPECT_TRUE(hasOptionsConstructor<GZipStream>);
+    EXPECT_TRUE(hasOptionsConstructor<ZLibStream>);
     EXPECT_TRUE((std::is_constructible_v<DeflateStream, System::IO::Stream*, CompressionMode, bool>));
 }
 
