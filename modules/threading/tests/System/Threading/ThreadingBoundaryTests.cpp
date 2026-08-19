@@ -19,6 +19,7 @@
 // the neighbouring valid input that must keep working unchanged.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -1439,4 +1440,150 @@ TEST(ReaderWriterDisposeWaiterCheckTests, Decl2389_TheHeldModeCheckStillFiresOnI
     EXPECT_THROW(lock.Dispose(), System::Threading::SynchronizationLockException);
     lock.ExitReadLock();
     EXPECT_NO_THROW(lock.Dispose());
+}
+
+// =============================================================================================
+// Ticket #1958 / SR-AUD-220 — ThreadLocal's trackAllValues flag means something, and Values exists.
+//
+// The flag was ACCEPTED AND NEVER READ, and the type exposed no Values property at all -- so a
+// caller who asked for tracking got a silent no-op and had no way to notice. Both halves of the
+// finding are one repair: the flag is only observable through the property it gates.
+//
+// .NET (ThreadLocal.cs:421-434):
+//     if (!_trackAllValues) throw new InvalidOperationException(SR.ThreadLocal_ValuesNotAvailable);
+//     List<T>? list = GetValuesAsList();          // returns null if disposed
+//     ObjectDisposedException.ThrowIf(list is null, this);
+//
+// Landed under SA-5 (behaviour derived; the property is additive) with SA-3's layout condition
+// discharged: sizeof(ThreadLocal<int>) grows 56 -> 128 and consumers must be recompiled.
+// =============================================================================================
+
+TEST(ThreadLocalValuesTests, Decl1958_TheRegistryGrowsTheType) {
+    static_assert(sizeof(System::Threading::ThreadLocal<int>) == 128,
+                  "#1958/SR-AUD-220 grew ThreadLocal 56 -> 128; a further change needs its own pin");
+    EXPECT_EQ(sizeof(System::Threading::ThreadLocal<int>), 128u);
+}
+
+TEST(ThreadLocalValuesTests, Fix1958_ValuesThrowsWhenNotTracking) {
+    System::Threading::ThreadLocal<int> local(std::function<int()>([] { return 1; }));
+    (void)local.getValueProperty();
+    EXPECT_THROW((void)local.getValuesProperty(), System::InvalidOperationException)
+        << "an instance built without trackAllValues must refuse Values";
+}
+
+TEST(ThreadLocalValuesTests, Fix1958_ValuesCollectsEveryThreadsValue) {
+    System::Threading::ThreadLocal<int> local(std::function<int()>([] { return 0; }),
+                                              /*trackAllValues=*/true);
+    local.setValueProperty(10);
+
+    std::vector<std::thread> threads;
+    for (int i = 1; i <= 3; ++i)
+        threads.emplace_back([&local, i] { local.setValueProperty(i * 100); });
+    for (auto& t : threads) t.join();
+
+    auto values = local.getValuesProperty();
+    std::sort(values.begin(), values.end());
+    EXPECT_EQ(values, (std::vector<int>{10, 100, 200, 300}));
+}
+
+TEST(ThreadLocalValuesTests, Fix1958_AValueSurvivesItsThreadExiting) {
+    // .NET's LinkedSlot hangs off the ThreadLocal's own list, so a value outlives the thread that
+    // created it and is released when the ThreadLocal is. A weak registry would silently drop it,
+    // which is the plausible wrong design.
+    System::Threading::ThreadLocal<int> local(std::function<int()>([] { return 0; }), true);
+    { std::thread t([&local] { local.setValueProperty(42); }); t.join(); }
+    // The thread is gone; its value must still be listed.
+    EXPECT_EQ(local.getValuesProperty(), (std::vector<int>{42}));
+}
+
+TEST(ThreadLocalValuesTests, Fix1958_AnUpdatedValueIsReflectedNotDuplicated) {
+    // The registry co-owns the same object, so updating in place must be visible without adding a
+    // second entry. Storing a COPY at creation time would fail both halves of this.
+    System::Threading::ThreadLocal<int> local(std::function<int()>([] { return 0; }), true);
+    local.setValueProperty(1);
+    EXPECT_EQ(local.getValuesProperty(), (std::vector<int>{1}));
+    local.setValueProperty(2);
+    EXPECT_EQ(local.getValuesProperty(), (std::vector<int>{2})) << "updated, not duplicated";
+    local.setValueProperty(3);
+    EXPECT_EQ(local.getValuesProperty().size(), 1u);
+}
+
+TEST(ThreadLocalValuesTests, Fix1958_TheFactoryPathIsTrackedToo) {
+    // Values created lazily by the factory must be registered as well, not only ones set
+    // explicitly -- they are two different creation sites.
+    System::Threading::ThreadLocal<int> local(std::function<int()>([] { return 7; }), true);
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 3; ++i)
+        threads.emplace_back([&local] { (void)local.getValueProperty(); });
+    for (auto& t : threads) t.join();
+    EXPECT_EQ(local.getValuesProperty(), (std::vector<int>{7, 7, 7}));
+}
+
+TEST(ThreadLocalValuesTests, Decl1958_TheTrackingCheckPrecedesTheDisposedCheck) {
+    // .NET tests _trackAllValues FIRST, so a DISPOSED instance built WITHOUT tracking reports
+    // InvalidOperationException rather than ObjectDisposedException.
+    //
+    // THIS CANNOT BE ASSERTED WITH EXPECT_THROW, and the first version of this test was therefore
+    // VACUOUS: ObjectDisposedException DERIVES FROM InvalidOperationException, here as in .NET, so
+    // EXPECT_THROW(..., InvalidOperationException) passes whichever check fired and mutation M2
+    // (invert the order) went uncaught. That is the same trap #2152 recorded for the compression
+    // streams. The concrete type has to be discriminated by catching the derived one first.
+    {
+        System::Threading::ThreadLocal<int> untracked(std::function<int()>([] { return 1; }));
+        untracked.Dispose();
+        bool sawNotTracking = false;
+        try {
+            (void)untracked.getValuesProperty();
+        } catch (const System::ObjectDisposedException&) {
+            // the disposed check fired first -- the order is wrong
+        } catch (const System::InvalidOperationException&) {
+            sawNotTracking = true;
+        }
+        EXPECT_TRUE(sawNotTracking)
+            << "not-tracking must win over disposed: .NET checks _trackAllValues first";
+    }
+    {
+        System::Threading::ThreadLocal<int> tracked(std::function<int()>([] { return 1; }), true);
+        tracked.Dispose();
+        EXPECT_THROW((void)tracked.getValuesProperty(), System::ObjectDisposedException)
+            << "tracking, so the disposed check is the one that fires";
+    }
+}
+
+namespace {
+    /// Counts its own destructions, so releasing the registry is observable.
+    struct DestructionCounter {
+        static std::atomic<int>& count() { static std::atomic<int> c{0}; return c; }
+        DestructionCounter() = default;
+        DestructionCounter(const DestructionCounter&) = default;
+        DestructionCounter& operator=(const DestructionCounter&) = default;
+        ~DestructionCounter() { ++count(); }
+    };
+}
+
+TEST(ThreadLocalValuesTests, Fix1958_DisposeReleasesTheTrackedValues) {
+    // .NET's Dispose unlinks every LinkedSlot, releasing the tracked values with it.
+    //
+    // THE OBVIOUS TEST DOES NOT WORK, and the first version of this one was exactly that: after
+    // Dispose, Values throws ObjectDisposedException whether or not the registry was cleared, so
+    // mutation M6 ("Dispose does not release the registry") went UNCAUGHT. The release is
+    // unreachable through the public surface -- its only observable is WHEN the values are
+    // destroyed.
+    //
+    // So the value is created on a worker thread which then EXITS, destroying its thread-local
+    // map: at that point the registry is the only owner, and clearing it is what runs the
+    // destructor.
+    System::Threading::ThreadLocal<DestructionCounter> local(
+        std::function<DestructionCounter()>([] { return DestructionCounter{}; }), true);
+
+    { std::thread t([&local] { (void)local.getValueProperty(); }); t.join(); }
+    ASSERT_EQ(local.getValuesProperty().size(), 1u);
+
+    const int before = DestructionCounter::count().load();
+    local.Dispose();
+    const int after = DestructionCounter::count().load();
+    EXPECT_GT(after, before)
+        << "Dispose must release the registry -- it is the last owner once the thread has gone";
+
+    EXPECT_THROW((void)local.getValuesProperty(), System::ObjectDisposedException);
 }

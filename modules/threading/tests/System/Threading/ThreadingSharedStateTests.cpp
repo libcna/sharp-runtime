@@ -63,7 +63,10 @@ TEST(ThreadingSharedStateTests, RepairedTypes_LayoutUnchanged) {
     EXPECT_EQ(sizeof(ManualResetEventSlim), 112u);
     EXPECT_EQ(sizeof(CountdownEvent), 104u);
     EXPECT_EQ(sizeof(Barrier), 160u);
-    EXPECT_EQ(sizeof(ThreadLocal<int>), 56u);
+    // #1958/SR-AUD-220 grew this 56 -> 128: trackAllValues_ was accepted and never read, and
+    // making it mean something needs a mutex (40) and a vector (24) for the instance-wide value
+    // registry. A real object-layout change under SA-3; consumers must be recompiled.
+    EXPECT_EQ(sizeof(ThreadLocal<int>), 128u);   // #1958/SR-AUD-220: was 56
 
     EXPECT_EQ(alignof(ReaderWriterLockSlim), 8u);
     EXPECT_EQ(alignof(SemaphoreSlim), 8u);
