@@ -404,38 +404,49 @@ TEST(UriBuilderTest, Fix2391_TheComparandIsAStringSoAnUnparseableOTHERIsMerelyUn
         << "an unparseable SELF throws, because the Uri property does";
 }
 
-TEST(UriBuilderTest, Fix2391_TheComparandKindIsRelativeOrAbsoluteAndItIsLoadBearing) {
-    // .NET's comparand branch uses UriKind.RelativeOrAbsolute, NOT Absolute
-    // (Uri.cs, the `comparand is string` branch). Absolute is the plausible wrong choice -- it is
-    // what #1997 A-3 picked for the CREATION overloads, and the two questions have different
-    // answers.
+TEST(UriBuilderTest, Decl2391_TheComparandKindIsRelativeOrAbsoluteAndIsNowAnEquivalence) {
+    // .NET's comparand branch uses UriKind.RelativeOrAbsolute, NOT Absolute (Uri.cs, the
+    // `comparand is string` branch), and this port transcribes that. HONEST RECORD, and it has
+    // moved twice in one day:
     //
-    // A first cut of this test recorded the kind as an unobservable equivalence, reasoning that
-    // `getUriProperty()` is always absolute so a relative comparand can never be equal. MEASURED,
-    // that reasoning is wrong at its premise: this port's `Uri(std::string)` constructor ACCEPTS
-    // "://example.com/" while `TryCreate(s, UriKind::Absolute)` REJECTS it, so `self` can be a
-    // Uri the strict comparand parse would refuse -- and then the two spellings disagree.
+    //   * The first cut of this case recorded the kind as an unobservable EQUIVALENCE, reasoning
+    //     that getUriProperty() is always ABSOLUTE, so a relative comparand can never compare
+    //     equal and both spellings return false.
+    //   * That reasoning was then measured WRONG, because this port's Uri(std::string)
+    //     constructor ACCEPTED "://example.com/" while its own TryCreate(s, Absolute) REJECTED
+    //     it -- two grammars in one type. `self` could therefore be a Uri the strict comparand
+    //     parse would refuse, and the spellings disagreed. The case was rewritten to pin that.
+    //   * #2393 REMOVED THE SECOND GRAMMAR. Uri(std::string) now delegates to
+    //     Uri(s, UriKind::Absolute), which is what .NET's does (Uri.cs:424-429), so the
+    //     constructor and TryCreate accept exactly the same strings -- and the original
+    //     reasoning becomes true. The kind is an equivalence again, this time for a reason that
+    //     holds by construction rather than by luck.
+    //
+    // So: mutating RelativeOrAbsolute to Absolute is a mutation NO TEST CAN CATCH, and the line
+    // is kept as RelativeOrAbsolute because that is what .NET writes, not because it is
+    // load-bearing. Simplifying it would be simplifying the reference rather than porting it.
     UriBuilder emptyScheme;
     emptyScheme.setSchemeProperty("");   // accepted since #1996 G-3
     emptyScheme.setHostProperty("example.com");
     ASSERT_EQ(emptyScheme.ToString(), "://example.com/");
 
-    // Reachability, measured: the two kinds really do disagree on a string a builder can render.
+    // The premise, measured: the two kinds still disagree on this string, so the branch is
+    // reachable and the equivalence is not vacuous.
     std::shared_ptr<System::Uri> parsed;
     EXPECT_TRUE(System::Uri::TryCreate(emptyScheme.ToString(),
                                        System::UriKind::RelativeOrAbsolute, parsed));
     EXPECT_FALSE(System::Uri::TryCreate(emptyScheme.ToString(),
                                         System::UriKind::Absolute, parsed));
 
-    // THIS is the assertion that discriminates. With RelativeOrAbsolute the comparand parses and
-    // the builder is equal to itself; with Absolute the parse fails and Equals returns false,
-    // making a builder unequal to ITSELF.
-    EXPECT_TRUE(emptyScheme.Equals(emptyScheme))
-        << "a builder must be equal to itself wherever its own Uri is obtainable";
-
-    // Still unequal to a different builder, so the case above is not passing for a trivial reason.
+    // And here is why it no longer discriminates: `self` can no longer BE such a Uri. The builder
+    // throws before any comparand is parsed, so neither spelling is ever reached.
     UriBuilder good; good.setHostProperty("example.com");
-    EXPECT_FALSE(emptyScheme.Equals(good));
+    EXPECT_THROW((void)emptyScheme.getUriProperty(), UriFormatException);
+    EXPECT_THROW((void)emptyScheme.Equals(emptyScheme), UriFormatException);
+    EXPECT_THROW((void)emptyScheme.Equals(good), UriFormatException);
+
+    // An unparseable OTHER is still merely unequal, which is the asymmetry #2391 landed and
+    // #2393 does not touch.
     EXPECT_FALSE(good.Equals(emptyScheme));
 }
 

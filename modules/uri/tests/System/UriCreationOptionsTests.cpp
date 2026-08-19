@@ -59,9 +59,8 @@ TEST(UriCreationOptionsTest, Fix1997A3_TheTryCreateOverloadExists) {
 }
 
 TEST(UriCreationOptionsTest, Decl1997A3_BothOverloadsResolveAgainstAbsoluteNotRelativeOrAbsolute) {
-    // THE DETAIL THAT IS EASY TO GET WRONG, because the sibling one-argument Uri constructor
-    // accepts a relative string. .NET passes UriKind.Absolute in BOTH bodies, so a relative
-    // string throws through the constructor and fails through TryCreate.
+    // .NET passes UriKind.Absolute in BOTH bodies, so a relative string throws through the
+    // constructor and fails through TryCreate.
     UriCreationOptions opts;
     EXPECT_THROW(System::Uri("/relative/path", opts), System::UriFormatException);
 
@@ -69,9 +68,19 @@ TEST(UriCreationOptionsTest, Decl1997A3_BothOverloadsResolveAgainstAbsoluteNotRe
     EXPECT_FALSE(System::Uri::TryCreate("/relative/path", opts, result));
     EXPECT_EQ(result, nullptr);
 
-    // ...while the one-argument constructor still accepts it, which is what makes the
-    // distinction observable rather than theoretical.
-    EXPECT_NO_THROW(System::Uri("/relative/path"));
+    // UPDATED BY #2393. This case used to end by asserting that the ONE-ARGUMENT constructor
+    // still ACCEPTS "/relative/path", and called that "what makes the distinction observable
+    // rather than theoretical". It was observable, and it was a DEFECT rather than a
+    // distinction: .NET's one-argument constructor is CreateThis(uriString, false,
+    // UriKind.Absolute) (Uri.cs:424-429), the same grammar TryCreate uses, so it rejects a
+    // relative string too. #2393 made the two agree, and the assertion is inverted.
+    EXPECT_THROW((void)System::Uri("/relative/path"), System::UriFormatException)
+        << "#2393: the one-argument constructor is UriKind::Absolute, as .NET's is";
+
+    // What genuinely IS a distinction, and what this case is really for: the options overloads
+    // resolve against Absolute rather than RelativeOrAbsolute. Asserted against the kind that
+    // WOULD have accepted it, so the case still discriminates now that the sibling agrees.
+    EXPECT_NO_THROW((void)System::Uri("/relative/path", System::UriKind::RelativeOrAbsolute));
 }
 
 TEST(UriCreationOptionsTest, Decl1997A3_TheFlagIsInertAndTheResultIsIdentical) {

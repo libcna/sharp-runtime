@@ -405,9 +405,21 @@ void Uri::parse(const std::string& rawUriString) {
 // Constructors
 // ---------------------------------------------------------------------------
 
-Uri::Uri(const std::string& uriString) {
-    parse(uriString);
-}
+// Ticket #2393. .NET's one-argument constructor is `CreateThis(uriString, false,
+// UriKind.Absolute)` (Uri.cs:424-429) and TryCreate(s, UriKind.Absolute, out u) is
+// `CreateHelper(uriString, false, UriKind.Absolute)` (UriExt.cs:223-227) -- the SAME grammar, so
+// in .NET the constructor throws exactly where TryCreate returns false.
+//
+// This port had TWO grammars: the body below called parse() and never checked isAbsoluteUri_,
+// while the (string, UriKind) overload did. So `Uri("://example.com/")` SUCCEEDED while
+// `Uri::TryCreate("://example.com/", UriKind::Absolute, u)` returned FALSE -- a caller could
+// construct a Uri this port's own TryCreate says is not an absolute URI. Reachable from ordinary
+// code: a UriBuilder with an empty scheme (accepted since #1996 G-3) renders "://example.com/",
+// and UriBuilder::getUriProperty() is Uri(ToString()).
+//
+// Delegating is the whole repair, and it is a NARROWING: a relative string that used to construct
+// silently now throws UriFormatException, which is what .NET does.
+Uri::Uri(const std::string& uriString) : Uri(uriString, UriKind::Absolute) {}
 
 Uri::Uri(const std::string& uriString, UriKind uriKind) {
     // Ticket #1992 (SR-AUD-145b): reject a value outside the enum's declared domain BEFORE

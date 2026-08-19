@@ -87,6 +87,20 @@ namespace System {
          *         would report the scheme's default port for a host that does not exist,
          *         while `"file:///path"` (RFC 8089) and every hierarchical scheme with no
          *         default-port entry keep an empty host with `Port == -1` and are accepted.
+         *
+         * @note **This constructor requires an ABSOLUTE URI** and throws `UriFormatException` for
+         * a relative reference — ticket **#2393**, 2026-08-19. It is
+         * `CreateThis(uriString, false, UriKind.Absolute)` in .NET (`Uri.cs:424-429`), the same
+         * grammar `TryCreate(s, UriKind::Absolute, u)` uses, so the two accept exactly the same
+         * strings and the constructor throws precisely where `TryCreate` returns `false`.
+         *
+         * **This is a narrowing.** It used to call `parse()` and never check, so it silently
+         * accepted every relative reference — and, because the sibling overload *did* check, this
+         * port carried **two absolute-URI grammars**: `Uri("://example.com/")` succeeded while
+         * `TryCreate("://example.com/", UriKind::Absolute, u)` returned `false`. To construct a
+         * relative reference, name the kind:
+         * `Uri("/relative/path", UriKind::RelativeOrAbsolute)`. Relative-URI support itself is
+         * unchanged. See `docs/Migration-UriConstructorRequiresAnAbsoluteUri.md`.
          */
         explicit Uri(const std::string& uriString);
 

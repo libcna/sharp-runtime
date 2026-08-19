@@ -183,8 +183,48 @@ TEST(UriTests, Loopback_LocalhostUppercase_IsLoopback) {
 // Relative URI
 // ---------------------------------------------------------------------------
 
+TEST(UriTests, Fix2393_TheConstructorAndTryCreateShareOneGrammar) {
+    // #2393. This port had TWO absolute-URI grammars: the one-argument constructor called parse()
+    // and never checked isAbsoluteUri_, while the (string, UriKind) overload did -- and TryCreate
+    // goes through the latter. So a caller could CONSTRUCT a Uri that this port's own TryCreate
+    // says is not an absolute URI.
+    //
+    // In .NET they are one grammar BY CONSTRUCTION: `new Uri(s)` is
+    // CreateThis(s, false, UriKind.Absolute) (Uri.cs:424-429) and
+    // TryCreate(s, UriKind.Absolute, out u) is CreateHelper(s, false, UriKind.Absolute)
+    // (UriExt.cs:223-227); CreateThis throws whatever CreateHelper would have returned null for.
+    //
+    // Asserted as an EQUIVALENCE over a corpus rather than on one string, because a repair that
+    // fixed only the reported example would pass a single-row test.
+    const char* rows[] = {
+        "://example.com/",          // the reported example -- an empty scheme
+        "/relative/path",           // an absolute-path reference
+        "relative/path",            // a relative-path reference
+        "//host/path",              // a network-path reference
+        "?query",                   // a query-only reference
+        "#fragment",                // a fragment-only reference
+        ":",                        // degenerate
+        "",                         // empty
+        "http://example.com/",      // ...and the absolute cases, which must still be accepted
+        "mailto:a@b",
+        "file:///tmp/x",
+    };
+    for (const char* text : rows) {
+        std::shared_ptr<Uri> viaTryCreate;
+        const bool tryCreateAccepts = Uri::TryCreate(text, UriKind::Absolute, viaTryCreate);
+
+        bool constructorAccepts = true;
+        try { Uri probe{std::string(text)}; (void)probe; }
+        catch (const System::UriFormatException&) { constructorAccepts = false; }
+
+        EXPECT_EQ(constructorAccepts, tryCreateAccepts)
+            << "#2393: the constructor and TryCreate(Absolute) must accept exactly the same "
+               "strings. Disagreed on: \"" << text << "\"";
+    }
+}
+
 TEST(UriTests, Relative_IsNotAbsolute) {
-    Uri u("/relative/path");
+    Uri u("/relative/path", UriKind::RelativeOrAbsolute);
     EXPECT_FALSE(u.getIsAbsoluteUriProperty());
 }
 
@@ -420,7 +460,7 @@ TEST(UriTests, OriginalString_WorksForRelativeUri) {
 // ---------------------------------------------------------------------------
 
 TEST(UriTests, SchemeDetection_RelativeWithAbsoluteUrlInQuery_IsRelative) {
-    Uri u("/path?redirect=http://evil.com");
+    Uri u("/path?redirect=http://evil.com", UriKind::RelativeOrAbsolute);
     EXPECT_FALSE(u.getIsAbsoluteUriProperty());
     EXPECT_EQ(u.getSchemeProperty(), "");
     // The whole reference is preserved by OriginalString/AbsoluteUri. AbsolutePath is the
@@ -433,13 +473,13 @@ TEST(UriTests, SchemeDetection_RelativeWithAbsoluteUrlInQuery_IsRelative) {
 }
 
 TEST(UriTests, SchemeDetection_PathlessRelativeWithAbsoluteUrlInQuery_IsRelative) {
-    Uri u("search?url=https://example.com");
+    Uri u("search?url=https://example.com", UriKind::RelativeOrAbsolute);
     EXPECT_FALSE(u.getIsAbsoluteUriProperty());
     EXPECT_EQ(u.getOriginalStringProperty(), "search?url=https://example.com");
 }
 
 TEST(UriTests, SchemeDetection_RelativeWithAbsoluteUrlInFragment_IsRelative) {
-    Uri u("page#see=http://example.com");
+    Uri u("page#see=http://example.com", UriKind::RelativeOrAbsolute);
     EXPECT_FALSE(u.getIsAbsoluteUriProperty());
     // Same #2002 update as the query case above; before #2002 this assertion read
     // getAbsolutePathProperty() == "page#see=http://example.com".
@@ -467,14 +507,14 @@ TEST(UriTests, SchemeDetection_ColonBeforeSlashSlash_TakesTheFirstColon) {
 }
 
 TEST(UriTests, SchemeDetection_LeadingColon_IsRelative) {
-    Uri u("://foo");
+    Uri u("://foo", UriKind::RelativeOrAbsolute);
     EXPECT_FALSE(u.getIsAbsoluteUriProperty());
     EXPECT_EQ(u.getAbsolutePathProperty(), "://foo");
 }
 
 TEST(UriTests, SchemeDetection_SchemeStartingWithDigit_IsRelative) {
     // RFC 3986 requires ALPHA first, so "1http:" is not a scheme token.
-    Uri u("1http://example.com/");
+    Uri u("1http://example.com/", UriKind::RelativeOrAbsolute);
     EXPECT_FALSE(u.getIsAbsoluteUriProperty());
 }
 
@@ -890,9 +930,9 @@ TEST(UriTests, Decl1995_RenderedStringsAreUnchanged) {
 TEST(UriTests, Decl1995_ARelativeReferenceComparesItsOriginalString) {
     // .NET: "if (IsNotAbsoluteUri) return OriginalString.Equals(other.OriginalString);"
     // (Uri.cs:1752-1753) -- no canonicalisation, and never equal to an absolute URI.
-    EXPECT_TRUE(Uri("/a/b") == Uri("/a/b"));
-    EXPECT_FALSE(Uri("/a/b") == Uri("/A/B")) << "no folding for a relative reference";
-    EXPECT_FALSE(Uri("/a/b") == Uri("http://example.com/a/b"));
+    EXPECT_TRUE(Uri("/a/b", UriKind::RelativeOrAbsolute) == Uri("/a/b", UriKind::RelativeOrAbsolute));
+    EXPECT_FALSE(Uri("/a/b", UriKind::RelativeOrAbsolute) == Uri("/A/B", UriKind::RelativeOrAbsolute)) << "no folding for a relative reference";
+    EXPECT_FALSE(Uri("/a/b", UriKind::RelativeOrAbsolute) == Uri("http://example.com/a/b", UriKind::RelativeOrAbsolute));
 }
 
 TEST(UriTests, DocumentedContract_MixedCaseSchemeHasNoDefaultPort) {
@@ -1046,7 +1086,8 @@ TEST(UriTests, EmptyAuthority_RelativeReferencesAreUnaffected) {
     // rejected. Their component split is ticket #2002's subject, so the assertion is on
     // OriginalString, which no ticket in this batch moves.
     for (const char* text : {"//", "//other.example/c", "/path", "path", "?q", "#f"}) {
-        Uri u{std::string(text)};
+        // UriKind since #2393: the one-argument constructor is UriKind::Absolute, as .NET's is.
+        Uri u{std::string(text), UriKind::RelativeOrAbsolute};
         EXPECT_FALSE(u.getIsAbsoluteUriProperty()) << text;
         EXPECT_EQ(u.getOriginalStringProperty(), text) << text;
     }
@@ -1286,7 +1327,7 @@ TEST(UriTests, OpaqueBase_ResultsRoundTrip) {
 }
 
 TEST(UriTests, OpaqueBase_RelativeBaseIsStillRejected) {
-    Uri relative("just/a/path");
+    Uri relative("just/a/path", UriKind::RelativeOrAbsolute);
     EXPECT_THROW(Uri(relative, "c"), System::ArgumentOutOfRangeException);
 }
 
@@ -1307,7 +1348,7 @@ TEST(UriTests, OpaqueBase_RelativeBaseIsStillRejected) {
 // ---------------------------------------------------------------------------
 
 TEST(UriTests, RelativeComponents_QueryIsSplitOutOfThePath) {
-    Uri u("a?b");
+    Uri u("a?b", UriKind::RelativeOrAbsolute);
     EXPECT_FALSE(u.getIsAbsoluteUriProperty());
     EXPECT_EQ(u.getAbsolutePathProperty(), "a");
     EXPECT_EQ(u.getQueryProperty(), "?b");
@@ -1315,14 +1356,14 @@ TEST(UriTests, RelativeComponents_QueryIsSplitOutOfThePath) {
 }
 
 TEST(UriTests, RelativeComponents_FragmentIsSplitOutOfThePath) {
-    Uri u("a#c");
+    Uri u("a#c", UriKind::RelativeOrAbsolute);
     EXPECT_EQ(u.getAbsolutePathProperty(), "a");
     EXPECT_EQ(u.getQueryProperty(), "");
     EXPECT_EQ(u.getFragmentProperty(), "#c");
 }
 
 TEST(UriTests, RelativeComponents_QueryAndFragmentTogether) {
-    Uri u("a?b#c");
+    Uri u("a?b#c", UriKind::RelativeOrAbsolute);
     EXPECT_EQ(u.getAbsolutePathProperty(), "a");
     EXPECT_EQ(u.getQueryProperty(), "?b");
     EXPECT_EQ(u.getFragmentProperty(), "#c");
@@ -1330,11 +1371,11 @@ TEST(UriTests, RelativeComponents_QueryAndFragmentTogether) {
 }
 
 TEST(UriTests, RelativeComponents_QueryOnlyAndFragmentOnlyHaveAnEmptyPath) {
-    Uri query("?b");
+    Uri query("?b", UriKind::RelativeOrAbsolute);
     EXPECT_EQ(query.getAbsolutePathProperty(), "");
     EXPECT_EQ(query.getQueryProperty(), "?b");
 
-    Uri fragment("#c");
+    Uri fragment("#c", UriKind::RelativeOrAbsolute);
     EXPECT_EQ(fragment.getAbsolutePathProperty(), "");
     EXPECT_EQ(fragment.getFragmentProperty(), "#c");
     EXPECT_EQ(fragment.getQueryProperty(), "");
@@ -1342,20 +1383,20 @@ TEST(UriTests, RelativeComponents_QueryOnlyAndFragmentOnlyHaveAnEmptyPath) {
 
 TEST(UriTests, RelativeComponents_EmptyQueryAndEmptyFragmentAreKept) {
     // Exactly what the absolute branch does: a bare '?' is a present-but-empty query.
-    EXPECT_EQ(Uri("a?").getQueryProperty(), "?");
-    EXPECT_EQ(Uri("a?").getAbsolutePathProperty(), "a");
-    EXPECT_EQ(Uri("a#").getFragmentProperty(), "#");
-    EXPECT_EQ(Uri("a#").getAbsolutePathProperty(), "a");
-    EXPECT_EQ(Uri("a?#").getQueryProperty(), "?");
-    EXPECT_EQ(Uri("a?#").getFragmentProperty(), "#");
+    EXPECT_EQ(Uri("a?", UriKind::RelativeOrAbsolute).getQueryProperty(), "?");
+    EXPECT_EQ(Uri("a?", UriKind::RelativeOrAbsolute).getAbsolutePathProperty(), "a");
+    EXPECT_EQ(Uri("a#", UriKind::RelativeOrAbsolute).getFragmentProperty(), "#");
+    EXPECT_EQ(Uri("a#", UriKind::RelativeOrAbsolute).getAbsolutePathProperty(), "a");
+    EXPECT_EQ(Uri("a?#", UriKind::RelativeOrAbsolute).getQueryProperty(), "?");
+    EXPECT_EQ(Uri("a?#", UriKind::RelativeOrAbsolute).getFragmentProperty(), "#");
 }
 
 TEST(UriTests, RelativeComponents_FirstDelimiterWins) {
     // The fragment is split first, so a '?' after a '#' belongs to the fragment and a second
     // '?' belongs to the query — identical to the absolute and opaque branches.
-    EXPECT_EQ(Uri("a?b?c").getQueryProperty(), "?b?c");
-    EXPECT_EQ(Uri("a#c#d").getFragmentProperty(), "#c#d");
-    Uri fragFirst("a#c?b");
+    EXPECT_EQ(Uri("a?b?c", UriKind::RelativeOrAbsolute).getQueryProperty(), "?b?c");
+    EXPECT_EQ(Uri("a#c#d", UriKind::RelativeOrAbsolute).getFragmentProperty(), "#c#d");
+    Uri fragFirst("a#c?b", UriKind::RelativeOrAbsolute);
     EXPECT_EQ(fragFirst.getAbsolutePathProperty(), "a");
     EXPECT_EQ(fragFirst.getFragmentProperty(), "#c?b");
     EXPECT_EQ(fragFirst.getQueryProperty(), "");
@@ -1363,19 +1404,19 @@ TEST(UriTests, RelativeComponents_FirstDelimiterWins) {
 
 TEST(UriTests, RelativeComponents_EscapedDelimitersAreNotSplit) {
     // The no-percent-decoding boundary is unchanged: "%3F" and "%23" are ordinary characters.
-    EXPECT_EQ(Uri("a%3Fb").getAbsolutePathProperty(), "a%3Fb");
-    EXPECT_EQ(Uri("a%3Fb").getQueryProperty(), "");
-    EXPECT_EQ(Uri("a%23c").getAbsolutePathProperty(), "a%23c");
-    EXPECT_EQ(Uri("a%23c").getFragmentProperty(), "");
+    EXPECT_EQ(Uri("a%3Fb", UriKind::RelativeOrAbsolute).getAbsolutePathProperty(), "a%3Fb");
+    EXPECT_EQ(Uri("a%3Fb", UriKind::RelativeOrAbsolute).getQueryProperty(), "");
+    EXPECT_EQ(Uri("a%23c", UriKind::RelativeOrAbsolute).getAbsolutePathProperty(), "a%23c");
+    EXPECT_EQ(Uri("a%23c", UriKind::RelativeOrAbsolute).getFragmentProperty(), "");
 }
 
 TEST(UriTests, RelativeComponents_AbsolutePathAndNetworkPathReferences) {
-    Uri absolutePath("/p/q?b#c");
+    Uri absolutePath("/p/q?b#c", UriKind::RelativeOrAbsolute);
     EXPECT_EQ(absolutePath.getAbsolutePathProperty(), "/p/q");
     EXPECT_EQ(absolutePath.getQueryProperty(), "?b");
     EXPECT_EQ(absolutePath.getFragmentProperty(), "#c");
 
-    Uri networkPath("//host/p?b#c");
+    Uri networkPath("//host/p?b#c", UriKind::RelativeOrAbsolute);
     EXPECT_FALSE(networkPath.getIsAbsoluteUriProperty());
     EXPECT_EQ(networkPath.getAbsolutePathProperty(), "//host/p");
     EXPECT_EQ(networkPath.getQueryProperty(), "?b");
@@ -1384,21 +1425,22 @@ TEST(UriTests, RelativeComponents_AbsolutePathAndNetworkPathReferences) {
 TEST(UriTests, RelativeComponents_OriginalStringAndIdentityAreUnchanged) {
     // The four things this ticket must NOT move: OriginalString, AbsoluteUri, ToString and
     // identity all read the verbatim input.
-    Uri u("a?b#c");
+    Uri u("a?b#c", UriKind::RelativeOrAbsolute);
     EXPECT_EQ(u.getOriginalStringProperty(), "a?b#c");
     EXPECT_EQ(u.getAbsoluteUriProperty(), "a?b#c");
     EXPECT_EQ(u.ToString(), "a?b#c");
-    Uri same("a?b#c");
+    Uri same("a?b#c", UriKind::RelativeOrAbsolute);
     EXPECT_TRUE(u == same);
     EXPECT_EQ(u.GetHashCode(), same.GetHashCode());
-    Uri other("a?b");
+    Uri other("a?b", UriKind::RelativeOrAbsolute);
     EXPECT_FALSE(u == other);
 }
 
 TEST(UriTests, RelativeComponents_RoundTrip) {
     for (const char* text : {"a?b", "a#c", "a?b#c", "?b", "#c", "/p/q?b#c"}) {
-        Uri u{std::string(text)};
-        Uri again(u.getAbsoluteUriProperty());
+        // UriKind since #2393: the one-argument constructor is UriKind::Absolute, as .NET's is.
+        Uri u{std::string(text), UriKind::RelativeOrAbsolute};
+        Uri again(u.getAbsoluteUriProperty(), UriKind::RelativeOrAbsolute);
         EXPECT_TRUE(again == u) << text;
         EXPECT_EQ(again.getAbsolutePathProperty(), u.getAbsolutePathProperty()) << text;
         EXPECT_EQ(again.getQueryProperty(), u.getQueryProperty()) << text;
@@ -1465,27 +1507,27 @@ TEST(UriTests, EmbeddedNul_IsCarriedThroughEveryComponentWithoutTruncation) {
     // #2359: a NUL in the HOST is now rejected, because NUL is not in DomainNameHelper's
     // s_validChars either -- the same rule that rejects a space. Every other component is
     // untouched, which is what this test is about.
-    EXPECT_THROW((void)Uri(std::string("http://h\0st/p", 13)), System::UriFormatException);
+    EXPECT_THROW((void)Uri(std::string("http://h\0st/p", 13), UriKind::RelativeOrAbsolute), System::UriFormatException);
 
-    Uri path(std::string("http://h/a\0b", 12));
+    Uri path(std::string("http://h/a\0b", 12), UriKind::RelativeOrAbsolute);
     EXPECT_EQ(path.getAbsolutePathProperty(), std::string("/a\0b", 4));
     EXPECT_EQ(path.getAbsoluteUriProperty().size(), 12u);
     EXPECT_EQ(path.ToString().size(), 12u);
 
-    Uri query(std::string("http://h/p?a\0b", 14));
+    Uri query(std::string("http://h/p?a\0b", 14), UriKind::RelativeOrAbsolute);
     EXPECT_EQ(query.getQueryProperty(), std::string("?a\0b", 4));
 
-    Uri fragment(std::string("http://h/p#a\0b", 14));
+    Uri fragment(std::string("http://h/p#a\0b", 14), UriKind::RelativeOrAbsolute);
     EXPECT_EQ(fragment.getFragmentProperty(), std::string("#a\0b", 4));
 
-    Uri userInfo(std::string("http://u\0r@h/p", 14));
+    Uri userInfo(std::string("http://u\0r@h/p", 14), UriKind::RelativeOrAbsolute);
     EXPECT_EQ(userInfo.getUserInfoProperty(), std::string("u\0r", 3));
 
-    Uri relative(std::string("a\0b", 3));
+    Uri relative(std::string("a\0b", 3), UriKind::RelativeOrAbsolute);
     EXPECT_FALSE(relative.getIsAbsoluteUriProperty());
     EXPECT_EQ(relative.getAbsolutePathProperty(), std::string("a\0b", 3));
 
-    Uri opaque(std::string("mailto:a\0b", 10));
+    Uri opaque(std::string("mailto:a\0b", 10), UriKind::RelativeOrAbsolute);
     EXPECT_EQ(opaque.getAbsolutePathProperty(), std::string("a\0b", 3));
 }
 
@@ -1511,13 +1553,13 @@ TEST(UriTests, EmbeddedNul_InThePortPositionIsStillRejected) {
 TEST(UriTests, Decl2003_RejectionIsConfinedToTheThreePlacesDotNetRejects) {
     // HOST -- DomainNameHelper.IsValid tests IndexOfAnyExcept over "-0-9A-Z_a-z.", and a NUL is
     // outside it (#2359).
-    EXPECT_THROW((void)Uri(std::string("http://h\0st/p", 13)), System::UriFormatException);
+    EXPECT_THROW((void)Uri(std::string("http://h\0st/p", 13), UriKind::RelativeOrAbsolute), System::UriFormatException);
     // PORT -- not a digit.
-    EXPECT_THROW((void)Uri(std::string("http://h:8\0 0/p", 15)), System::UriFormatException);
+    EXPECT_THROW((void)Uri(std::string("http://h:8\0 0/p", 15), UriKind::RelativeOrAbsolute), System::UriFormatException);
     // SCHEME -- a NUL is not a scheme character, so the reference is RELATIVE rather than
     // rejected, and the whole text becomes the path. That is .NET's fallback too, and it is
     // why "reject anywhere" would have been wrong here as well as in the path.
-    Uri notAScheme(std::string("ht\0tp://h/p", 11));
+    Uri notAScheme(std::string("ht\0tp://h/p", 11), UriKind::RelativeOrAbsolute);
     EXPECT_FALSE(notAScheme.getIsAbsoluteUriProperty());
     EXPECT_EQ(notAScheme.getAbsolutePathProperty().size(), 11u);
 
@@ -1534,7 +1576,7 @@ TEST(UriTests, Decl2003_RejectionIsConfinedToTheThreePlacesDotNetRejects) {
         {std::string("mailto:a\0b", 10),     10},
     };
     for (const auto& row : rows) {
-        Uri u(row.text);
+        Uri u(row.text, UriKind::RelativeOrAbsolute);
         EXPECT_EQ(u.ToString().size(), row.expected) << "input of " << row.text.size() << " bytes";
         EXPECT_EQ(u.ToString(), row.text);
     }
@@ -1571,7 +1613,7 @@ TEST(UriTests, Fix2005_TheTrimmedSetIsExactlyDotNetsIsLWS) {
     // folds vertical tab and form feed and is locale-sensitive.
     for (const char* pad : {" ", "\t", "\r", "\n", " \t\r\n "}) {
         SCOPED_TRACE(pad);
-        Uri padded(std::string(pad) + "http://h/p" + pad);
+        Uri padded(std::string(pad) + "http://h/p" + pad, UriKind::RelativeOrAbsolute);
         EXPECT_TRUE(padded.getIsAbsoluteUriProperty());
         EXPECT_EQ(padded.getHostProperty(), "h");
         EXPECT_EQ(padded.getAbsolutePathProperty(), "/p");
@@ -1579,7 +1621,7 @@ TEST(UriTests, Fix2005_TheTrimmedSetIsExactlyDotNetsIsLWS) {
 
     // A vertical tab is NOT linear whitespace, so it is left to fail as an ordinary bad
     // character rather than being trimmed away.
-    EXPECT_FALSE(Uri("\vhttp://h/p").getIsAbsoluteUriProperty())
+    EXPECT_FALSE(Uri("\vhttp://h/p", UriKind::RelativeOrAbsolute).getIsAbsoluteUriProperty())
         << "trimming more than IsLWS would accept text .NET rejects";
 }
 
