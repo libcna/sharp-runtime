@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <algorithm>
+#include "System/MathF.hpp"
 #include <array>
 #include <charconv>
 #include <cstdint>
@@ -190,6 +191,82 @@ public:
      * `BFloat16.cs:150-154`: `(~bits & PositiveInfinityBits) != 0`, i.e. the eight exponent
      * bits are not all set. Written here as the equivalent mask comparison.
      */
+    // -----------------------------------------------------------------------------------
+    // #2384 unit 1: the sign/magnitude family, moving in step with System::Half.
+    //
+    // EVERY BODY WAS DERIVED FROM BFloat16.cs SEPARATELY rather than copied from Half, which is
+    // #2382's lesson applied rather than quoted: there, copying Half::GetHashCode would have
+    // compiled, satisfied the hash contract and returned the WRONG NUMBER, because .NET's
+    // BFloat16 delegates its identity trio to float while Half masks to 16 bits. Checked here:
+    // for these nine members the two references agree, and the only textual difference is that
+    // BFloat16.Clamp calls Math.Clamp where Half.Clamp calls float.Clamp -- same semantics.
+    // -----------------------------------------------------------------------------------
+
+    /** @brief The absolute value. .NET: `value._value & ~SignMask` (`BFloat16.cs:1396`) -- a BIT
+     *  MASK, not a float round-trip, so a NaN keeps its payload. */
+    [[nodiscard]] static BFloat16 Abs(BFloat16 value) noexcept {
+        return BFloat16(static_cast<uint16_t>(value.bits_ & 0x7FFFu));
+    }
+
+    /** @brief Copies the sign of @p sign onto the magnitude of @p value. .NET:
+     *  `BFloat16.cs:1300-1310`, bitwise because -- in its own comment -- the method "is required
+     *  to work for all inputs, including NaN". */
+    [[nodiscard]] static BFloat16 CopySign(BFloat16 value, BFloat16 sign) noexcept {
+        return BFloat16(static_cast<uint16_t>((value.bits_ & 0x7FFFu) | (sign.bits_ & 0x8000u)));
+    }
+
+    /** @brief The next representable value greater than @p x. .NET: `BFloat16.cs:1134-1164`.
+     *  Edges transcribed: NaN returns itself, -Infinity returns MinValue, +Infinity returns
+     *  itself, and **-0.0 returns Epsilon**. */
+    [[nodiscard]] static BFloat16 BitIncrement(BFloat16 x) noexcept {
+        uint16_t bits = x.bits_;
+        if (!IsFinite(x)) {
+            return (bits == 0xFF80u) ? MinValue() : x;   // -Infinity -> MinValue
+        }
+        if (bits == 0x8000u) return Epsilon();           // -0.0 -> Epsilon
+        if (IsNegative(x)) --bits; else ++bits;
+        return BFloat16(bits);
+    }
+
+    /** @brief The next representable value less than @p x. .NET: `BFloat16.cs:1101-1131`.
+     *  +Infinity returns MaxValue and **+0.0 returns -Epsilon**. */
+    [[nodiscard]] static BFloat16 BitDecrement(BFloat16 x) noexcept {
+        uint16_t bits = x.bits_;
+        if (!IsFinite(x)) {
+            return (bits == 0x7F80u) ? MaxValue() : x;   // +Infinity -> MaxValue
+        }
+        if (bits == 0x0000u) {
+            return BFloat16(static_cast<uint16_t>(Epsilon().bits_ | 0x8000u));  // +0.0 -> -Epsilon
+        }
+        if (IsNegative(x)) ++bits; else --bits;
+        return BFloat16(bits);
+    }
+
+    /** @brief Clamps @p value to [@p min, @p max]. .NET: `(BFloat16)Math.Clamp((float)...)`
+     *  (`BFloat16.cs:1297`) -- a float round-trip, unlike Abs and CopySign above. */
+    [[nodiscard]] static BFloat16 Clamp(BFloat16 value, BFloat16 min, BFloat16 max) {
+        return BFloat16(System::MathF::Clamp(toFloat(value.bits_), toFloat(min.bits_),
+                                             toFloat(max.bits_)));
+    }
+    /** @brief The larger of two values, through `float`, as .NET does. */
+    [[nodiscard]] static BFloat16 Max(BFloat16 x, BFloat16 y) noexcept {
+        return BFloat16(System::MathF::Max(toFloat(x.bits_), toFloat(y.bits_)));
+    }
+    /** @brief The smaller of two values, through `float`, as .NET does. */
+    [[nodiscard]] static BFloat16 Min(BFloat16 x, BFloat16 y) noexcept {
+        return BFloat16(System::MathF::Min(toFloat(x.bits_), toFloat(y.bits_)));
+    }
+    /** @brief The value with the larger magnitude. .NET: `float.MaxMagnitude`
+     *  (`BFloat16.cs:1491`). */
+    [[nodiscard]] static BFloat16 MaxMagnitude(BFloat16 x, BFloat16 y) noexcept {
+        return BFloat16(System::MathF::MaxMagnitude(toFloat(x.bits_), toFloat(y.bits_)));
+    }
+    /** @brief The value with the smaller magnitude. .NET: `float.MinMagnitude`
+     *  (`BFloat16.cs:1519`). */
+    [[nodiscard]] static BFloat16 MinMagnitude(BFloat16 x, BFloat16 y) noexcept {
+        return BFloat16(System::MathF::MinMagnitude(toFloat(x.bits_), toFloat(y.bits_)));
+    }
+
     [[nodiscard]] static bool IsFinite(BFloat16 v) noexcept {
         return (v.bits_ & 0x7F80u) != 0x7F80u;
     }

@@ -2,6 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <utility>
 #include "System/detail/SpecialFolderDefinedness.hpp"
 #include <cerrno>
 #include <cstddef>
@@ -640,6 +643,167 @@ TEST(EnvironmentTests, GetFolderPath_MyDocuments_NonEmpty) {
                                                Environment::SpecialFolderOption::DoNotVerify);
     EXPECT_FALSE(p.empty());
 }
+// ---------------------------------------------------------------------------
+// #2364 -- the eight rows #2320 left, aligned 2026-08-19.
+//
+// Every case uses DoNotVerify, so what is asserted is the MAPPING rather than whether this
+// machine happens to have the directory. That is the #2320 / SA-6 lesson stated as a rule: five of
+// its rows passed only because this container has ~/Desktop, which SA-6 calls a defect in the
+// TEST rather than evidence about the code.
+//
+// $HOME is set explicitly per case rather than read, for the same reason -- a path derived from
+// the machine's own environment cannot discriminate a mapping from a coincidence.
+// ---------------------------------------------------------------------------
+
+namespace {
+    /// Restores HOME and every XDG variable this suite perturbs, whatever the case does.
+    class ScopedFolderEnv {
+        std::vector<std::pair<std::string, std::optional<std::string>>> saved_;
+    public:
+        void set(const std::string& name, const std::optional<std::string>& value) {
+            saved_.emplace_back(name, Environment::GetEnvironmentVariable(name));
+            Environment::SetEnvironmentVariable(name, value);
+        }
+        ~ScopedFolderEnv() {
+            for (auto it = saved_.rbegin(); it != saved_.rend(); ++it)
+                Environment::SetEnvironmentVariable(it->first, it->second);
+        }
+    };
+
+    std::string folder(Environment::SpecialFolder f) {
+        return Environment::GetFolderPath(f, Environment::SpecialFolderOption::DoNotVerify);
+    }
+}
+
+TEST(EnvironmentTests, Fix2364_TheSixUserDirectoriesGoThroughReadXdgDirectory) {
+    // GetFolderPathCore.Unix.cs:88-89, 119-121, 133-140. Each falls back to home/<name> when the
+    // variable is unset and no user-dirs.dirs entry matches -- which is the shape this case pins,
+    // with an XDG config directory pointed at somewhere that has no user-dirs.dirs at all.
+    ScopedFolderEnv env;
+    env.set("HOME", "/tmp-not-used/h2364");
+    env.set("XDG_CONFIG_HOME", "/tmp-not-used/h2364/emptyconfig");
+    for (const char* key : {"XDG_DOCUMENTS_DIR", "XDG_DESKTOP_DIR", "XDG_MUSIC_DIR",
+                            "XDG_PICTURES_DIR", "XDG_VIDEOS_DIR", "XDG_TEMPLATES_DIR"})
+        env.set(key, std::nullopt);
+
+    // THE SHARPEST ROW: this port used to return the HOME DIRECTORY ITSELF for Personal, so an
+    // application writing "the user's documents" wrote into $HOME.
+    EXPECT_EQ(folder(Environment::SpecialFolder::Personal), "/tmp-not-used/h2364/Documents");
+    EXPECT_EQ(folder(Environment::SpecialFolder::MyDocuments), "/tmp-not-used/h2364/Documents")
+        << "MyDocuments == Personal (0x0005), so it must move with it";
+    EXPECT_EQ(folder(Environment::SpecialFolder::Desktop), "/tmp-not-used/h2364/Desktop");
+    EXPECT_EQ(folder(Environment::SpecialFolder::DesktopDirectory), "/tmp-not-used/h2364/Desktop");
+    EXPECT_EQ(folder(Environment::SpecialFolder::MyMusic), "/tmp-not-used/h2364/Music");
+    EXPECT_EQ(folder(Environment::SpecialFolder::MyPictures), "/tmp-not-used/h2364/Pictures");
+    EXPECT_EQ(folder(Environment::SpecialFolder::MyVideos), "/tmp-not-used/h2364/Videos");
+    EXPECT_EQ(folder(Environment::SpecialFolder::Templates), "/tmp-not-used/h2364/Templates");
+
+    // UserProfile is home ITSELF and must NOT have moved with Personal -- the two used to be the
+    // same answer, so a repair that moved both would look right here without this row.
+    EXPECT_EQ(folder(Environment::SpecialFolder::UserProfile), "/tmp-not-used/h2364");
+}
+
+TEST(EnvironmentTests, Fix2364_AnAbsoluteXdgVariableWinsAndARelativeOneIsIgnored) {
+    // ReadXdgDirectory:220-224 -- the variable is used only when it is ABSOLUTE. A relative value
+    // is ignored, not joined, which is the same rule xdgBase already applied to the two bases.
+    ScopedFolderEnv env;
+    env.set("HOME", "/tmp-not-used/h2364");
+    env.set("XDG_CONFIG_HOME", "/tmp-not-used/h2364/emptyconfig");
+
+    env.set("XDG_MUSIC_DIR", "/absolute/tunes");
+    EXPECT_EQ(folder(Environment::SpecialFolder::MyMusic), "/absolute/tunes");
+
+    env.set("XDG_PICTURES_DIR", "relative/pics");
+    EXPECT_EQ(folder(Environment::SpecialFolder::MyPictures), "/tmp-not-used/h2364/Pictures")
+        << "a relative XDG value is IGNORED, not joined onto home";
+
+    env.set("XDG_VIDEOS_DIR", "");
+    EXPECT_EQ(folder(Environment::SpecialFolder::MyVideos), "/tmp-not-used/h2364/Videos")
+        << "an empty value is not absolute either";
+}
+
+TEST(EnvironmentTests, Fix2364_TheUserDirsFileIsReadAndItsGrammarIsDotNets) {
+    // ReadXdgDirectory:184-248. The file is read out of the XDG CONFIG directory -- so it honours
+    // XDG_CONFIG_HOME rather than a hard-coded ~/.config -- and each rejection below is one .NET
+    // makes rather than a simplification.
+    namespace fs = std::filesystem;
+    const fs::path sandbox = fs::current_path() / "sandbox-2364";
+    std::error_code ec;
+    fs::remove_all(sandbox, ec);
+    fs::create_directories(sandbox / "config");
+
+    {
+        std::ofstream out(sandbox / "config" / "user-dirs.dirs");
+        out << "# a comment line, skipped\n";
+        out << "XDG_DESKTOP_DIR=\"$HOME/Bureau\"\n";              // $HOME-relative
+        out << "   XDG_MUSIC_DIR   =   \"/srv/music\"\n";          // whitespace everywhere
+        out << "XDG_PICTURES_DIR=\"notabsolute/pics\"\n";          // neither $HOME/ nor / -> SKIPPED
+        out << "XDG_VIDEOS_DIR=\"\"\n";                            // empty value -> SKIPPED
+    }
+
+    ScopedFolderEnv env;
+    env.set("HOME", (sandbox / "home").string());
+    env.set("XDG_CONFIG_HOME", (sandbox / "config").string());
+    for (const char* key : {"XDG_DESKTOP_DIR", "XDG_MUSIC_DIR", "XDG_PICTURES_DIR",
+                            "XDG_VIDEOS_DIR"})
+        env.set(key, std::nullopt);
+
+    EXPECT_EQ(folder(Environment::SpecialFolder::Desktop),
+              (sandbox / "home" / "Bureau").string())
+        << "the $HOME/ prefix is stripped and the rest joined onto home";
+    EXPECT_EQ(folder(Environment::SpecialFolder::MyMusic), "/srv/music")
+        << "whitespace before the key, around '=' and before the quote is skipped";
+    EXPECT_EQ(folder(Environment::SpecialFolder::MyPictures),
+              (sandbox / "home" / "Pictures").string())
+        << "a value that is neither $HOME/-relative nor absolute is SKIPPED, not accepted";
+    EXPECT_EQ(folder(Environment::SpecialFolder::MyVideos),
+              (sandbox / "home" / "Videos").string())
+        << "an empty value is skipped";
+
+    fs::remove_all(sandbox, ec);
+}
+
+TEST(EnvironmentTests, Fix2364_TheTwoStaticPathsAndTheTwoDeliberatelyUnmappedOnes) {
+    // GetFolderPathCore.Unix.cs:52-60.
+    ScopedFolderEnv env;
+    env.set("HOME", "/tmp-not-used/h2364");
+
+    // Static, resolved before .NET even looks up the home directory.
+    EXPECT_EQ(folder(Environment::SpecialFolder::CommonApplicationData), "/usr/share")
+        << "#2364: was \"/etc\", which is not writable by a non-root user and is not where shared "
+           "application data belongs";
+    EXPECT_EQ(folder(Environment::SpecialFolder::CommonTemplates), "/usr/share/templates")
+        << "#2364: was unmapped";
+
+    // Fonts moved from a SYSTEM path to a USER one.
+    EXPECT_EQ(folder(Environment::SpecialFolder::Fonts), "/tmp-not-used/h2364/.fonts")
+        << "#2364: was \"/usr/share/fonts\"";
+
+    // THE REVERSE SHAPE, and the reason it is worth its own assertions: .NET maps these two only
+    // under TARGET_OSX, so on Linux no arm matches and the answer is "". This port INVENTED
+    // "/usr" and "/usr/lib", so here the alignment REMOVES a mapping rather than adding one.
+    EXPECT_EQ(folder(Environment::SpecialFolder::ProgramFiles), "")
+        << "#2364: was \"/usr\" -- an invented mapping where .NET has none on Linux";
+    EXPECT_EQ(folder(Environment::SpecialFolder::System), "")
+        << "#2364: was \"/usr/lib\" -- likewise";
+}
+
+TEST(EnvironmentTests, Decl2364_AnUnknownHomeStillFallsBackToRoot) {
+    // GetFolderPathCore.Unix.cs:76-81, unchanged by #2364 and asserted because the new rows all
+    // build on `home`: "/" is not writable by a non-root user, which .NET states as a SAFEGUARD
+    // rather than a tidy default. A row that silently produced "Documents" with no leading slash
+    // would be a place an application could write private data.
+    ScopedFolderEnv env;
+    env.set("HOME", std::nullopt);
+    env.set("XDG_CONFIG_HOME", std::nullopt);
+    env.set("XDG_DOCUMENTS_DIR", std::nullopt);
+
+    EXPECT_EQ(folder(Environment::SpecialFolder::UserProfile), "/");
+    const std::string documents = folder(Environment::SpecialFolder::Personal);
+    EXPECT_FALSE(documents.empty());
+    EXPECT_EQ(documents.front(), '/') << "every derived row must stay absolute";
+}
+
 TEST(EnvironmentTests, GetFolderPath_Temp_IsString) {
     std::string p = Environment::GetFolderPath(Environment::SpecialFolder::ApplicationData);
     EXPECT_NE(p, "");

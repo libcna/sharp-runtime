@@ -76,9 +76,23 @@ namespace System::Runtime::InteropServices
          * misnamed. That is exactly #2323's own rule, in its own words: <i>a message naming the
          * wrong type is a lie, where an empty one is merely an absence.</i>
          *
-         * The remaining routes both cost more than this ticket may spend: a virtual `ToString()`
-         * adds a slot to this class's vtable, which SA-3 excludes, and a stored type name is a
-         * data member on a class three downstream types derive from. Ticket <b>#2387</b>.
+         * <b>Ticket #2387 DECIDED this on 2026-08-19, and the decision is to leave it absent.</b>
+         * Both remaining routes were offered and declined:
+         *
+         * - a <b>virtual `ToString()`</b> adds a slot to this class's vtable. That is the same
+         *   shape #2374 was granted for `MarshalByRefObject`, so the cost is known and payable --
+         *   but there it bought a capability nothing else could provide (an overridable lease
+         *   policy), while here it would only relocate the naming problem into each of the three
+         *   downstream types, every one of which would have to implement the override to get a
+         *   correct name. The slot buys nothing they do not already have;
+         * - a <b>stored type name</b> is a data member on a class three downstream types derive
+         *   from, growing `sizeof` and requiring all three to start passing a name they currently
+         *   do not.
+         *
+         * So the absence stands, for #2323's own reason: <i>a message naming the wrong type is a
+         * lie, where an absence is merely an absence.</i> Pinned by
+         * `ExternalExceptionTests.Decl2387_*`, so the absence is a decision rather than an
+         * oversight and a future addition is a deliberate act.
          */
         ~ExternalException() override = default;
     };

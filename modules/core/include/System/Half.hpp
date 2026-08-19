@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cstdint>
+#include "System/MathF.hpp"
 #include <cstring>
 #include <string>
 #include <cmath>
@@ -184,6 +185,103 @@ namespace System {
         static const Half PositiveInfinity;
         /** @brief Represents negative infinity. C++ counterpart of .NET Half.NegativeInfinity. */
         static const Half NegativeInfinity;
+        // -----------------------------------------------------------------------------------
+        // #2384 unit 1: the sign/magnitude family. Every body is DERIVED PER TYPE from the
+        // reference rather than copied across, because #2382 measured what copying costs -- its
+        // GetHashCode would have compiled, satisfied the hash contract and returned the wrong
+        // number. Here the two types agree, and that was CHECKED rather than assumed.
+        //
+        // Note which of these are bit operations and which are float round-trips: .NET makes that
+        // distinction deliberately, and a blanket "forward to float" would be wrong for four of
+        // the nine.
+        // -----------------------------------------------------------------------------------
+
+        /**
+         * @brief Returns the absolute value.
+         *
+         * C++ counterpart of .NET `Half.Abs(Half)` (`Half.cs:1756`), which is a **bit mask**,
+         * `value._value & ~SignMask` -- NOT a float round-trip. That matters for NaN: masking
+         * preserves the payload and the quiet bit, where a round-trip through `float` would
+         * canonicalise them (see this type's own note on NaN payloads).
+         */
+        [[nodiscard]] static Half Abs(Half value) noexcept {
+            return Half(static_cast<uint16_t>(value.bits & 0x7FFFu));
+        }
+
+        /**
+         * @brief Copies the sign of @p sign onto the magnitude of @p value.
+         *
+         * C++ counterpart of .NET `Half.CopySign(Half, Half)` (`Half.cs:1654-1664`). .NET states
+         * why it is bitwise in a comment of its own -- *"This method is required to work for all
+         * inputs, including NaN, so we operate on the raw bits"* -- so this is transcribed rather
+         * than expressed through `std::copysign` on a converted `float`.
+         */
+        [[nodiscard]] static Half CopySign(Half value, Half sign) noexcept {
+            return Half(static_cast<uint16_t>((value.bits & 0x7FFFu) | (sign.bits & 0x8000u)));
+        }
+
+        /**
+         * @brief Returns the next representable value greater than @p x.
+         *
+         * C++ counterpart of .NET `Half.BitIncrement(Half)` (`Half.cs:1478-1508`), transcribed
+         * including its three non-obvious edges: a NaN returns itself, `-Infinity` returns
+         * `MinValue` (not `-MaxValue` by arithmetic), `+Infinity` returns itself, and **-0.0
+         * returns `Epsilon`** rather than +0.0.
+         */
+        [[nodiscard]] static Half BitIncrement(Half x) noexcept {
+            uint16_t bits = x.bits;
+            if (!IsFinite(x)) {
+                // NaN -> NaN, -Infinity -> MinValue, +Infinity -> +Infinity
+                return (bits == 0xFC00u) ? MinValue : x;
+            }
+            if (bits == 0x8000u) return Epsilon;   // -0.0 -> Epsilon
+            // Negative values are decremented, positive values incremented.
+            if (IsNegative(x)) --bits; else ++bits;
+            return Half(bits);
+        }
+
+        /**
+         * @brief Returns the next representable value less than @p x.
+         *
+         * C++ counterpart of .NET `Half.BitDecrement(Half)` (`Half.cs:1445-1475`). The mirror of
+         * BitIncrement, and its edges mirror too: `+Infinity` returns `MaxValue` and **+0.0
+         * returns `-Epsilon`**.
+         */
+        [[nodiscard]] static Half BitDecrement(Half x) noexcept {
+            uint16_t bits = x.bits;
+            if (!IsFinite(x)) {
+                // NaN -> NaN, +Infinity -> MaxValue, -Infinity -> -Infinity
+                return (bits == 0x7C00u) ? MaxValue : x;
+            }
+            if (bits == 0x0000u) {
+                // +0.0 -> -Epsilon
+                return Half(static_cast<uint16_t>(Epsilon.bits | 0x8000u));
+            }
+            if (IsNegative(x)) ++bits; else --bits;
+            return Half(bits);
+        }
+
+        /**
+         * @brief Clamps @p value to the inclusive range [@p min, @p max].
+         *
+         * C++ counterpart of .NET `Half.Clamp(Half, Half, Half)` (`Half.cs:1641`), which **is** a
+         * float round-trip -- `(Half)float.Clamp((float)value, (float)min, (float)max)`.
+         * @throws System::ArgumentException if @p min is greater than @p max, matching
+         *         `Math.Clamp`'s own contract.
+         */
+        [[nodiscard]] static Half Clamp(Half value, Half min, Half max);
+
+        /** @brief The larger of two values. .NET: `(Half)float.Max(...)` (`Half.cs:1667`). */
+        [[nodiscard]] static Half Max(Half x, Half y) noexcept;
+        /** @brief The smaller of two values. .NET's counterpart of Max. */
+        [[nodiscard]] static Half Min(Half x, Half y) noexcept;
+        /** @brief The value with the larger magnitude. .NET: `(Half)MathF.MaxMagnitude(...)`
+         *  (`Half.cs:1851`). */
+        [[nodiscard]] static Half MaxMagnitude(Half x, Half y) noexcept;
+        /** @brief The value with the smaller magnitude. .NET: `(Half)MathF.MinMagnitude(...)`
+         *  (`Half.cs:1879`). */
+        [[nodiscard]] static Half MinMagnitude(Half x, Half y) noexcept;
+
         /** @brief Represents the largest finite half-precision value (65504). C++ counterpart of .NET Half.MaxValue. */
         static const Half MaxValue;
         /** @brief Represents the most negative finite half-precision value (-65504). C++ counterpart of .NET Half.MinValue. */
@@ -427,6 +525,25 @@ namespace System {
     inline const Half Half::NaN              = Half(0xFE00);
     inline const Half Half::PositiveInfinity = Half(0x7C00);
     inline const Half Half::NegativeInfinity = Half(0xFC00);
+    // #2384 unit 1: the four float round-trip members, defined after the constants they need.
+    // Each is .NET's own expression, not a re-derivation -- Clamp is float.Clamp, Max/Min are
+    // float.Max/float.Min, and MaxMagnitude/MinMagnitude are MathF.MaxMagnitude/MinMagnitude.
+    inline Half Half::Clamp(Half value, Half min, Half max) {
+        return FromSingle(System::MathF::Clamp(value.ToSingle(), min.ToSingle(), max.ToSingle()));
+    }
+    inline Half Half::Max(Half x, Half y) noexcept {
+        return FromSingle(System::MathF::Max(x.ToSingle(), y.ToSingle()));
+    }
+    inline Half Half::Min(Half x, Half y) noexcept {
+        return FromSingle(System::MathF::Min(x.ToSingle(), y.ToSingle()));
+    }
+    inline Half Half::MaxMagnitude(Half x, Half y) noexcept {
+        return FromSingle(System::MathF::MaxMagnitude(x.ToSingle(), y.ToSingle()));
+    }
+    inline Half Half::MinMagnitude(Half x, Half y) noexcept {
+        return FromSingle(System::MathF::MinMagnitude(x.ToSingle(), y.ToSingle()));
+    }
+
     inline const Half Half::MaxValue         = Half(0x7BFF);  //  65504
     inline const Half Half::MinValue         = Half(0xFBFF);  // -65504
     inline const Half Half::Epsilon          = Half(0x0001);  //  ~5.96e-8

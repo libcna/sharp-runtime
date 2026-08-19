@@ -145,6 +145,62 @@ namespace {
     }
 
     // =====================================================================================
+    // #2207 -- the residual TOCTOU, DECLARED AND ACCEPTED on 2026-08-19.
+    // =====================================================================================
+
+    TEST_F(IsolatedStorageConfinementTest, Decl2207_ConfinementDefeatsAccidentalEscapeNotARacingWriter)
+    {
+        // DECLARED LIMITATION. The resolver verifies containment with weakly_canonical and the
+        // operation then runs on the path NAME, so a process able to write inside the store root
+        // can swap a component for a symlink between the two. Closing it needs per-component
+        // openat(O_NOFOLLOW) held open for the operation's duration, fd-relative *at operations,
+        // an fd-accepting FileStream primitive this port does not have, an NtCreateFile equivalent
+        // for Windows, and an Emscripten story -- a platform-policy change for the whole module.
+        // That was offered and declined.
+        //
+        // THE THREAT BOUNDARY IS WHAT THIS CASE PINS, because it is what makes the limitation
+        // acceptable rather than merely tolerated. Everything the confinement is FOR still holds.
+
+        // 1. An absolute path still cannot escape.
+        writeFile(outside_ / "secret.txt", "secret");
+        EXPECT_FALSE(store().FileExists((outside_ / "secret.txt").string()));
+
+        // 2. `..` still cannot climb out.
+        EXPECT_THROW((void)store().FileExists("../outside/secret.txt"),
+                     System::ArgumentException);
+
+        // 3. A symlink PLANTED IN ADVANCE and pointing outside is still refused -- this is the
+        //    case people assume the TOCTOU defeats, and it does not: the check sees the link
+        //    because it is already there when the check runs.
+        std::error_code ec;
+        fs::create_directory_symlink(outside_, root_ / "escape", ec);
+        if (!ec) {
+            writeFile(outside_ / "via_link.txt", "secret");
+            EXPECT_THROW((void)store().FileExists("escape/via_link.txt"),
+                         System::ArgumentException)
+                << "#2207: a pre-existing symlink out of the store is REFUSED; only a link "
+                   "swapped in DURING the operation wins the race";
+        } else {
+            GTEST_SKIP() << "symlink creation unavailable here: " << ec.message();
+        }
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Decl2207_TheRacingWriterAlreadyHasWhatTheRaceWouldWin)
+    {
+        // The second half of the boundary, and the reason the residual is narrow: the attacker
+        // this does not stop must ALREADY be able to write inside the store root. Such an attacker
+        // can already read and write every file in the store DIRECTLY -- so winning the race
+        // widens their reach BEYOND the store rather than granting them access TO it.
+        //
+        // Asserted rather than argued: a file created directly under the root by anyone with write
+        // access there is visible to the store with no race at all.
+        writeFile(root_ / "planted.txt", "planted");
+        EXPECT_TRUE(store().FileExists("planted.txt"))
+            << "#2207: anyone who can write inside the root already reaches the store's contents "
+               "without needing the race";
+    }
+
+    // =====================================================================================
     // SR-AUD-241, exactly as the audit recorded it.
     // =====================================================================================
 

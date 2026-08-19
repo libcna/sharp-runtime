@@ -28,10 +28,33 @@ namespace System::IO::IsolatedStorage
      *       points out — throws System::ArgumentException before any filesystem access or
      *       mutation happens.  A leading directory separator is stripped rather than rejected,
      *       matching .NET's `GetFullPath`, so `"/data.bin"` names `data.bin` inside the store.
-     *       The check is check-then-use and therefore does not defeat a process concurrently
-     *       replacing a path component with a symbolic link (ticket #2207), and
      *       IsolatedStorageFileStream's own public constructor is not confined at all
      *       (ticket #2208).
+     *
+     * @note **DECLARED LIMITATION — the confinement is check-then-use (SR-AUD-241 residual,
+     *       ticket #2207, decided 2026-08-19).** The resolver verifies containment with
+     *       `weakly_canonical` and the operation then runs on the path *name*, so a process able
+     *       to write inside the store root can swap a component for a symbolic link between the
+     *       two and win the race.
+     *
+     *       **The threat boundary is what makes this acceptable rather than merely tolerated, so
+     *       it is stated rather than left to be inferred:**
+     *       - it **does** protect against *accidental* escape — a path that climbs out through
+     *         `..`, an absolute path, or an existing symlink pointing outside — which is what the
+     *         confinement was added for and what a caller passing untrusted *path text* needs;
+     *       - it does **not** protect against an attacker who can already **write inside the
+     *         store root**. Such an attacker can already read and write every file in the store
+     *         directly, so winning this race widens their reach *beyond* the store rather than
+     *         granting them access *to* it.
+     *
+     *       **What closing it would cost, measured and declined**: per-component
+     *       `openat(O_NOFOLLOW)` resolution held open for the operation's whole duration,
+     *       fd-relative `*at` operations, an **fd-accepting `FileStream` primitive this port does
+     *       not have**, an `NtCreateFile`/`FILE_FLAG_OPEN_REPARSE_POINT` equivalent for Windows,
+     *       and an Emscripten story. That is a platform-policy change for the whole module, not a
+     *       repair to this function.
+     *
+     *       Pinned by `IsolatedStorageConfinementTests.Decl2207_*`.
      *
      * @note Status: DONE
      */
@@ -60,9 +83,11 @@ namespace System::IO::IsolatedStorage
          *         empty once leading separators are removed, is rooted in a way this port does
          *         not reinterpret, or resolves outside the storage root.
          *
-         * @note This is a check-then-use test.  It rejects every path the caller can name, but
-         *       it cannot defeat a process that swaps a path component for a symbolic link
-         *       between the check and the operation; see ticket #2207.
+         * @note This is a check-then-use test, **declared and accepted** rather than pending
+         *       (ticket #2207, decided 2026-08-19). It rejects every path the caller can name,
+         *       but it cannot defeat a process that swaps a path component for a symbolic link
+         *       between the check and the operation. See the class-level note for the threat
+         *       boundary that makes that acceptable, and for what closing it would cost.
          */
         [[nodiscard]] std::filesystem::path fullPath(const std::string& relativePath,
                                                      const char* paramName) const;

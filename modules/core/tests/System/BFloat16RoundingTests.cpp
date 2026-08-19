@@ -11,7 +11,9 @@
 // depends on how a decimal literal is parsed or on the host's rounding mode.
 #include <cstdint>
 #include <cstring>
+#include <bit>
 #include <gtest/gtest.h>
+#include "System/Half.hpp"
 #include <array>
 #include <string>
 #include <type_traits>
@@ -383,24 +385,36 @@ template <typename T> concept HasSqrt         = requires(T v) { T::Sqrt(v); };
 template <typename T> concept HasIsFinite     = requires(T v) { T::IsFinite(v); };
 template <typename T> concept HasGetHashCode  = requires(const T& v) { v.GetHashCode(); };
 
-TEST(BFloat16SurfaceTests, Fix2382_TheDeclinedSurfaceIsDECLAREDNotMerelyAbsent) {
-    // The point of the header's @note block is that the absence is a decision. Pinned here
-    // as a statement rather than prose: none of the #2383 surface exists on this type, and
-    // if one of them is added the ticket that adds it must move `Half` in the same change.
-    // The parameter MUST be dependent. gcc evaluates a non-dependent `requires` eagerly and
-    // errors on the missing name instead of yielding false -- measured on ticket #2299,
-    // recorded in CLAUDE.md, and hit again writing this case. `T` is what makes it a
-    // substitution failure rather than a hard error.
-    static_assert(!HasAbs<BFloat16>,
-                  "#2383 landed on BFloat16 -- it must move System::Half too.");
-    static_assert(!HasBitIncrement<BFloat16>,
-                  "#2383 landed on BFloat16 -- it must move System::Half too.");
-    static_assert(!HasCopySign<BFloat16>,
-                  "#2383 landed on BFloat16 -- it must move System::Half too.");
+TEST(BFloat16SurfaceTests, Fix2384_TheInStepRequirementHeldWhenUnit1Landed) {
+    // PARTIALLY INVERTED BY #2384 UNIT 1. Its predecessor asserted that NONE of this surface
+    // existed and said, in every message, "it must move System::Half too". That is #2340's
+    // in-step rule, and it WORKED AS DESIGNED: adding these three members to BFloat16 alone broke
+    // the build, which is exactly the signal it was written to give.
+    //
+    // The dependent parameter is KEPT -- gcc evaluates a non-dependent `requires` eagerly and
+    // errors on a missing name instead of yielding false (#2299, hit again writing the original
+    // of this case). It is what lets presence and absence be asserted in the same form.
+    static_assert(HasAbs<BFloat16>,          "#2384 unit 1");
+    static_assert(HasBitIncrement<BFloat16>, "#2384 unit 1");
+    static_assert(HasCopySign<BFloat16>,     "#2384 unit 1");
+
+    // AND THE SAME MEMBERS EXIST ON Half. This is the assertion that enforces #2340's rule now
+    // that the surface is arriving: a unit that moved one type and not the other fails HERE
+    // rather than being discovered later as an inconsistency between the port's two 16-bit
+    // floats -- which #2340 measured as worse than either policy applied consistently.
+    static_assert(HasAbs<System::Half>,          "#2384: units move BOTH 16-bit float types");
+    static_assert(HasBitIncrement<System::Half>, "#2384: units move BOTH 16-bit float types");
+    static_assert(HasCopySign<System::Half>,     "#2384: units move BOTH 16-bit float types");
+
+    // Unit 2 has NOT landed, and its absence is still pinned on both types with the same message
+    // the original carried -- so the next unit gets the same signal this one did.
     static_assert(!HasSqrt<BFloat16>,
-                  "#2383 landed on BFloat16 -- it must move System::Half too.");
-    // ...and the members #2382 DID add exist, so the two halves of this pin cannot both be
-    // satisfied by the type simply failing to compile.
+                  "#2384 unit 2 landed on BFloat16 -- it must move System::Half too.");
+    static_assert(!HasSqrt<System::Half>,
+                  "#2384 unit 2 landed on Half -- it must move BFloat16 too.");
+
+    // ...and #2382's members still exist, so no half of this pin is satisfied by the type simply
+    // failing to compile.
     static_assert(HasIsFinite<BFloat16>);
     static_assert(HasGetHashCode<BFloat16>);
     SUCCEED();
@@ -411,4 +425,136 @@ TEST(BFloat16SurfaceTests, Fix2382_LayoutIsStillTwoBytes) {
     EXPECT_EQ(sizeof(BFloat16), 2u);
     EXPECT_EQ(alignof(BFloat16), 2u);
     static_assert(std::is_trivially_copyable_v<BFloat16>);
+}
+
+// =================================================================================================
+// #2384 unit 1 -- the sign/magnitude family, on BOTH 16-bit float types.
+//
+// #2340 established that this surface must move for System::Half and System::Numerics::BFloat16
+// TOGETHER or not at all: adding it to one leaves the port's two 16-bit floats inconsistent with
+// each other, which is worse than either policy applied consistently. So every case below asserts
+// the same property on both types, side by side, and a member added to only one fails to compile.
+// =================================================================================================
+
+TEST(Fix2384Unit1, AbsAndCopySignAreBitOperationsNotFloatRoundTrips) {
+    // .NET's Abs is `value._value & ~SignMask` (Half.cs:1756, BFloat16.cs:1396) and its CopySign
+    // says in a comment of its own that it "is required to work for all inputs, including NaN, so
+    // we operate on the raw bits". A blanket "forward to float" would be wrong for both, and the
+    // NaN rows are what discriminate: this port canonicalises a NaN through FromSingle, so a
+    // round-trip implementation would lose a non-canonical payload that masking keeps.
+    using System::Half;
+    using System::Numerics::BFloat16;
+
+    // A NaN with a payload bit that a float round-trip in this port would canonicalise.
+    const Half halfNaN(static_cast<uint16_t>(0x7E01u));
+    // A SIGNALLING NaN, deliberately. The first cut used 0x7FC1, which is already QUIET, so a
+    // float round-trip returned it unchanged and the mutation that replaces masking with
+    // std::fabs went UNCAUGHT. Measured over all 65,536 patterns, the two forms differ on
+    // exactly 126 -- every one a signalling NaN, which fromFloat quiets by OR-ing in 0x0040.
+    const BFloat16 bfNaN(static_cast<uint16_t>(0x7F81u));
+    ASSERT_TRUE(Half::IsNaN(halfNaN));
+    ASSERT_TRUE(BFloat16::IsNaN(bfNaN));
+
+    EXPECT_EQ(Half::Abs(halfNaN).bits, 0x7E01u) << "#2384: Abs masks, it does not round-trip";
+    EXPECT_EQ(Half::Abs(Half(static_cast<uint16_t>(0xFE01u))).bits, 0x7E01u);
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::Abs(bfNaN)), 0x7F81u)
+        << "#2384: Abs MASKS, so a signalling NaN stays signalling; a float round-trip would "
+           "quiet it to 0x7FC1";
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::Abs(BFloat16(static_cast<uint16_t>(0xFF81u)))),
+              0x7F81u) << "and the sign is cleared without disturbing the payload";
+
+    // Ordinary magnitudes, both signs, and the signed zeros -- Abs(-0.0) is +0.0 by masking.
+    EXPECT_EQ(Half::Abs(Half::FromSingle(-2.5f)).bits, Half::FromSingle(2.5f).bits);
+    EXPECT_EQ(Half::Abs(Half(static_cast<uint16_t>(0x8000u))).bits, 0x0000u);
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::Abs(BFloat16(-2.5f))),
+              std::bit_cast<uint16_t>(BFloat16(2.5f)));
+
+    // CopySign takes the magnitude of the first and the sign of the second, including onto NaN.
+    EXPECT_EQ(Half::CopySign(Half::FromSingle(2.5f), Half::FromSingle(-1.0f)).bits,
+              Half::FromSingle(-2.5f).bits);
+    EXPECT_EQ(Half::CopySign(Half::FromSingle(-2.5f), Half::FromSingle(1.0f)).bits,
+              Half::FromSingle(2.5f).bits);
+    EXPECT_EQ(Half::CopySign(halfNaN, Half::FromSingle(-1.0f)).bits, 0xFE01u)
+        << "#2384: the payload survives, which is why this is bitwise";
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::CopySign(BFloat16(2.5f), BFloat16(-1.0f))), std::bit_cast<uint16_t>(BFloat16(-2.5f)));
+
+    // Signed zero: CopySign(+0, -x) is -0, which no comparison can see -- so the BITS are asserted.
+    EXPECT_EQ(Half::CopySign(Half(static_cast<uint16_t>(0x0000u)),
+                             Half::FromSingle(-1.0f)).bits, 0x8000u);
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::CopySign(BFloat16(uint16_t(0x0000u)), BFloat16(-1.0f))), 0x8000u);
+}
+
+TEST(Fix2384Unit1, BitIncrementAndBitDecrementTranscribeTheirEdges) {
+    // The three edges that are NOT arithmetic, transcribed from Half.cs:1445-1508 and
+    // BFloat16.cs:1101-1164, and asserted on both types because they are the rows a plausible
+    // "add one to the bits" implementation gets wrong.
+    using System::Half;
+    using System::Numerics::BFloat16;
+
+    // -0.0 -> Epsilon, NOT +0.0.
+    EXPECT_EQ(Half::BitIncrement(Half(static_cast<uint16_t>(0x8000u))).bits, Half::Epsilon.bits);
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::BitIncrement(BFloat16(uint16_t(0x8000u)))), std::bit_cast<uint16_t>(BFloat16::Epsilon()));
+
+    // +0.0 -> -Epsilon.
+    EXPECT_EQ(Half::BitDecrement(Half(static_cast<uint16_t>(0x0000u))).bits,
+              static_cast<uint16_t>(Half::Epsilon.bits | 0x8000u));
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::BitDecrement(BFloat16(uint16_t(0x0000u)))),
+              static_cast<uint16_t>(std::bit_cast<uint16_t>(BFloat16::Epsilon()) | 0x8000u));
+
+    // -Infinity increments to MinValue; +Infinity decrements to MaxValue.
+    EXPECT_EQ(Half::BitIncrement(Half::NegativeInfinity).bits, Half::MinValue.bits);
+    EXPECT_EQ(Half::BitDecrement(Half::PositiveInfinity).bits, Half::MaxValue.bits);
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::BitIncrement(BFloat16::NegativeInfinity())), std::bit_cast<uint16_t>(BFloat16::MinValue()));
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::BitDecrement(BFloat16::PositiveInfinity())), std::bit_cast<uint16_t>(BFloat16::MaxValue()));
+
+    // The infinities in the OTHER direction, and NaN, return themselves.
+    EXPECT_EQ(Half::BitIncrement(Half::PositiveInfinity).bits, Half::PositiveInfinity.bits);
+    EXPECT_EQ(Half::BitDecrement(Half::NegativeInfinity).bits, Half::NegativeInfinity.bits);
+    EXPECT_TRUE(Half::IsNaN(Half::BitIncrement(Half::NaN)));
+    EXPECT_TRUE(Half::IsNaN(Half::BitDecrement(Half::NaN)));
+    EXPECT_TRUE(BFloat16::IsNaN(BFloat16::BitIncrement(BFloat16::NaN())));
+
+    // And the ordinary case is a real step: increment then decrement returns the original, and
+    // the step is the SMALLEST one -- nothing lies strictly between.
+    const Half one = Half::FromSingle(1.0f);
+    const Half next = Half::BitIncrement(one);
+    EXPECT_NE(next.bits, one.bits);
+    EXPECT_EQ(Half::BitDecrement(next).bits, one.bits);
+    EXPECT_EQ(static_cast<uint16_t>(next.bits - one.bits), 1u);
+
+    // Negative values step the OTHER way through the bit pattern, which is the branch a naive
+    // implementation drops.
+    const Half minusOne = Half::FromSingle(-1.0f);
+    EXPECT_LT((Half::BitDecrement(minusOne)).ToSingle(), -1.0f);
+    EXPECT_GT((Half::BitIncrement(minusOne)).ToSingle(), -1.0f);
+}
+
+TEST(Fix2384Unit1, ClampMaxMinAndMagnitudeGoThroughFloatAsDotNetDoes) {
+    using System::Half;
+    using System::Numerics::BFloat16;
+
+    EXPECT_EQ((Half::Clamp(Half::FromSingle(5.0f), Half::FromSingle(1.0f),
+                                         Half::FromSingle(3.0f))).ToSingle(), 3.0f);
+    EXPECT_EQ((Half::Clamp(Half::FromSingle(-5.0f), Half::FromSingle(-3.0f),
+                                         Half::FromSingle(3.0f))).ToSingle(), -3.0f);
+    EXPECT_EQ((Half::Clamp(Half::FromSingle(2.0f), Half::FromSingle(1.0f),
+                                         Half::FromSingle(3.0f))).ToSingle(), 2.0f);
+    EXPECT_EQ(static_cast<float>(BFloat16::Clamp(BFloat16(5.0f), BFloat16(1.0f),
+                                                BFloat16(3.0f))), 3.0f);
+
+    EXPECT_EQ((Half::Max(Half::FromSingle(1.0f), Half::FromSingle(2.0f))).ToSingle(), 2.0f);
+    EXPECT_EQ((Half::Min(Half::FromSingle(1.0f), Half::FromSingle(2.0f))).ToSingle(), 1.0f);
+    EXPECT_EQ(static_cast<float>(BFloat16::Max(BFloat16(1.0f), BFloat16(2.0f))), 2.0f);
+    EXPECT_EQ(static_cast<float>(BFloat16::Min(BFloat16(1.0f), BFloat16(2.0f))), 1.0f);
+
+    // MAGNITUDE, not value -- the row that separates these from Max/Min, and the one a
+    // copy-paste of Max would pass every other assertion while failing.
+    EXPECT_EQ((Half::MaxMagnitude(Half::FromSingle(-3.0f),
+                                                Half::FromSingle(2.0f))).ToSingle(), -3.0f);
+    EXPECT_EQ((Half::MinMagnitude(Half::FromSingle(-3.0f),
+                                                Half::FromSingle(2.0f))).ToSingle(), 2.0f);
+    EXPECT_EQ(static_cast<float>(BFloat16::MaxMagnitude(BFloat16(-3.0f), BFloat16(2.0f))),
+              -3.0f);
+    EXPECT_EQ(static_cast<float>(BFloat16::MinMagnitude(BFloat16(-3.0f), BFloat16(2.0f))),
+              2.0f);
 }

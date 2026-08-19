@@ -1380,3 +1380,70 @@ TEST(StringFormatBoundaryTests, Ccf012_OutOfRangeIndexKeepsItsOwnMessage) {
                   "than the size of the argument list.");
     }
 }
+
+// =================================================================================================
+// #2338 -- Unicode normalization stays invariant-mode, DECIDED 2026-08-19.
+// =================================================================================================
+
+TEST(StringNormalizationTests, Decl2338_TheInvariantBehaviourIsDotNetsNotAStub) {
+    // DECIDED, not deferred. IsNormalized returns true and Normalize returns its argument
+    // unchanged for every input -- and that IS .NET, in invariant globalization mode:
+    //
+    //     // In Invariant mode we assume all characters are normalized because we don't
+    //     // support any linguistic operations on strings.
+    //     if (GlobalizationMode.Invariant || Ascii.IsValid(source)) { return true; }
+    //                                                        -- Normalization.cs:11-40
+    //
+    // .NET has NO normalization tables of its own; it delegates to ICU on Unix and NLS on
+    // Windows, and CharUnicodeInfoData.cs -- SA-4's source of record -- carries zero
+    // decomposition, combining-class, composition-exclusion or quick-check data. Own tables plus
+    // UAX #15 (size L-to-XL, and a second Unicode version to keep in step) and an ICU dependency
+    // (the shape CLAUDE.md already declined for cryptography) were both offered and declined.
+    //
+    // THE PORT IS THEREFORE NOT DIVERGING; it matches .NET under .NET's own stated conditions.
+    using System::StringNormalizationExtensions;
+    namespace T = System::Text;
+
+    // Non-ASCII input, so this is not passing through .NET's Ascii.IsValid shortcut -- which is
+    // the row that makes the case about INVARIANT MODE rather than about ASCII.
+    const std::string composed   = "\xC3\xA9";              // U+00E9, precomposed
+    const std::string decomposed = "e\xCC\x81";             // U+0065 U+0301, decomposed
+    ASSERT_NE(composed, decomposed) << "the two forms really are different byte sequences";
+
+    for (const auto form : {T::NormalizationForm::FormC, T::NormalizationForm::FormD,
+                            T::NormalizationForm::FormKC, T::NormalizationForm::FormKD}) {
+        EXPECT_TRUE(StringNormalizationExtensions::IsNormalized(composed, form));
+        EXPECT_TRUE(StringNormalizationExtensions::IsNormalized(decomposed, form))
+            << "#2338: true means 'this runtime performs no linguistic normalization', NOT "
+               "'the string is in the requested form'";
+        EXPECT_EQ(StringNormalizationExtensions::Normalize(composed, form), composed);
+        EXPECT_EQ(StringNormalizationExtensions::Normalize(decomposed, form), decomposed);
+    }
+
+    // The two forms are NOT brought together, which is the whole content of the declaration and
+    // the assertion that fails the day real normalization lands.
+    EXPECT_NE(StringNormalizationExtensions::Normalize(composed, T::NormalizationForm::FormD),
+              StringNormalizationExtensions::Normalize(decomposed, T::NormalizationForm::FormD))
+        << "#2338: if these ever agree, normalization was implemented and the header note, "
+           "CLAUDE.md's deviation list and this case must all be rewritten";
+}
+
+TEST(StringNormalizationTests, Decl2338_FormValidationIsNotInvariantModeDependent) {
+    // The half that is NOT declined, and it is worth separating: CheckNormalizationForm runs
+    // BEFORE the invariant shortcut (Normalization.cs:13,29), so .NET rejects an undefined form
+    // on every platform and in every mode -- and #2386 made this port do the same. A future
+    // implementation of the normalization itself must not disturb it.
+    using System::StringNormalizationExtensions;
+    namespace T = System::Text;
+
+    // 3 and 4 are HOLES in the enumeration (FormC=1, FormD=2, FormKC=5, FormKD=6), so a bounds
+    // check would wrongly accept them -- #2386's point, restated here because #2338 is the ticket
+    // a future reader of this area opens.
+    for (const int undefined : {0, 3, 4, 7, 99}) {
+        const auto form = static_cast<T::NormalizationForm>(undefined);
+        EXPECT_THROW((void)StringNormalizationExtensions::IsNormalized("abc", form),
+                     System::ArgumentException) << "value " << undefined;
+        EXPECT_THROW((void)StringNormalizationExtensions::Normalize("abc", form),
+                     System::ArgumentException) << "value " << undefined;
+    }
+}

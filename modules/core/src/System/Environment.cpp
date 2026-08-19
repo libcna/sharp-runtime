@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Environment.hpp"
+#include <cctype>
+#include <fstream>
 #ifdef _WIN32
 #include "System/ApplicationException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -350,6 +352,72 @@ std::string xdgBase(const char* variable, const std::string& home, const char* f
     return home + fallback;
 }
 
+/**
+ * C++ counterpart of .NET's `ReadXdgDirectory(homeDir, key, fallback)`
+ * (`GetFolderPathCore.Unix.cs:220-249`), added by ticket #2364.
+ *
+ * Three sources, in .NET's order:
+ *   1. the environment variable @p key, if set AND absolute -- a relative value is IGNORED, which
+ *      is the same rule `xdgBase` above already applies to the two base directories;
+ *   2. the `XDG_DESKTOP_DIR="$HOME/Desktop"`-style lines of `user-dirs.dirs`, read out of the XDG
+ *      CONFIG directory (so it honours `XDG_CONFIG_HOME`, not a hard-coded `~/.config`);
+ *   3. `home/fallback`.
+ *
+ * The line grammar is transcribed rather than approximated, because each rejection is one .NET
+ * makes: whitespace is skipped before the key, before and after `=`, and before the opening quote;
+ * a value must be either `$HOME/`-prefixed or absolute, and anything else is SKIPPED rather than
+ * accepted; the value ends at the next `"`, and an empty one is skipped. .NET eats every error
+ * reading the file, so an unreadable or malformed file falls through to the fallback.
+ */
+std::string readXdgDirectory(const std::string& home, const char* key, const char* fallback) {
+    const char* envPath = std::getenv(key);
+    if (envPath != nullptr && envPath[0] == '/') return std::string(envPath);
+
+    const std::string userDirsPath = xdgBase("XDG_CONFIG_HOME", home, "/.config") + "/user-dirs.dirs";
+    if (::access(userDirsPath.c_str(), R_OK) == 0) {
+        std::ifstream reader(userDirsPath);
+        std::string line;
+        const std::string keyText(key);
+        while (std::getline(reader, line)) {
+            std::size_t pos = 0;
+            const auto skipWhitespace = [&] {
+                while (pos < line.size() &&
+                       std::isspace(static_cast<unsigned char>(line[pos])) != 0) ++pos;
+            };
+            skipWhitespace();
+            if (pos >= line.size()) continue;
+            if (line.compare(pos, keyText.size(), keyText) != 0) continue;
+            pos += keyText.size();
+
+            skipWhitespace();
+            // ="" plus at least one character between the quotes -- .NET's own bound.
+            if (pos + 4 > line.size() || line[pos] != '=') continue;
+            ++pos;
+
+            skipWhitespace();
+            if (pos + 3 > line.size() || line[pos] != '"') continue;
+            ++pos;
+
+            bool relativeToHome = false;
+            static constexpr const char* kRelativePrefix = "$HOME/";
+            static constexpr std::size_t kRelativePrefixLength = 6;
+            if (line.compare(pos, kRelativePrefixLength, kRelativePrefix) == 0) {
+                relativeToHome = true;
+                pos += kRelativePrefixLength;
+            } else if (line[pos] != '/') {
+                continue;   // not relative to home, so it must be absolute
+            }
+
+            const std::size_t endPos = line.find('"', pos);
+            if (endPos == std::string::npos || endPos <= pos) continue;
+            const std::string value = line.substr(pos, endPos - pos);
+            return relativeToHome ? (home + "/" + value) : value;
+        }
+    }
+
+    return home + "/" + std::string(fallback);
+}
+
 /// `Interop.Sys.Access(path, R_OK) == 0` -- the verification .NET's DEFAULT option performs.
 bool readable(const std::string& path) {
     return !path.empty() && ::access(path.c_str(), R_OK) == 0;
@@ -434,24 +502,42 @@ std::string Environment::GetFolderPath(SpecialFolder folder, SpecialFolderOption
 
     std::string path;
     switch (folder) {
-        case SpecialFolder::Personal:          // == MyDocuments (0x0005), returns home
+        // #2364 completed the table on 2026-08-19. #2320 had adopted the two XDG BASES only, and
+        // gave as its reason that the rest "has no .NET mapping, so it would cross from parity
+        // into invention" -- which was measured afterwards and is FALSE: every remaining row maps
+        // onto ReadXdgDirectory or onto a static path. So the eight rows below are alignments,
+        // not widenings, and each cites the line it comes from.
+
+        // The two purely STATIC paths, which .NET resolves before it even looks up the home
+        // directory (GetFolderPathCore.Unix.cs:52-56).
+        case SpecialFolder::CommonApplicationData: path = "/usr/share"; break;
+        case SpecialFolder::CommonTemplates:  path = "/usr/share/templates"; break;
+
         case SpecialFolder::UserProfile:      path = h.empty() ? "/" : h; break;
+
+        // The six user directories, every one through ReadXdgDirectory
+        // (GetFolderPathCore.Unix.cs:88-89, 119-121, 133-140). Personal == MyDocuments (0x0005)
+        // and Desktop == DesktopDirectory share arms here as they share values there.
+        case SpecialFolder::Personal:         path = readXdgDirectory(h, "XDG_DOCUMENTS_DIR", "Documents"); break;
         case SpecialFolder::Desktop:
-        case SpecialFolder::DesktopDirectory: path = h + "/Desktop"; break;
-        case SpecialFolder::MyMusic:          path = h + "/Music"; break;
-        case SpecialFolder::MyPictures:       path = h + "/Pictures"; break;
-        case SpecialFolder::MyVideos:         path = h + "/Videos"; break;
-        // The two XDG bases, and the ONLY two this ticket adopts -- see the migration note for
-        // the rest of the table, which diverges from the reference in six further places and is
-        // ticket #2364 rather than a silent widening here.
+        case SpecialFolder::DesktopDirectory: path = readXdgDirectory(h, "XDG_DESKTOP_DIR", "Desktop"); break;
+        case SpecialFolder::MyMusic:          path = readXdgDirectory(h, "XDG_MUSIC_DIR", "Music"); break;
+        case SpecialFolder::MyPictures:       path = readXdgDirectory(h, "XDG_PICTURES_DIR", "Pictures"); break;
+        case SpecialFolder::MyVideos:         path = readXdgDirectory(h, "XDG_VIDEOS_DIR", "Videos"); break;
+        case SpecialFolder::Templates:        path = readXdgDirectory(h, "XDG_TEMPLATES_DIR", "Templates"); break;
+
+        // The two XDG bases (GetFolderPathCore.Unix.cs:122-132), landed by #2320.
         case SpecialFolder::ApplicationData:  path = xdgBase("XDG_CONFIG_HOME", h, "/.config"); break;
         case SpecialFolder::LocalApplicationData:
                                               path = xdgBase("XDG_DATA_HOME", h, "/.local/share"); break;
-        case SpecialFolder::CommonApplicationData: path = "/etc"; break;
-        case SpecialFolder::ProgramFiles:     path = "/usr"; break;
-        case SpecialFolder::System:           path = "/usr/lib"; break;
-        case SpecialFolder::Fonts:            path = "/usr/share/fonts"; break;
-        case SpecialFolder::Templates:        path = h + "/Templates"; break;
+
+        case SpecialFolder::Fonts:            path = h + "/.fonts"; break;
+
+        // ProgramFiles and System are DELIBERATELY UNMAPPED and fall through to "". .NET maps them
+        // only under TARGET_OSX (/Applications and /System, GetFolderPathCore.Unix.cs:57-60); on
+        // Linux no arm matches, GetSpecialFolder returns null, and null becomes "". This port used
+        // to answer "/usr" and "/usr/lib", which is the REVERSE of the other rows -- an INVENTED
+        // mapping where .NET has none -- so removing them is the alignment.
         // #2321, verified 2026-08-18. .NET's Unix `GetSpecialFolder` is a switch that returns
         // `null` for anything it does not handle, and `GetFolderPathCore` turns that into `""`
         // (`GetFolderPathCore.Unix.cs:20-24`) -- with the comment "No need to validate if

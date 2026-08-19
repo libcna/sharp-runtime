@@ -29,8 +29,26 @@ namespace System {
      *       `CharUnicodeInfoData.cs`, the source of record `docs/StandingApprovals.md` SA-4
      *       names, contains zero decomposition, combining-class, composition-exclusion or
      *       quick-check data. So reproducing .NET's <i>non</i>-invariant behaviour needs a
-     *       Unicode data source SA-4 does not grant plus a UAX #15 implementation; that decision
-     *       is ticket <b>#2338</b> and is open.
+     *       Unicode data source SA-4 does not grant plus a UAX #15 implementation.
+     *
+     *       <b>Ticket #2338 DECIDED this on 2026-08-19, and the decision is to keep the invariant
+     *       behaviour and declare it.</b> Two alternatives were offered and declined:
+     *       - <b>own UCD tables plus UAX #15</b> — the decomposition mappings, canonical combining
+     *         classes, composition exclusions and quick-check properties, none of which is present
+     *         here, plus canonical ordering, recursive decomposition and canonical composition.
+     *         Size L-to-XL, and it would introduce a <i>second</i> Unicode version to keep in step
+     *         with SA-4's 16.0;
+     *       - <b>an ICU dependency</b>, as .NET takes — which is the shape `CLAUDE.md` already
+     *         declined for `System.Security.Cryptography` (<i>"a large new external dependency"</i>),
+     *         so taking it here would reverse a standing decision rather than make a new one.
+     *
+     *       Measured at the time of the decision: <b>zero call sites in `cna` and zero in
+     *       `mobile-eggbert`</b>, and the only in-repository uses are this type's own tests. So
+     *       the capability being declined is one no caller currently has.
+     *
+     *       <b>This is a declaration, not a stub.</b> The port is not diverging from .NET; it is
+     *       matching .NET under .NET's own stated conditions. Pinned by
+     *       `StringNormalizationTests.Decl2338_*`.
      *
      *       What this means for a caller today: a true from `IsNormalized` means "this runtime
      *       performs no linguistic normalization", exactly as it does for a .NET application

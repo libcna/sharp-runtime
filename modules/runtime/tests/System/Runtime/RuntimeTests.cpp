@@ -597,6 +597,46 @@ TEST(MarkerAttributeTests, OptionalAttribute_Instantiates) {
 // ExternalException
 // ===========================================================================
 
+namespace detail2387 {
+    /// Detection idiom for `ToString()`. The parameter is DEPENDENT deliberately: gcc evaluates a
+    /// non-dependent `requires` eagerly and hard-errors on a missing name instead of yielding
+    /// false -- the trap #2299 recorded. An absent member must be expressible as absent.
+    template <class T>
+    concept HasToString = requires(T& t) { t.ToString(); };
+}
+
+TEST(ExternalExceptionTests, Decl2387_ToStringIsDeliberatelyAbsent) {
+    // DECIDED 2026-08-19. .NET's ExternalException.ToString() is
+    // $"{GetType()} (0x{HResult:X8})" plus the message and any inner exception, and GetType() is
+    // the MOST DERIVED type -- reflection this port permanently lacks.
+    //
+    // #1980 IMPLEMENTED IT AND THEN REMOVED IT, on the downstream measurement SA-2 condition 5
+    // requires: cna derives from this class in THREE types -- NoAudioHardwareException,
+    // InstancePlayLimitException and StorageDeviceNotConnectedException -- and a statically
+    // resolved name would have misnamed every one. That is #2323's own rule: a message naming the
+    // WRONG type is a lie, where an absence is merely an absence.
+    //
+    // Both remaining routes were offered on 2026-08-19 and DECLINED: a virtual ToString() (a
+    // vtable slot, the #2374 shape -- but there the slot bought an overridable policy nothing else
+    // could provide, while here it would only relocate the naming problem into each of the three
+    // downstream types) and a stored type name (a data member on a class three types derive from).
+    //
+    // This pin is the DECLARATION. If it ever fails, the decision was reversed and the header note
+    // must be rewritten.
+    static_assert(!detail2387::HasToString<System::Runtime::InteropServices::ExternalException>,
+                  "#2387: ToString() is deliberately absent -- see the header for why, and for "
+                  "the two routes that were declined");
+
+    // The members that ARE present still work, so the absence is confined rather than a gap in
+    // the type. ErrorCode is an ALIAS for HResult (.NET: `public virtual int ErrorCode => HResult`),
+    // not a second field -- asserted here because a stored-name repair would have been tempted to
+    // add one beside it.
+    System::Runtime::InteropServices::ExternalException ex("boom", 0x80004005);
+    EXPECT_EQ(ex.getErrorCodeProperty(), ex.getHResultProperty());
+    EXPECT_EQ(ex.getErrorCodeProperty(), static_cast<SharpRuntime::intcs>(0x80004005));
+    EXPECT_STREQ(ex.what(), "boom");
+}
+
 TEST(ExternalExceptionTests, DefaultMessage) {
     ExternalException ex;
     EXPECT_STREQ(ex.what(), "External component has thrown an exception.");
