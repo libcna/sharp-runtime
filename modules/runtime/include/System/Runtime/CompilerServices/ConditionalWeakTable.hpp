@@ -73,23 +73,48 @@ private:
         ValuePtr value;
     };
 
+    /**
+     * @brief One row of an enumerator's snapshot: two WEAK references.
+     *
+     * Ticket #1981 (SR-AUD, cause R-H). The snapshot used to be a `std::vector<Entry>`, and
+     * `Entry::value` is a **strong** `shared_ptr`, so an enumerator kept every value it had
+     * snapshotted alive for its own lifetime — including values the table had since released.
+     * Measured (`build-probe/1981_probe1_layout.cpp`): after `table.Remove(key)` the value was
+     * still alive, and became collectable only when the enumerator was deleted.
+     *
+     * .NET's enumerator retains only `Current` (`ConditionalWeakTable.cs:441-490`).
+     */
+    struct SnapshotEntry {
+        std::weak_ptr<TKey>   key;
+        std::weak_ptr<TValue> value;
+    };
+
     class Enumerator final : public System::Collections::Generic::IEnumerator<Pair> {
-        std::vector<Entry> entries_;
+        std::vector<SnapshotEntry> entries_;
         std::size_t nextIndex_ = 0;
         Pair current_;
         bool hasCurrent_ = false;
 
     public:
         /** Initializes an enumerator over the table entries visible at creation time. */
-        explicit Enumerator(std::vector<Entry> entries) : entries_(std::move(entries)) {}
+        explicit Enumerator(std::vector<SnapshotEntry> entries) : entries_(std::move(entries)) {}
 
-        /** Advances to the next key that has not yet expired. */
+        /**
+         * @brief Advances to the next entry whose key AND value are both still alive.
+         *
+         * Both halves are locked here rather than snapshotted strongly, so the only value this
+         * enumerator keeps alive is the one in `current_` — which is what .NET retains too.
+         * An entry the table released after the snapshot was taken is skipped, exactly as
+         * .NET's `TryGetEntry` loop skips one that has been removed or collected
+         * (`ConditionalWeakTable.cs:459-467`).
+         */
         bool MoveNext() override {
             while (nextIndex_ < entries_.size()) {
-                const Entry& entry = entries_[nextIndex_++];
+                const SnapshotEntry& entry = entries_[nextIndex_++];
                 KeyPtr key = entry.key.lock();
-                if (key) {
-                    current_ = Pair(std::move(key), entry.value);
+                ValuePtr value = entry.value.lock();
+                if (key && value) {
+                    current_ = Pair(std::move(key), std::move(value));
                     hasCurrent_ = true;
                     return true;
                 }
@@ -100,12 +125,18 @@ private:
             return false;
         }
 
-        /** Returns the enumerator to its initial, pre-first-element state. */
-        void Reset() override {
-            nextIndex_ = 0;
-            current_ = Pair{};
-            hasCurrent_ = false;
-        }
+        /**
+         * @brief Does nothing, matching .NET.
+         *
+         * `ConditionalWeakTable.cs:492` is literally `public void Reset() { }`. This port used to
+         * rewind the snapshot index and clear `Current`, so a caller could re-enumerate; that is
+         * a capability .NET's enumerator does not have, and ticket #1981 removes it deliberately.
+         *
+         * Because the body is empty, `Current()` after `Reset()` still returns the last element
+         * — again matching .NET, whose `Current` is guarded on `_currentIndex < 0` and is
+         * therefore unaffected by a call that changes nothing.
+         */
+        void Reset() override {}
 
         /** Gets the current key/value pair. */
         [[nodiscard]] const Pair& Current() const override {
@@ -325,7 +356,15 @@ public:
     [[nodiscard]] System::Collections::Generic::IEnumerator<Pair>* GetEnumerator() override {
         std::lock_guard lock(mutex_);
         removeExpiredLocked();
-        return new Enumerator(entries_);
+        // #1981: the snapshot demotes each value to a weak reference, so the enumerator retains
+        // only whatever `Current` holds. Copying `entries_` directly would copy a strong
+        // ValuePtr per row, which is the over-retention this ticket removes.
+        std::vector<SnapshotEntry> snapshot;
+        snapshot.reserve(entries_.size());
+        for (const Entry& entry : entries_) {
+            snapshot.push_back(SnapshotEntry{entry.key, std::weak_ptr<TValue>(entry.value)});
+        }
+        return new Enumerator(std::move(snapshot));
     }
 };
 

@@ -870,3 +870,169 @@ TEST(ExternalExceptionTests, Decl1980G1_ToStringIsAbsentUntilItsTypeNameQuestion
     EXPECT_EQ(ex.getErrorCodeProperty(), static_cast<SharpRuntime::intcs>(0x80070005));
     SUCCEED();
 }
+
+// =============================================================================================
+// Ticket #1981 (cause R-H) — the ConditionalWeakTable enumerator retains only Current, and
+// Reset() does nothing.
+//
+// The enumerator's snapshot used to be a vector of Entry, whose `value` is a STRONG shared_ptr,
+// so an enumerator kept every snapshotted value alive for its own lifetime -- including values
+// the table had already released. Measured before the repair
+// (build-probe/1981_probe1_layout.cpp): after table.Remove(key) the value was still alive, and
+// became collectable only when the enumerator was deleted.
+//
+// .NET's enumerator holds NO snapshot at all: it keeps the table plus an index range and reads
+// the live container under the table's lock (ConditionalWeakTable.cs:441-478), so it retains
+// only `_current`. That exact design is deliberately NOT reproduced here -- it requires the
+// enumerator to hold a borrowed pointer to the table, and GetEnumerator() hands the caller a raw
+// IEnumerator* whose lifetime the table does not control, which is the CCF-019 defect class this
+// programme has spent the session removing. A snapshot of WEAK references reaches the same
+// observable contract without introducing that hazard.
+// =============================================================================================
+
+namespace {
+    using WeakTable = System::Runtime::CompilerServices::ConditionalWeakTable<int, int>;
+    using WeakPair  = System::Collections::Generic::KeyValuePair<std::shared_ptr<int>,
+                                                                 std::shared_ptr<int>>;
+    using WeakEnum  = System::Collections::Generic::IEnumerator<WeakPair>;
+}
+
+TEST(ConditionalWeakTableEnumeratorTests, Fix1981_TheEnumeratorDoesNotRetainAReleasedValue) {
+    auto key = std::make_shared<int>(1);
+    std::weak_ptr<int> watch;
+    WeakTable table;
+    {
+        auto value = std::make_shared<int>(42);
+        watch = value;
+        table.Add(key, value);
+    }
+
+    std::unique_ptr<WeakEnum> e(table.GetEnumerator());
+    ASSERT_FALSE(watch.expired()) << "the table itself still holds the value here";
+
+    ASSERT_TRUE(table.Remove(key));
+    EXPECT_TRUE(watch.expired())
+        << "the enumerator must not keep a value alive after the table released it";
+}
+
+TEST(ConditionalWeakTableEnumeratorTests, Fix1981_OnlyCurrentIsRetained) {
+    auto keyA = std::make_shared<int>(1);
+    auto keyB = std::make_shared<int>(2);
+    std::weak_ptr<int> watchA, watchB;
+    WeakTable table;
+    {
+        auto a = std::make_shared<int>(10);
+        auto b = std::make_shared<int>(20);
+        watchA = a; watchB = b;
+        table.Add(keyA, a);
+        table.Add(keyB, b);
+    }
+
+    std::unique_ptr<WeakEnum> e(table.GetEnumerator());
+    ASSERT_TRUE(e->MoveNext());
+    const int firstKey = *e->Current().Key;
+
+    // Release BOTH from the table. Whichever one MoveNext has landed on is retained by Current;
+    // the other must be gone. That asymmetry is the whole point -- a snapshot holding strong
+    // values would keep both alive.
+    ASSERT_TRUE(table.Remove(keyA));
+    ASSERT_TRUE(table.Remove(keyB));
+
+    if (firstKey == 1) {
+        EXPECT_FALSE(watchA.expired()) << "Current must stay alive";
+        EXPECT_TRUE(watchB.expired())  << "a value that is not Current must not be retained";
+    } else {
+        EXPECT_FALSE(watchB.expired()) << "Current must stay alive";
+        EXPECT_TRUE(watchA.expired())  << "a value that is not Current must not be retained";
+    }
+}
+
+TEST(ConditionalWeakTableEnumeratorTests, Fix1981_ResetDoesNothingAndCannotReEnumerate) {
+    // .NET: `public void Reset() { }` (ConditionalWeakTable.cs:492). This port used to rewind
+    // the index, so Reset() re-enumerated. That capability is removed deliberately.
+    auto key = std::make_shared<int>(1);
+    auto value = std::make_shared<int>(42);
+    WeakTable table;
+    table.Add(key, value);
+
+    std::unique_ptr<WeakEnum> e(table.GetEnumerator());
+    ASSERT_TRUE(e->MoveNext());
+    EXPECT_EQ(*e->Current().Value, 42);
+    ASSERT_FALSE(e->MoveNext()) << "one entry, so the second MoveNext ends the enumeration";
+
+    e->Reset();
+    EXPECT_FALSE(e->MoveNext()) << "Reset() is a no-op, so it cannot restart the enumeration";
+}
+
+TEST(ConditionalWeakTableEnumeratorTests, Fix1981_ResetLeavesCurrentUntouched) {
+    // The half that is easy to get wrong in the other direction: because .NET's Reset() body is
+    // empty, it does NOT clear Current either. A "no-op" that still cleared hasCurrent_ would
+    // make Current() throw here.
+    auto key = std::make_shared<int>(1);
+    auto value = std::make_shared<int>(42);
+    WeakTable table;
+    table.Add(key, value);
+
+    std::unique_ptr<WeakEnum> e(table.GetEnumerator());
+    ASSERT_TRUE(e->MoveNext());
+    e->Reset();
+    EXPECT_NO_THROW((void)e->Current());
+    EXPECT_EQ(*e->Current().Value, 42);
+}
+
+TEST(ConditionalWeakTableEnumeratorTests, Fix1981_AnEntryReleasedAfterTheSnapshotIsSkipped) {
+    // Added after mutation M3 -- "test only the key, not the value" -- went UNCAUGHT: no case
+    // above enumerates AFTER a Remove, which is the only situation where the key is alive and the
+    // value is not. The caller still holds the key, so key.lock() succeeds; the table has dropped
+    // the value, so value.lock() fails. Testing the key alone would yield a pair with a NULL
+    // value and count it as a live entry.
+    //
+    // .NET skips it: its MoveNext loops while TryGetEntry returns false for an index whose entry
+    // has been removed or collected (ConditionalWeakTable.cs:459-467).
+    auto keyA = std::make_shared<int>(1);
+    auto keyB = std::make_shared<int>(2);
+    WeakTable table;
+    {
+        table.Add(keyA, std::make_shared<int>(10));
+        table.Add(keyB, std::make_shared<int>(20));
+    }
+
+    std::unique_ptr<WeakEnum> e(table.GetEnumerator());
+    ASSERT_TRUE(table.Remove(keyA));   // after the snapshot was taken; keyA is still alive here
+
+    int seen = 0;
+    while (e->MoveNext()) {
+        ++seen;
+        ASSERT_NE(e->Current().Value, nullptr) << "a skipped entry must never be yielded";
+        EXPECT_EQ(*e->Current().Key, 2);
+        EXPECT_EQ(*e->Current().Value, 20);
+    }
+    EXPECT_EQ(seen, 1) << "the released entry must be skipped, not yielded with a null value";
+}
+
+TEST(ConditionalWeakTableEnumeratorTests, Fix1981_OrdinaryEnumerationIsUnchanged) {
+    auto keyA = std::make_shared<int>(1);
+    auto keyB = std::make_shared<int>(2);
+    auto a = std::make_shared<int>(10);
+    auto b = std::make_shared<int>(20);
+    WeakTable table;
+    table.Add(keyA, a);
+    table.Add(keyB, b);
+
+    std::unique_ptr<WeakEnum> e(table.GetEnumerator());
+    int seen = 0, sum = 0;
+    while (e->MoveNext()) { ++seen; sum += *e->Current().Value; }
+    EXPECT_EQ(seen, 2);
+    EXPECT_EQ(sum, 30);
+}
+
+TEST(ConditionalWeakTableEnumeratorTests, Decl1981_TheTablesOwnLayoutIsUnchanged) {
+    // SA-3's pinned measurement. The Enumerator is a PRIVATE nested class that GetEnumerator()
+    // heap-allocates and hands back as an IEnumerator<Pair>*, so no consumer can name it, size it
+    // or hold one by value: its layout change is invisible through every public spelling. What a
+    // consumer CAN size is the table, and that did not move -- 72 before the repair and 72 after
+    // (build-probe/1981_probe1_layout.cpp).
+    static_assert(sizeof(WeakTable) == 72, "#1981 must not change the table's own layout");
+    static_assert(alignof(WeakTable) == 8);
+    EXPECT_EQ(sizeof(WeakTable), 72u);
+}
