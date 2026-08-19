@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <optional>
 #include <string>
 #include "System/Uri.hpp"
 
@@ -42,13 +43,39 @@ namespace System {
         /**
          * @brief Converts a string to a Uri.
          *
-         * C++ counterpart of .NET UriTypeConverter.ConvertFrom(ITypeDescriptorContext, CultureInfo, object).
+         * C++ counterpart of .NET UriTypeConverter.ConvertFrom(ITypeDescriptorContext,
+         * CultureInfo, object).
+         *
          * @param text The string representation of a URI.
-         * @return A Uri constructed from @p text.
-         * @throws System::UriFormatException if @p text is empty or malformed.
+         * @return A Uri constructed from @p text, or **`std::nullopt` when @p text is empty**.
+         * @throws System::UriFormatException if @p text is malformed.
+         *
+         * Ticket #1999 / SR-AUD-148 (U-I). The return type was a by-value `Uri`, which **cannot
+         * express .NET's `null`**, so an empty string was forwarded straight to the `Uri`
+         * constructor and threw `UriFormatException`. .NET returns null:
+         * @code
+         * if (value is string uriString)
+         * {
+         *     if (string.IsNullOrEmpty(uriString))
+         *     {
+         *         return null;
+         *     }
+         *     // Let the Uri constructor throw any informative exceptions
+         *     return new Uri(uriString, UriKind.RelativeOrAbsolute);
+         * }                                       // UriTypeConverter.cs:40-51
+         * @endcode
+         * The empty case is the ONLY one .NET short-circuits -- its comment says outright that a
+         * malformed string is left to the constructor -- so `std::optional` widens exactly one
+         * input and nothing else.
+         *
+         * @note The kind is spelled **explicitly** as `RelativeOrAbsolute`, matching the
+         * reference. It is behaviourally identical to the one-argument `Uri(text)` this used to
+         * call -- with that kind the two guards in `Uri(string, UriKind)` are both inert -- so
+         * the change is documentation rather than behaviour.
          */
-        [[nodiscard]] virtual Uri ConvertFrom(const std::string& text) const {
-            return Uri(text);
+        [[nodiscard]] virtual std::optional<Uri> ConvertFrom(const std::string& text) const {
+            if (text.empty()) return std::nullopt;
+            return Uri(text, UriKind::RelativeOrAbsolute);
         }
 
         /**
