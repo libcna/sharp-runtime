@@ -80,8 +80,18 @@ namespace System::Text::RegularExpressions {
         [[nodiscard]] bool getSuccessProperty() const { return success_; }
         /** @return The matched substring, or empty string if unsuccessful. */
         [[nodiscard]] std::string getValueProperty() const { return success_ ? subMatches_[0].value : ""; }
-        /** @return The zero-based index of the match in the input string, or -1 if unsuccessful. */
-        [[nodiscard]] intcs getIndexProperty() const { return success_ ? subMatches_[0].index : -1; }
+        /**
+         * @return The zero-based index of the match in the input string, or **0** if
+         * unsuccessful.
+         *
+         * The unsuccessful answer is .NET's and is derived rather than chosen: `Match.cs:75`
+         * defines `Match.Empty` as `new Match(null, 1, string.Empty, 0)`, which reaches
+         * `Group.cs:27-28` with `capcount == 0` and therefore stores `Capture.Index = 0`
+         * (`Capture.cs:27-32`). This port previously answered `-1`, a sentinel .NET never
+         * produces. .NET states plainly on `Match.Empty` that "this property should not be used
+         * to determine if a match is successful" (`Match.cs:72-74`); `getSuccessProperty()` is.
+         */
+        [[nodiscard]] intcs getIndexProperty() const { return success_ ? subMatches_[0].index : 0; }
         /** @return The length of the matched substring, or 0 if unsuccessful. */
         [[nodiscard]] intcs getLengthProperty() const { return success_ ? subMatches_[0].length : 0; }
 

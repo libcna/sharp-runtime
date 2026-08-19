@@ -1,5 +1,28 @@
 # Sharp Runtime plan
 
+*Last verified: 2026-08-19 — branch **`next`**, working tree clean. Gate **17,612 across 38
+executables: 17,612 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs
+with every executable run separately and continuing past failures, zero build warnings at
+`--parallel 2`. Graph **41 / 93**, seams **3 / 20**, negative fixtures **48 / 245** (unchanged —
+#2397 outlawed no spelling). **BOTH WORK QUEUES ARE EMPTY**: `ticket` has 0 `todo` (2,380 done, 9
+blocked, 1 needs_user, 5 wontfix) and `task` has 0 unclassified.*
+
+***The latest change is #2397, and what it demonstrates matters more than what it repaired.*** *The
+queues were already empty, so the work was **found by measurement**: the restored reference was
+pointed at `System::Text::RegularExpressions`, a module with **no test sources of its own** whose
+only coverage was a section of one integration file. It held **four divergences from .NET, two of
+them silent data loss through a public member** — `Regex::Split` discarded every matched capture
+group's value and dropped a trailing empty segment, both because the body was one
+`std::sregex_token_iterator(-1)`; `Regex::Escape` used its own metacharacter set, differing in
+**both** directions; and an unsuccessful `Match` reported an `Index` of **-1**, a sentinel .NET
+never produces. Landed under SA-5 with no layout, vtable, signature or `noexcept` change and no
+outlawed spelling. **Zero downstream sites** in both consumers. Nine mutations, eight caught, and
+the ninth a **proven equivalence** measured over 288 (pattern, input) pairs rather than asserted.
+`NEXT.md` §4b lists the three other modules with no test sources and says plainly which are and
+are not worth the same treatment.*
+
+*Prior snapshot, retained historically:*
+
 *Last verified: 2026-08-19 — branch **`next`** at `8b08571b`, **pushed and verified on the
 remote**, working tree clean. Gate **17,597 across 38 executables: 17,597 passed, 0 failed, 0
 skipped — GREEN**, recounted from the per-executable logs and reproduced independently on the

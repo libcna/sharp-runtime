@@ -520,11 +520,15 @@ TEST(RegexTests, InvalidPattern_Throws) {
 // Match
 // ===========================================================================
 
+// #2397 INVERTED THIS PIN. It asserted Index == -1, which is a sentinel .NET never produces:
+// Match.cs:75 defines Match.Empty as new Match(null, 1, string.Empty, 0), reaching Group.cs:27-28
+// with capcount == 0 and therefore Capture.Index == 0 (Capture.cs:27-32). The rest of the case is
+// unchanged, because the rest of it was right.
 TEST(MatchTests, Empty_SuccessFalse) {
     const Match& m = Match::Empty();
     EXPECT_FALSE(m.getSuccessProperty());
     EXPECT_EQ(m.getValueProperty(), "");
-    EXPECT_EQ(m.getIndexProperty(), -1);
+    EXPECT_EQ(m.getIndexProperty(), 0);
     EXPECT_EQ(m.getLengthProperty(), 0);
 }
 

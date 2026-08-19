@@ -3,18 +3,26 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-19 — 17,597 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,597 run: 17,597 passed, 0 failed, 0 skipped**, recounted from the
-> per-executable logs and **reproduced independently on the committed state** (`8b08571b`, tree
-> clean, `HEAD == origin/next`, zero warnings). Every checkpoint below this one ends with *"the
-> gate is not green"*; this one does not. Two of the three historical failure sources were
-> environmental and are simply absent in this container; the third was a real repair (#2351).
+> **Test-count floor, 2026-08-19 — 17,612 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,612 run: 17,612 passed, 0 failed, 0 skipped**, recounted from the
+> per-executable logs with every executable run separately and continuing past failures, zero build
+> warnings at `--parallel 2`. Every checkpoint below this one ends with *"the gate is not green"*;
+> this one does not. Two of the three historical failure sources were environmental and are simply
+> absent in this container; the third was a real repair (#2351).
 >
-> **BOTH WORK QUEUES ARE EMPTY.** `ticket` has **0 `todo`**; `task` has **0** unclassified
-> (14,979 ignored / 1,082 ported / 140 ignore). Ticket totals: **2,379 done, 9 blocked, 1
-> needs_user, 5 wontfix**. **192 tickets closed since the 2026-08-12 block below, 43 of them on
-> 2026-08-19 alone.** A new session will find nothing to pick up: what remains needs the user or
-> an external event, and each is itemised in §2 below.
+> **The queues were empty and the work was found by measurement instead (#2397).** With `ticket`
+> at 0 `todo` and `task` fully classified, the next move was **not** to stop but to point the
+> restored reference at a module the audit had never reviewed. `System::Text::RegularExpressions`
+> has **no dedicated test executable** — its only coverage was a section of one integration file —
+> and it turned out to hold **four divergences from .NET, two of them silent data loss through a
+> public member**: `Regex::Split` discarded every matched capture group's value *and* dropped a
+> trailing empty segment, both because the body was a single `std::sregex_token_iterator(-1)`.
+> **A module with no test executable is where to look next**, and §5 below lists the others.
+>
+> **BOTH WORK QUEUES ARE STILL EMPTY.** `ticket` has **0 `todo`**; `task` has **0** unclassified
+> (14,979 ignored / 1,082 ported / 140 ignore). Ticket totals: **2,380 done, 9 blocked, 1
+> needs_user, 5 wontfix**. What remains blocked needs the user or an external event, and each is
+> itemised in §2 below.
 
 ## Handoff for a new context, 2026-08-19 (queue exhausted)
 
@@ -105,11 +113,51 @@ Re-measured 2026-08-19; the ticket's own cost premise was **wrong for one viable
   process-wide setting this port has today. The faithful repair is a two-property model, which
   adds public surface inside the parked area.
 
+### 4b. #2397 — what a queue-empty session did, and the seam it opened
+
+**#2397 is the answer to "the queues are empty, now what".** It found four real divergences by
+pointing the restored reference at a module the audit never reviewed, and two of them were losing
+data through a public member. The full record is on the ticket and in
+`docs/Migration-RegexEscapeSplitAndEmptyMatchIndex.md`; the part worth carrying forward is the
+**method**, and the fact that it is not exhausted.
+
+**Four modules have no test sources of their own** — `modules/<name>/tests/` holds only a
+`.gitkeep` — so none of them owns an entry in the 38-executable gate. Measured 2026-08-19, with
+where each is *actually* exercised, because "no test directory" is not the same claim as "no
+coverage" and the difference matters:
+
+| Module | Component | Where it is exercised today |
+|---|---|---|
+| `text-regular-expressions` | `Text.RegularExpressions` | a section of `tests/integration/System/Text/TextRemainingTests.cpp` — **this is the one #2397 measured, and it held four divergences** |
+| `io-compression-zip` | `IO.Compression.Zip` | `tests/integration/System/IO/Compression/CompressionTests.cpp` (145 cases in the file, covering the whole namespace) |
+| `security-cryptography-random` | `Security.Cryptography.Random` | `tests/integration/System/Security/Cryptography/KeyDerivationTests.cpp` (13 cases in the file) |
+| `storage` | `Storage` | `tests/integration/Task39RemainingTests.cpp` (78 cases in the file) — one header, `StoragePaths` |
+
+**Do not read the table as four equal opportunities.** `io-compression-zip` is genuinely well
+covered by a large sibling file; `storage` is 48 lines and one header. The two worth measuring
+against `/rv` next are **`security-cryptography-random`** (`RandomNumberGenerator` /
+`RNGCryptoServiceProvider`, and note that #2228 has already put a real CSPRNG behind `Guid::NewGuid`,
+so the question is whether *these* types reach the same source) and a **second pass over
+`Text.RegularExpressions`**, whose remaining gaps #2397 listed rather than closed: `Regex::Unescape`
+is absent, the `count`/`startat` `Split` overloads are absent, and `Match::Empty().Groups().Count`
+is 0 here against .NET's 1.
+
+**Adding a 39th executable was considered and not taken.** A dedicated
+`SharpRuntimeTests_Text_RegularExpressions` would be the architecturally tidier home, and the
+module's `CMakeLists.txt` is a three-line `INTERFACE` registration that would accept one. It was
+declined for this ticket because "38 executables" is written into `CLAUDE.md` rule 2, `plan.md` and
+every checkpoint in this file, so the change is a documentation decision as much as a build one —
+and #2397's tests belong beside the regex cases that already exist. A later ticket may take it;
+it should take it deliberately, and update all three documents in the same change.
+
 ### 4. How to resume
 
 1. `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, title FROM ticket WHERE status='todo' ORDER BY ticket_no;"` — **expect nothing.**
-2. If it is still empty, the work is a **rule-14 sweep**: re-read each blocked ticket's recorded
-   gate against `docs/StandingApprovals.md` and §0 above. That is how #1894 and many others closed.
+2. If it is still empty, there are **two** kinds of work, and the second is the one #2397 proved
+   is still productive. (a) A **rule-14 sweep**: re-read each blocked ticket's recorded gate
+   against `docs/StandingApprovals.md` and §0 above — that is how #1894 and many others closed.
+   (b) A **parity sweep against `/rv`** over a module the audit never reviewed. §4b lists the
+   candidates and says plainly which of them are and are not worth the measurement.
 3. Do not start #1940, #1980 G-3, #1997 A-4 or #1962 without the user. Do not edit `cna` or
    `mobile-eggbert` without a per-action instruction, and never commit there.
 4. The gate script must run **every executable separately and continue past failures**; both

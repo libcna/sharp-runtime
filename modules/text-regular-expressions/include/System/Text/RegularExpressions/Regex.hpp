@@ -26,6 +26,15 @@ namespace System::Text::RegularExpressions {
      * NEXT.md previously called out ("no named groups") is now fixed. `RegexOptions` beyond
      * `IgnoreCase`/`Multiline` have no effect (see that enum's doc comment); no match timeout
      * support (`std::regex_search` cannot be interrupted mid-match).
+     *
+     * @note What ticket #2397 aligned to the reference, and what it deliberately left: `Escape`,
+     * `Split` and an unsuccessful `Match`'s `Index` now answer exactly as .NET does, each derived
+     * from `/rv` with the citation at its own site. **Still absent, and stated so that silence is
+     * not read as parity**: `Regex.Unescape(string)` (it needs `RegexParser.ScanCharEscape`, i.e.
+     * the pattern grammar rather than a string transformation), the `Split(input, count)` and
+     * `Split(input, count, startat)` overloads, and `Match.Empty.Groups.Count`, which is `1` in
+     * .NET (`Match.cs:75` builds it with `capcount = 1`; `GroupCollection.cs:67`) and `0` here
+     * because this port's `Match` does not derive from `Group`/`Capture` as .NET's does.
      */
     class Regex {
         std::regex re_;
@@ -186,11 +195,49 @@ namespace System::Text::RegularExpressions {
             return result;
         }
 
-        /** @brief Splits the input string on occurrences of the pattern. */
+        /**
+         * @brief Splits the input string on occurrences of the pattern.
+         *
+         * Transcribed from `Regex.Split.cs:295-321`, which does three things this port's earlier
+         * `std::sregex_token_iterator(-1)` implementation did not:
+         *
+         * 1. **Every matched capture group's value is appended** after the segment that preceded
+         *    its match (`Regex.Split.cs:304-311`), so `Split("a1b2c", "(\\d)")` is
+         *    `{"a","1","b","2","c"}` and not `{"a","b","c"}`. A group that did **not** participate
+         *    in the match is skipped, which is why `Split("a,b", "(,)|(;)")` yields
+         *    `{"a",",","b"}` rather than an empty element for the alternative that lost.
+         * 2. **The trailing segment is always appended once any match was seen**
+         *    (`Regex.Split.cs:321`), so `Split("abc", "c")` is `{"ab",""}` and not `{"ab"}` --
+         *    `sregex_token_iterator` suppresses a trailing empty token, which silently dropped it.
+         * 3. **A pattern that never matches returns the whole input as one element**
+         *    (`Regex.Split.cs:316-319`). The `results.empty()` test below is .NET's own
+         *    `state.results.Count == 0`: every match appends at least the segment before it, so
+         *    an empty result set is exactly "no match occurred".
+         */
         [[nodiscard]] std::vector<std::string> Split(const std::string& input) const {
             std::vector<std::string> result;
-            std::sregex_token_iterator it(input.begin(), input.end(), re_, -1), end;
-            for (; it != end; ++it) result.push_back(it->str());
+            size_t prevat = 0;
+            auto end = std::sregex_iterator();
+            for (auto it = std::sregex_iterator(input.begin(), input.end(), re_); it != end; ++it) {
+                const std::smatch& m = *it;
+                const size_t index = static_cast<size_t>(m.position(0));
+                result.push_back(input.substr(prevat, index - prevat));
+                prevat = index + static_cast<size_t>(m.length(0));
+
+                // Regex.Split.cs:304-311 -- add all MATCHED capture groups, group 0 excluded.
+                for (size_t g = 1; g < m.size(); ++g) {
+                    if (m[g].matched) result.push_back(m[g].str());
+                }
+            }
+            // Regex.Split.cs:316-319. This early return is a PROVEN EQUIVALENCE here and is kept
+            // for being .NET's rather than for being load-bearing: every iteration of the loop
+            // above appends at least the segment preceding its match, so an empty result set means
+            // the loop never ran, which means `prevat` is still 0, which means the fall-through
+            // `input.substr(prevat)` below already yields exactly `{input}`. Measured over 288
+            // (pattern, input) pairs with both forms side by side: zero differences. Mutation M7
+            // removes it and is NOT CAUGHT, and that is the honest result rather than a test gap.
+            if (result.empty()) return {input};
+            result.push_back(input.substr(prevat)); // Regex.Split.cs:321
             return result;
         }
 
@@ -210,14 +257,43 @@ namespace System::Text::RegularExpressions {
             return Regex(pattern).Split(input);
         }
 
-        /** @brief Escapes regex metacharacters in @p str so it can be used as a literal within a pattern. */
+        /**
+         * @brief Escapes regex metacharacters in @p str so it can be used as a literal within a
+         * pattern.
+         *
+         * The escaped set and the escaped spelling are .NET's, transcribed rather than chosen:
+         * `RegexParser.cs:2135-2136` defines the metacharacters as
+         * `SearchValues.Create("\t\n\f\r #$()*+.?[\\^{|")`, and `RegexParser.cs:180-199`
+         * renders the four whitespace metacharacters as a backslash followed by a **letter**
+         * (`\n` -> `\` `n`, `\r` -> `\` `r`, `\t` -> `\` `t`, `\f` -> `\` `f`) rather than
+         * as a backslash followed by the raw control byte.
+         *
+         * @note Two consequences are .NET's and are deliberate rather than oversights. A space
+         * and `#` **are** escaped, because .NET's `IgnorePatternWhitespace` mode gives both a
+         * meaning; `]` and `}` are **not**, because neither can open a construct. The second is
+         * the one with an observable edge: splicing this output into a character class --
+         * `"[" + Escape(x) + "]"` -- no longer escapes a `]` that would close the class early.
+         * That hazard is .NET's own, and is the reason `Escape` is specified for a literal in a
+         * pattern rather than for a literal in a class.
+         */
         [[nodiscard]] static std::string Escape(const std::string& str) {
-            static const std::string metaChars = "\\^$.|?*+()[]{}";
+            // RegexParser.cs:2135-2136 -- SearchValues.Create("\t\n\f\r #$()*+.?[\\^{|")
+            static const std::string metaChars = "\t\n\f\r #$()*+.?[\\^{|";
             std::string result;
             result.reserve(str.size());
             for (char c : str) {
-                if (metaChars.find(c) != std::string::npos) result += '\\';
-                result += c;
+                if (metaChars.find(c) == std::string::npos) {
+                    result += c;
+                    continue;
+                }
+                result += '\\';
+                switch (c) { // RegexParser.cs:182-196
+                    case '\n': result += 'n'; break;
+                    case '\r': result += 'r'; break;
+                    case '\t': result += 't'; break;
+                    case '\f': result += 'f'; break;
+                    default: result += c; break;
+                }
             }
             return result;
         }
