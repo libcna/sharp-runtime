@@ -34,11 +34,15 @@ namespace System::Runtime::InteropServices {
      * Stated explicitly because the audit found this header to be the one interop-adjacent file
      * that described effects it cannot produce **without saying so**, unlike the compiler-service
      * marker headers alongside it (ticket #1978, the disclosure half of SR-AUD-168). The
-     * remaining divergences in the *values* this header declares — `UnmanagedType::LPStruct`,
-     * `StructLayoutAttribute::Pack`, `DllImportAttribute::PreserveSig`/`BestFitMapping`, the
-     * omitted `MarshalAsAttribute` fields and the absent `ComInterfaceType`/`ClassInterfaceType`
-     * enums — are SR-AUD-165/166/167 and are tracked separately by the approval-gated ticket
-     * #1980, because changing them changes declarations a consumer can already name.
+     * The *value* divergences this header used to declare — `UnmanagedType::LPStruct`, the
+     * missing `Currency`/`IDispatch`, `StructLayoutAttribute::Pack`, both `CharSet` defaults and
+     * `DllImportAttribute::PreserveSig`/`BestFitMapping` — were **#1980 group G-2** and are now
+     * fixed; see docs/Migration-InteropMetadataValues.md. What remains of #1980 here is
+     * **SR-AUD-167** (group G-5): the omitted `MarshalAsAttribute` fields and the absent
+     * `ComInterfaceType`/`ClassInterfaceType` enums.
+     *
+     * Because these types exist to preserve managed metadata rather than to produce an effect,
+     * getting the *numbers* right is the whole of their contract.
      */
 
     /** Specifies the memory layout of a managed class or struct. */
@@ -69,6 +73,10 @@ namespace System::Runtime::InteropServices {
         U8         = 10,
         R4         = 11,
         R8         = 12,
+        // #1980 G-2 / SR-AUD-165: Currency and IDispatch were absent. .NET declares
+        // `Currency = 0xf` and `IDispatch = 0x1a` (UnmanagedType.cs:22,30).
+        Currency   = 15,
+        IDispatch  = 26,
         LPStr      = 20,
         LPWStr     = 21,
         LPTStr     = 22,
@@ -88,7 +96,12 @@ namespace System::Runtime::InteropServices {
         FunctionPtr= 38,
         AsAny      = 40,
         LPArray    = 42,
-        LPStruct   = 48,
+        // #1980 G-2 / SR-AUD-165. This was 48, which is not merely the wrong number: 48 is
+        // LPUTF8Str's value, so the two enumerators COLLIDED -- `LPStruct == LPUTF8Str` was true,
+        // and a switch over UnmanagedType could not carry both arms. .NET declares
+        // `LPStruct = 0x2b` (UnmanagedType.cs:55). The plan recorded this as a wrong value; the
+        // collision is what measurement added.
+        LPStruct   = 43,
         CustomMarshaler = 44,
         Error      = 45,
         IInspectable = 46,
@@ -109,9 +122,28 @@ namespace System::Runtime::InteropServices {
     class StructLayoutAttribute : public System::Attribute {
     public:
         LayoutKind Value;  ///< The layout kind.
-        SharpRuntime::intcs Pack = 8; ///< Packing alignment in bytes.
+        /**
+         * Packing alignment in bytes.
+         *
+         * #1980 G-2 / SR-AUD-166: this defaulted to **8**. .NET declares `public int Pack;` with
+         * no initializer (`StructLayoutAttribute.cs:21`), so a default-constructed attribute
+         * reports **0** -- which in the metadata means "use the runtime's default packing", a
+         * different statement from "pack to 8".
+         */
+        SharpRuntime::intcs Pack = 0;
         SharpRuntime::intcs Size = 0; ///< Minimum size in bytes (0 = no minimum).
-        ::System::Runtime::InteropServices::CharSet CharSet = ::System::Runtime::InteropServices::CharSet::Ansi; ///< Character set used for embedded strings.
+        /**
+         * Character set used for embedded strings.
+         *
+         * #1980 G-2: this defaulted to `CharSet::Ansi`. .NET declares `public CharSet CharSet;`
+         * with no initializer (`StructLayoutAttribute.cs:23`), so the default is **0** -- and
+         * `CharSet` has no enumerator with that value (`None` is 1). **That is deliberate, not a
+         * slip**: this header exists to preserve the managed metadata values exactly, and .NET's
+         * metadata really does carry an unset CharSet here. The plan's G-2 list did not name this
+         * field; it was found by measuring the reference alongside the four it did name.
+         */
+        ::System::Runtime::InteropServices::CharSet CharSet =
+            static_cast<::System::Runtime::InteropServices::CharSet>(0);
 
         /** @param layout The desired memory layout kind. */
         explicit StructLayoutAttribute(LayoutKind layout) : Value(layout) {}
@@ -152,12 +184,34 @@ namespace System::Runtime::InteropServices {
     public:
         std::string Value;         ///< The name of the DLL to import from.
         std::string EntryPoint;    ///< Name of the exported function; empty means use the method name.
-        ::System::Runtime::InteropServices::CharSet            CharSet           = ::System::Runtime::InteropServices::CharSet::None;   ///< String marshalling character set.
+        /**
+         * String marshalling character set.
+         *
+         * #1980 G-2: this defaulted to `CharSet::None` (1). .NET declares
+         * `public CharSet CharSet;` with no initializer, so the default is **0**, which is not a
+         * declared enumerator. Same reasoning as `StructLayoutAttribute::CharSet` above.
+         */
+        ::System::Runtime::InteropServices::CharSet            CharSet           =
+            static_cast<::System::Runtime::InteropServices::CharSet>(0);
         ::System::Runtime::InteropServices::CallingConvention  CallingConvention = ::System::Runtime::InteropServices::CallingConvention::Winapi; ///< Calling convention.
         bool               SetLastError      = false; ///< Capture GetLastError after the call.
         bool               ExactSpelling     = false; ///< Disable automatic A/W suffix probing.
-        bool               PreserveSig       = true;  ///< Preserve the signature (no HRESULT transformation).
-        bool               BestFitMapping    = true;  ///< Enable best-fit character mapping.
+        /**
+         * Preserve the signature (no HRESULT transformation).
+         *
+         * #1980 G-2 / SR-AUD-166: this defaulted to **true**. .NET declares `public bool
+         * PreserveSig;` with no initializer (`DllImportAttribute.cs:22`), so the field reads
+         * **false** on a default-constructed attribute -- the same as every other bool on the
+         * type, none of which this port had got wrong.
+         */
+        bool               PreserveSig       = false;
+        /**
+         * Enable best-fit character mapping.
+         *
+         * #1980 G-2 / SR-AUD-166: this defaulted to **true**; .NET's is a plain
+         * `public bool BestFitMapping;` (`DllImportAttribute.cs:21`), i.e. **false**.
+         */
+        bool               BestFitMapping    = false;
         bool               ThrowOnUnmappableChar = false; ///< Throw on unmappable Unicode characters.
 
         /** @param dllName The name of the native DLL. */

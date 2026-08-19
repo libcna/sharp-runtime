@@ -496,9 +496,13 @@ TEST(StructLayoutAttributeTests, Constructor_StoresLayout) {
     EXPECT_EQ(attr.Value, LayoutKind::Sequential);
 }
 
-TEST(StructLayoutAttributeTests, DefaultPack_IsEight) {
+TEST(StructLayoutAttributeTests, Fix1980G2_DefaultPackIsZeroNotEight) {
+    // INVERTED by #1980 group G-2. The plan predicted this exact pin would have to be rewritten,
+    // and it is the only pre-existing test the group touches. .NET declares `public int Pack;`
+    // with no initializer (StructLayoutAttribute.cs:21), so the default is 0 -- which in the
+    // metadata means "use the runtime's default packing", a different statement from "pack to 8".
     StructLayoutAttribute attr(LayoutKind::Explicit);
-    EXPECT_EQ(attr.Pack, 8);
+    EXPECT_EQ(attr.Pack, 0);
 }
 
 TEST(StructLayoutAttributeTests, DefaultSize_IsZero) {
@@ -1035,4 +1039,64 @@ TEST(ConditionalWeakTableEnumeratorTests, Decl1981_TheTablesOwnLayoutIsUnchanged
     static_assert(sizeof(WeakTable) == 72, "#1981 must not change the table's own layout");
     static_assert(alignof(WeakTable) == 8);
     EXPECT_EQ(sizeof(WeakTable), 72u);
+}
+
+// =============================================================================================
+// Ticket #1980 group G-2 (SR-AUD-165/166) — the interop metadata VALUES.
+//
+// These types exist to preserve managed metadata, not to produce an effect (P/Invoke and interop
+// are a declared permanent deviation), so getting the numbers right is the whole of their
+// contract. Landed under SA-5: every value below is transcribed from the reference.
+// =============================================================================================
+
+TEST(InteropMetadataValueTests, Fix1980G2_LPStructNoLongerCollidesWithLPUTF8Str) {
+    // THE FINDING WAS UNDERSTATED. LPStruct was 48 -- which is LPUTF8Str's value, so the two
+    // enumerators were INDISTINGUISHABLE: the comparison below was true, and a switch over
+    // UnmanagedType could not carry both arms. .NET: LPStruct = 0x2b (UnmanagedType.cs:55).
+    EXPECT_EQ(static_cast<int>(UnmanagedType::LPStruct), 43);
+    EXPECT_EQ(static_cast<int>(UnmanagedType::LPUTF8Str), 48);
+    EXPECT_NE(UnmanagedType::LPStruct, UnmanagedType::LPUTF8Str);
+}
+
+TEST(InteropMetadataValueTests, Fix1980G2_CurrencyAndIDispatchExist) {
+    // Both were absent. .NET: Currency = 0xf, IDispatch = 0x1a (UnmanagedType.cs:22,30).
+    EXPECT_EQ(static_cast<int>(UnmanagedType::Currency), 15);
+    EXPECT_EQ(static_cast<int>(UnmanagedType::IDispatch), 26);
+}
+
+TEST(InteropMetadataValueTests, Decl1980G2_EveryOtherUnmanagedTypeValueWasAlreadyRight) {
+    // Asserted so the two repairs above are not mistaken for a wholesale renumbering: the rest of
+    // the enum already matched .NET exactly, which is why only these three rows moved.
+    EXPECT_EQ(static_cast<int>(UnmanagedType::Bool), 2);
+    EXPECT_EQ(static_cast<int>(UnmanagedType::U8), 10);
+    EXPECT_EQ(static_cast<int>(UnmanagedType::BStr), 19);
+    EXPECT_EQ(static_cast<int>(UnmanagedType::IUnknown), 25);
+    EXPECT_EQ(static_cast<int>(UnmanagedType::Struct), 27);
+    EXPECT_EQ(static_cast<int>(UnmanagedType::LPArray), 42);
+    EXPECT_EQ(static_cast<int>(UnmanagedType::CustomMarshaler), 44);
+    EXPECT_EQ(static_cast<int>(UnmanagedType::HString), 47);
+}
+
+TEST(InteropMetadataValueTests, Fix1980G2_DllImportBoolDefaultsAreAllFalse) {
+    // PreserveSig and BestFitMapping defaulted to TRUE. .NET declares every one of these as a
+    // plain `public bool` with no initializer (DllImportAttribute.cs:18-23), so all five read
+    // false -- and the port had already got the other three right, which is what made the two
+    // outliers a divergence rather than a policy.
+    DllImportAttribute attr("lib");
+    EXPECT_FALSE(attr.PreserveSig);
+    EXPECT_FALSE(attr.BestFitMapping);
+    EXPECT_FALSE(attr.SetLastError);
+    EXPECT_FALSE(attr.ExactSpelling);
+    EXPECT_FALSE(attr.ThrowOnUnmappableChar);
+}
+
+TEST(InteropMetadataValueTests, Decl1980G2_BothCharSetDefaultsAreUnsetNotNamed) {
+    // A divergence the plan's G-2 list did NOT name, found by measuring the reference alongside
+    // the four it did. .NET declares `public CharSet CharSet;` on both attributes with no
+    // initializer, so the default is 0 -- and CharSet has NO enumerator with that value (None is
+    // 1). Reproducing it is deliberate: the header's stated purpose is to preserve the managed
+    // metadata values, and .NET's metadata really does carry an unset CharSet here.
+    EXPECT_EQ(static_cast<int>(CharSet::None), 1) << "None is 1, so 0 is genuinely unnamed";
+    EXPECT_EQ(static_cast<int>(StructLayoutAttribute(LayoutKind::Sequential).CharSet), 0);
+    EXPECT_EQ(static_cast<int>(DllImportAttribute("lib").CharSet), 0);
 }
