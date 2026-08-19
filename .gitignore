@@ -7,3 +7,10 @@ plan.sqlite3-journal
 plan.sqlite3-wal
 plan.sqlite3-shm
 docs/generated/
+
+# Python bytecode. These are build artefacts: regenerated automatically, specific to the
+# interpreter that produced them (cpython-311 vs cpython-313 both appeared here), and useless to
+# any other machine. Six of them had been committed accidentally -- see CLAUDE.md's "Never commit
+# binaries".
+__pycache__/
+*.pyc
