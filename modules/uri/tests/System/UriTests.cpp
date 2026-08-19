@@ -1371,16 +1371,35 @@ TEST(UriTests, RelativeComponents_UriKindRelativeSeesTheSameSplit) {
 }
 
 // ---------------------------------------------------------------------------
-// Embedded NUL — ticket #2003, pinned rather than changed.
+// Embedded NUL — ticket #2003 RESOLVED, and the resolution is that nothing changes.
 //
-// Measured across every component position: a NUL is carried through as ordinary data. There
-// is NO prefix-only parse, NO silent truncation and no length loss — Uri("http://h/a\0b")
-// keeps all 12 bytes, round-trips, and does NOT compare equal to Uri("http://h/a"). The port
-// position already rejects it, because a NUL is not a digit. Whether .NET rejects a NUL
-// outright could not be measured here (/rv/tmp/runtime/src/libraries/ is absent), so choosing
-// rejection would be a narrowing on no surviving evidence — the line #1998 and #1963 sit on.
-// The current, self-consistent behaviour is pinned so a later change is deliberate.
-// See docs/SystemUriNamespaceReviewPlan.md §30.
+// The deferral was correct and its gate is now discharged. #2003 asked for approval to
+// "make System::Uri reject an embedded NUL anywhere in the URI string with
+// UriFormatException, accepting that the .NET behaviour it matches could not be re-measured
+// in this environment". With the reference present, that behaviour IS measurable, and it
+// says the opposite: .NET does NOT reject.
+//
+//   * `UriHelper.s_notSafeForUnescapeChars` lists U+0000 through U+001F explicitly, so a NUL
+//     is never unescaped back from `%00` — it is carried, not refused.
+//   * `Uri.TryCreateThis` (`UriExt.cs:30-70`) has no whole-string character precheck at all;
+//     the only rejection paths are the scheme, the host and the port.
+//   * A control character in the path, query or fragment is percent-ESCAPED during
+//     canonicalisation. The data survives; only its rendering differs.
+//
+// So the approval must NOT be sought: the proposed repair points away from the reference.
+// This port preserves the same data RAW rather than escaped, which is the already-declared
+// no-percent-encoding boundary (plan §15.1), not a second divergence.
+//
+// TWO PREMISE CORRECTIONS, both measured:
+//   1. The ticket's title says a NUL crosses "into every component". It does not any more —
+//      #2359 gave the host .NET's DNS character set, and a NUL is outside it exactly as a
+//      space is. The host row below is that rejection, and it agrees with .NET's own
+//      `DomainNameHelper.IsValid`.
+//   2. "No truncation" is true of the STRING and had never been asserted of the component
+//      ACCESSORS. It holds for those too, and each row states a length so a `%s`-shaped
+//      truncation cannot pass unnoticed.
+//
+// See docs/SystemUriNamespaceReviewPlan.md §30 and docs/Migration-UriEmbeddedNul.md.
 // ---------------------------------------------------------------------------
 
 TEST(UriTests, EmbeddedNul_IsCarriedThroughEveryComponentWithoutTruncation) {
@@ -1426,6 +1445,40 @@ TEST(UriTests, EmbeddedNul_DoesNotProduceAPrefixOnlyParse) {
 
 TEST(UriTests, EmbeddedNul_InThePortPositionIsStillRejected) {
     EXPECT_THROW(Uri(std::string("http://h:8\0 0/p", 15)), System::UriFormatException);
+}
+
+// #2003's resolution, stated as assertions rather than only as prose: the three places .NET
+// rejects are the three places this port rejects, and everywhere else the byte survives.
+TEST(UriTests, Decl2003_RejectionIsConfinedToTheThreePlacesDotNetRejects) {
+    // HOST -- DomainNameHelper.IsValid tests IndexOfAnyExcept over "-0-9A-Z_a-z.", and a NUL is
+    // outside it (#2359).
+    EXPECT_THROW((void)Uri(std::string("http://h\0st/p", 13)), System::UriFormatException);
+    // PORT -- not a digit.
+    EXPECT_THROW((void)Uri(std::string("http://h:8\0 0/p", 15)), System::UriFormatException);
+    // SCHEME -- a NUL is not a scheme character, so the reference is RELATIVE rather than
+    // rejected, and the whole text becomes the path. That is .NET's fallback too, and it is
+    // why "reject anywhere" would have been wrong here as well as in the path.
+    Uri notAScheme(std::string("ht\0tp://h/p", 11));
+    EXPECT_FALSE(notAScheme.getIsAbsoluteUriProperty());
+    EXPECT_EQ(notAScheme.getAbsolutePathProperty().size(), 11u);
+
+    // Everywhere else: carried, with the LENGTH asserted, because a truncating parser and a
+    // preserving one differ only in a byte count that `operator<<` would not show.
+    struct Row { std::string text; size_t expected; };
+    const Row rows[] = {
+        {std::string("http://h/a\0b", 12),   12},
+        {std::string("http://h/p?q\0r", 14), 14},
+        {std::string("http://h/p#f\0g", 14), 14},
+        {std::string("http://u\0r@h/p", 14), 14},
+        {std::string("http://h/p\0", 11),    11},
+        {std::string("a\0b", 3),              3},
+        {std::string("mailto:a\0b", 10),     10},
+    };
+    for (const auto& row : rows) {
+        Uri u(row.text);
+        EXPECT_EQ(u.ToString().size(), row.expected) << "input of " << row.text.size() << " bytes";
+        EXPECT_EQ(u.ToString(), row.text);
+    }
 }
 
 // ---------------------------------------------------------------------------
