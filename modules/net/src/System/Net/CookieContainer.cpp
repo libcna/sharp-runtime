@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/CookieContainer.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Net/CookieException.hpp"
 #include "System/Net/IPAddress.hpp"
 #include <algorithm>
@@ -103,8 +104,21 @@ void CookieContainer::Add(const System::Uri& uri, const Cookie& cookie) {
 
     if (stored.getPathImplicitProperty()) stored.applyOriginPath(uri.getAbsolutePathProperty());
 
+    // #2042: the size limit bounds the VALUE alone, not the whole cookie, and it REPORTS rather
+    // than evicting -- CookieContainer.cs:235-237, message from Strings.resx:87-89. It runs
+    // before anything is stored, and before the capacity checks, exactly as .NET's does.
+    if (static_cast<intcs>(stored.getValueProperty().size()) > maxCookieSize_)
+        throw System::Net::CookieException(
+            "The value size of the cookie is '" +
+            std::to_string(stored.getValueProperty().size()) +
+            "'. This exceeds the configured maximum size, which is '" +
+            std::to_string(maxCookieSize_) + "'.");
+
     // Replace an existing cookie with the same Name/Domain/Path (matches real .NET's
     // "adding a cookie with the same identity overwrites/refreshes it" semantics).
+    // A replacement consumes no new slot, so it precedes the capacity check as it does in .NET,
+    // where InternalAdd's `m_count += cookies.InternalAdd(cookie, true)` adds zero for an
+    // overwrite.
     for (auto& existing : cookies_) {
         if (existing.getNameProperty() == stored.getNameProperty() &&
             existing.getDomainProperty() == stored.getDomainProperty() &&
@@ -113,7 +127,102 @@ void CookieContainer::Add(const System::Uri& uri, const Cookie& cookie) {
             return;
         }
     }
+
+    // #2042: an EXPIRED cookie is an explicit removal command, not an insertion
+    // (CookieContainer.cs:263-275) -- so it must not be stored, and must not evict anything.
+    if (stored.getExpiredProperty()) return;
+
+    const std::string domain = stored.getDomainProperty();
+    const auto inDomain = static_cast<intcs>(std::count_if(cookies_.begin(), cookies_.end(),
+        [&domain](const Cookie& c) { return c.getDomainProperty() == domain; }));
+    if ((inDomain >= perDomainCapacity_ || static_cast<intcs>(cookies_.size()) >= capacity_)
+        && !ageCookies(domain))
+        return;  // Cannot age: reject the new cookie, silently, as .NET does.
+
     cookies_.push_back(stored);
+}
+
+
+// ---------------------------------------------------------------------------
+// #2042 (SR-AUD-308) -- capacity, aging and eviction.
+//
+// The three limits are .NET's own constants, so nothing here is a number somebody chose:
+// DefaultCookieLimit = 300, DefaultPerDomainCookieLimit = 20, DefaultCookieLengthLimit = 4096
+// (CookieContainer.cs:69-71). The ticket was gated on "every bound is a number somebody must
+// choose" AND on ".NET's exact default capacities cannot be established here"; the reference
+// establishes them, which dissolves both halves at once.
+// ---------------------------------------------------------------------------
+
+void CookieContainer::setCapacityProperty(intcs value) {
+    // CookieContainer.cs:117-119. The lower bound is PerDomainCapacity, not zero, because a
+    // total below the per-domain limit is unsatisfiable.
+    if (value <= 0 || value < perDomainCapacity_)
+        throw System::ArgumentOutOfRangeException(
+            "value", "'Capacity' has to be greater than '0' and less than '" +
+                         std::to_string(perDomainCapacity_) + "'.");
+    capacity_ = value;
+    // .NET ages immediately when the new value is smaller (`:121-124`), rather than waiting for
+    // the next Add -- otherwise Count could exceed a limit the caller has already set.
+    while (static_cast<intcs>(cookies_.size()) > capacity_) {
+        if (purgeExpired() == 0) cookies_.erase(cookies_.begin());
+    }
+}
+
+void CookieContainer::setPerDomainCapacityProperty(intcs value) {
+    // CookieContainer.cs:163-172.
+    if (value <= 0 || value > capacity_)
+        throw System::ArgumentOutOfRangeException(
+            "value", "'PerDomainCapacity' has to be greater than '0' and less than '" +
+                         std::to_string(capacity_) + "'.");
+    perDomainCapacity_ = value;
+}
+
+void CookieContainer::setMaxCookieSizeProperty(intcs value) {
+    // CookieContainer.cs:147-151.
+    if (value <= 0)
+        throw System::ArgumentOutOfRangeException("value", "'MaxCookieSize' has to be greater than '0'.");
+    maxCookieSize_ = value;
+}
+
+intcs CookieContainer::purgeExpired() {
+    // .NET's ExpireCollection, applied container-wide. This is the half the FINDING DOES NOT
+    // NAME and #2047's second pin recorded: there was no expiry cleanup at all, so an expired
+    // cookie was retained and merely hidden from emission, and Count grew for ever.
+    const auto before = cookies_.size();
+    cookies_.erase(std::remove_if(cookies_.begin(), cookies_.end(),
+                                  [](const Cookie& c) { return c.getExpiredProperty(); }),
+                   cookies_.end());
+    return static_cast<intcs>(before - cookies_.size());
+}
+
+bool CookieContainer::ageCookies(const std::string& domain) {
+    // AgeCookies(domain) then AgeCookies(null), in .NET's order and with .NET's target:
+    // min_count = min(domain_count * fraction, min(perDomain, capacity) - 1)  (:441).
+    // With the container not over its total limit the fraction is 1, so a domain sitting at the
+    // per-domain limit is cut to exactly one below it -- freeing one slot, not emptying it.
+    purgeExpired();
+
+    const auto countIn = [this](const std::string& d) {
+        return static_cast<intcs>(std::count_if(cookies_.begin(), cookies_.end(),
+            [&d](const Cookie& c) { return c.getDomainProperty() == d; }));
+    };
+
+    const intcs domainTarget = std::min(perDomainCapacity_, capacity_) - 1;
+    while (countIn(domain) > domainTarget) {
+        // Oldest first: vector order is insertion order. .NET removes cc.RemoveAt(0) from the
+        // least-recently-used PATH COLLECTION; this container has no collections to time-stamp,
+        // so it drops the oldest stored cookie of the domain. See the header note.
+        auto oldest = std::find_if(cookies_.begin(), cookies_.end(),
+            [&domain](const Cookie& c) { return c.getDomainProperty() == domain; });
+        if (oldest == cookies_.end()) break;
+        cookies_.erase(oldest);
+    }
+
+    while (static_cast<intcs>(cookies_.size()) >= capacity_) {
+        if (cookies_.empty()) return false;
+        cookies_.erase(cookies_.begin());
+    }
+    return countIn(domain) <= domainTarget;
 }
 
 void CookieContainer::Add(const System::Uri& uri, const CookieCollection& cookies) {

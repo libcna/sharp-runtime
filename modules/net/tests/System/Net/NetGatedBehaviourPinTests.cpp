@@ -31,6 +31,10 @@
 #include "System/Net/CookieCollection.hpp"
 #include "System/Net/CookieContainer.hpp"
 #include "System/Net/CookieException.hpp"
+#include <algorithm>
+#include <chrono>
+#include <thread>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Net/WebUtility.hpp"
 #include "System/Uri.hpp"
 
@@ -176,25 +180,59 @@ TEST(NetGatedBehaviourPinTests, Pin2040_AnImplicitDomainStaysImplicitAfterBeingD
 }
 
 // ===========================================================================
-// #2042 -- the storage bound. Approval sentence: plan §14.2.
+// #2042 RESOLVED -- the storage bound, and the numbers were never anybody's to choose.
+//
+// The ticket was gated twice: "every bound is a number somebody must choose" AND ".NET's exact
+// default capacities cannot be established here". The reference establishes them, which
+// dissolves both halves at once -- DefaultCookieLimit = 300, DefaultPerDomainCookieLimit = 20,
+// DefaultCookieLengthLimit = 4096 (CookieContainer.cs:69-71).
 // ===========================================================================
 
-TEST(NetGatedBehaviourPinTests, Pin2042_StorageIsUnbounded) {
-    // 2,000 rather than the audit's 10,000 purely for runtime -- the container scans linearly on
-    // every Add, so the cost is quadratic. 2,000 already exceeds any plausible default capacity
-    // by an order of magnitude, so it pins the same fact: there is no bound at all.
+TEST(NetGatedBehaviourPinTests, Fix2042_TheDefaultsAreDotNetsOwnConstants) {
     CookieContainer container;
-    const Uri origin("http://origin.invalid/");
-    for (int i = 0; i < 2000; ++i) {
-        container.Add(origin, Cookie("n" + std::to_string(i), "v" + std::to_string(i)));
-    }
-    EXPECT_EQ(container.getCountProperty(), 2000);
+    EXPECT_EQ(container.getCapacityProperty(), 300);
+    EXPECT_EQ(container.getPerDomainCapacityProperty(), 20);
+    EXPECT_EQ(container.getMaxCookieSizeProperty(), 4096);
+    EXPECT_EQ(CookieContainer::DefaultCookieLimit, 300);
+    EXPECT_EQ(CookieContainer::DefaultPerDomainCookieLimit, 20);
+    EXPECT_EQ(CookieContainer::DefaultCookieLengthLimit, 4096);
 }
 
-TEST(NetGatedBehaviourPinTests, Pin2042_ExpiredCookiesAreRetainedNotPurged) {
-    // No expiry cleanup either: an expired cookie stays in storage and only the EMISSION filter
-    // hides it. Count is the observable that #2042's "clean expired cookies on insertion" option
-    // would change.
+TEST(NetGatedBehaviourPinTests, Fix2042_StorageIsBoundedPerDomainAndInTotal) {
+    // INVERTED. 2,000 cookies from one origin used to be all retained; the per-domain limit now
+    // binds first, and it binds at min(perDomain, capacity) - 1 = 19 rather than at 20, because
+    // aging must FREE a slot for the cookie being added (CookieContainer.cs:441).
+    CookieContainer container;
+    const Uri origin("http://origin.invalid/");
+    for (int i = 0; i < 2000; ++i)
+        container.Add(origin, Cookie("n" + std::to_string(i), "v" + std::to_string(i)));
+    EXPECT_EQ(container.getCountProperty(), 20);
+
+    // Oldest-first: the survivors are the LAST twenty added.
+    const std::string header = container.GetCookieHeader(origin);
+    EXPECT_NE(header.find("n1999=v1999"), std::string::npos) << header;
+    EXPECT_EQ(header.find("n0=v0"), std::string::npos) << header;
+}
+
+TEST(NetGatedBehaviourPinTests, Fix2042_TheTotalCapacityBindsAcrossDomains) {
+    // The per-domain limit alone would allow 20 per domain without end, so the total is a
+    // separate bound and needs its own case. 40 domains x 20 would be 800; the total is 300.
+    CookieContainer container;
+    for (int d = 0; d < 40; ++d) {
+        const Uri origin("http://d" + std::to_string(d) + ".invalid/");
+        for (int i = 0; i < 20; ++i)
+            container.Add(origin, Cookie("n" + std::to_string(i), "v"));
+    }
+    EXPECT_LE(container.getCountProperty(), 300);
+    EXPECT_GT(container.getCountProperty(), 0);
+}
+
+TEST(NetGatedBehaviourPinTests, Fix2042_ExpiredCookiesArePurgedNotRetained) {
+    // INVERTED. The finding did not name this half -- #2047's pin found it: there was no expiry
+    // cleanup at all, so an expired cookie was retained and only hidden from emission.
+    //
+    // An expired cookie is an explicit REMOVAL command in .NET (CookieContainer.cs:263-275), so
+    // adding one stores nothing.
     CookieContainer container;
     const Uri origin("http://origin.invalid/");
     Cookie expired("gone", "v");
@@ -202,8 +240,121 @@ TEST(NetGatedBehaviourPinTests, Pin2042_ExpiredCookiesAreRetainedNotPurged) {
     container.Add(origin, expired);
     container.Add(origin, Cookie("kept", "v"));
 
-    EXPECT_EQ(container.getCountProperty(), 2);
+    EXPECT_EQ(container.getCountProperty(), 1);
     EXPECT_EQ(container.GetCookieHeader(origin), "kept=v");
+}
+
+TEST(NetGatedBehaviourPinTests, Fix2042_MaxCookieSizeReportsRatherThanEvicting) {
+    // The one limit that throws. It bounds the VALUE alone -- not the name, not the whole
+    // cookie -- and the message is .NET's (Strings.resx:87-89).
+    CookieContainer container;
+    const Uri origin("http://origin.invalid/");
+    EXPECT_NO_THROW(container.Add(origin, Cookie("ok", std::string(4096, 'x'))));
+    try {
+        container.Add(origin, Cookie("big", std::string(4097, 'x')));
+        ADD_FAILURE() << "an oversized cookie value was accepted";
+    } catch (const System::Net::CookieException& e) {
+        const std::string what = e.what();
+        EXPECT_NE(what.find("This exceeds the configured maximum size, which is '4096'."),
+                  std::string::npos) << what;
+    }
+    // A long NAME is not a long value: the limit is on Value alone, so this must be accepted.
+    EXPECT_NO_THROW(container.Add(origin, Cookie(std::string(5000, 'n'), "v")));
+}
+
+TEST(NetGatedBehaviourPinTests, Fix2042_ReplacingACookieConsumesNoSlot) {
+    // .NET's InternalAdd adds zero to m_count for an overwrite, so re-adding the same identity
+    // must not evict anything -- the row that fails if the capacity check runs before the
+    // identity replacement.
+    //
+    // THE DOMAIN MUST BE AT ITS LIMIT for this to discriminate: below the limit the capacity
+    // check does nothing and the two orders agree, which is how a first version of this case
+    // let that mutation through. Twenty-one adds leave the domain at exactly 20 (the 21st ages
+    // it to 19 and then inserts), which is the state where the order is observable.
+    CookieContainer container;
+    const Uri origin("http://origin.invalid/");
+    for (int i = 0; i < 21; ++i) container.Add(origin, Cookie("n" + std::to_string(i), "v"));
+    ASSERT_EQ(container.getCountProperty(), 20);
+    const std::string before = container.GetCookieHeader(origin);
+
+    // Re-adding an identity already present must refresh it in place: no eviction, no growth.
+    for (int i = 0; i < 50; ++i) container.Add(origin, Cookie("n20", "refreshed"));
+    EXPECT_EQ(container.getCountProperty(), 20);
+    EXPECT_NE(container.GetCookieHeader(origin).find("n20=refreshed"), std::string::npos);
+    // ...and nothing else was dropped to make room for it. The header is bound to a NAMED
+    // string first: taking begin() and end() from two separate GetCookieHeader() calls would be
+    // iterators into two different temporaries, which is undefined and hung this test once.
+    const std::string after = container.GetCookieHeader(origin);
+    EXPECT_EQ(std::count(before.begin(), before.end(), ';'),
+              std::count(after.begin(), after.end(), ';'));
+}
+
+TEST(NetGatedBehaviourPinTests, Fix2042_AgingPurgesCookiesThatExpiredWhileStored) {
+    // The purge inside aging is NOT reachable through Add, because a cookie that is already
+    // expired when added is an explicit removal and is never stored. It becomes reachable the
+    // only way it can: a cookie stored while valid, whose Expires then passes.
+    //
+    // The wait is deterministic rather than a race -- Expires is a fixed instant and sleeping
+    // past it can only overshoot -- which is why this is a legitimate test where the SIGSTOP
+    // shape in #2031 was not.
+    // THE EXPIRED COOKIE MUST NOT BE THE OLDEST, or the case cannot discriminate: dropping it
+    // would be what plain oldest-first eviction does anyway. A first version put it first and
+    // the mutation went through. Here eleven live cookies precede it, so:
+    //   with the purge    -> "shortlived" goes and n0 survives;
+    //   without the purge -> n0 is evicted as the oldest and "shortlived" stays in storage.
+    CookieContainer container;
+    const Uri origin("http://origin.invalid/");
+    for (int i = 0; i < 11; ++i) container.Add(origin, Cookie("n" + std::to_string(i), "v"));
+
+    Cookie soon("shortlived", "v");
+    soon.setExpiresProperty(System::DateTime::getNowProperty().AddMilliseconds(300));
+    container.Add(origin, soon);
+    ASSERT_EQ(container.getCountProperty(), 12);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+
+    // Fill the domain to its limit so aging runs.
+    for (int i = 11; i < 20; ++i) container.Add(origin, Cookie("n" + std::to_string(i), "v"));
+    const std::string header = container.GetCookieHeader(origin);
+    EXPECT_NE(header.find("n0=v"), std::string::npos)
+        << "the oldest LIVE cookie was evicted even though an expired one was available: "
+        << header;
+    EXPECT_EQ(header.find("shortlived"), std::string::npos) << header;
+}
+
+TEST(NetGatedBehaviourPinTests, Fix2042_TheLimitSettersValidateAsDotNetsDo) {
+    CookieContainer container;
+    // Capacity's lower bound is PerDomainCapacity, not zero (CookieContainer.cs:117-119).
+    EXPECT_THROW(container.setCapacityProperty(0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(container.setCapacityProperty(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(container.setCapacityProperty(19), System::ArgumentOutOfRangeException);
+    EXPECT_NO_THROW(container.setCapacityProperty(20));
+
+    // PerDomainCapacity may not exceed Capacity (:163-172).
+    EXPECT_THROW(container.setPerDomainCapacityProperty(21), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(container.setPerDomainCapacityProperty(0), System::ArgumentOutOfRangeException);
+    EXPECT_NO_THROW(container.setPerDomainCapacityProperty(5));
+
+    EXPECT_THROW(container.setMaxCookieSizeProperty(0), System::ArgumentOutOfRangeException);
+    EXPECT_NO_THROW(container.setMaxCookieSizeProperty(1));
+
+    // The three-argument constructor sets per-domain first, so a pair that is only valid in that
+    // order is accepted -- .NET's own ordering (CookieContainer.cs:88-106).
+    EXPECT_NO_THROW((CookieContainer{10, 10, 100}));
+    EXPECT_THROW((CookieContainer{5, 10, 100}), System::ArgumentOutOfRangeException);
+}
+
+TEST(NetGatedBehaviourPinTests, Fix2042_ShrinkingTheCapacityEvictsImmediately) {
+    // .NET ages as soon as the smaller value is set (:121-124) rather than waiting for the next
+    // Add, or Count could exceed a limit the caller has already established.
+    CookieContainer container;
+    for (int d = 0; d < 5; ++d) {
+        const Uri origin("http://d" + std::to_string(d) + ".invalid/");
+        for (int i = 0; i < 10; ++i) container.Add(origin, Cookie("n" + std::to_string(i), "v"));
+    }
+    ASSERT_EQ(container.getCountProperty(), 50);
+    container.setCapacityProperty(30);
+    EXPECT_LE(container.getCountProperty(), 30);
 }
 
 // ===========================================================================
