@@ -112,14 +112,65 @@ Six mutations, all caught: `MaxNumber` forwarding to `Max`; dropping its signed-
 returning `-1` for `-0.0`; `Sign` returning `0` instead of throwing; `Round` ties away from zero;
 and `BFloat16::MinNumber` propagating NaN.
 
+---
+
+# Unit 2b — the transcendental, root, power and angular families
+
+Landed 2026-08-19, same day. Purely additive. **39 members on each type.**
+
+## Every one is a float round-trip, and that is .NET's own shape
+
+Verified member by member against `Half.cs` and `BFloat16.cs`: they are all
+`(Half)MathF.Sqrt((float)x)` and friends. So unlike units 1 and 2a there is **no bit-level body to
+get wrong here** — which changes what is worth testing. The risk in a forwarding table is not
+arithmetic, it is **mis-wiring**: `Sin` calling `Cos`, or `Atan2`'s arguments swapped. Every
+compile-only test passes against both.
+
+So the tests assert that each name reaches **its own** float function, comparing against
+`FromSingle(expected(in))` rather than a literal — which makes them tests of the *forwarding*
+rather than of `MathF`'s accuracy — plus explicit cross-checks that three members **disagree** with
+each other on the same input, and operands chosen so that a swapped argument order gives a
+different answer.
+
+## The count in the previous unit's note was wrong, and the measurement corrects it
+
+Unit 2a's note estimated unit 2b at "~45 members per type, mostly one-line forwards". **Only 39 of
+them could be forwarded**, and the reason is a real boundary rather than an oversight:
+
+| forward target | members |
+|---|---|
+| `System::MathF` | 25 |
+| `System::Single` | 13 |
+| **neither — absent from this port's `float` surface entirely** | **10** |
+
+**Ten members .NET declares have no counterpart in this port's `System::MathF` *or*
+`System::Single`**: `Compound`, `ExpM1`, `Exp2M1`, `Exp10M1`, `LogP1`, `Log2P1`, `Log10P1`, `Lerp`,
+`MultiplyAddEstimate` and `ClampNative`. Adding them to the 16-bit floats would mean widening
+**`float`'s own public surface first** — a different type's API, and a different question from
+*"should the 16-bit floats carry the MathF-forwarding surface"*. They are pinned absent on both
+types, so whichever ticket widens `System::Single` trips that pin and can complete the 16-bit types
+in the same change.
+
+`MultiplyAddEstimate` and `ClampNative` are **doubly** absent: `float` lacks them here *and* .NET
+declares them on `Half` only.
+
+## One naming difference worth keeping
+
+`Ieee754Remainder` is the only member whose .NET name and this port's `MathF` name differ — .NET
+calls it `Ieee754Remainder` on the float types and `IEEERemainder` on `MathF`, and this port's
+`MathF` follows the latter. The forward is spelled out and pinned, because a mis-wiring there would
+be invisible to a name-based reading.
+
+## Mutation testing
+
+Seven mutations, all caught: `Sin` wired to `Cos`; `Atan2` arguments swapped; two-argument `Log`
+swapped; `ScaleB`'s integer argument routed through `float`; `Exp2` wired to `Exp10`;
+`BFloat16::Sqrt` wired to `Cbrt`; and `Ieee754Remainder` wired to `Pow`.
+
 ## What is still to come
 
-**Unit 2b** is the transcendental families proper (`Sqrt`, `Cbrt`, `RootN`, `Exp`, `Log`, `Pow`,
-`Compound`, the trigonometric and `*Pi` sets, the hyperbolic set, `Hypot`, `ScaleB`, `Lerp`,
-`FusedMultiplyAdd`, `DegreesToRadians`/`RadiansToDegrees`, the two estimates) — measured at **~45
-members per type**, mostly one-line forwards. **Unit 3** is the conversion operators, measured at
-**43 on `Half` and 47 on `BFloat16`**. Both must move the two types in step, and unit 2b's absence
-is pinned on both types today via `Sqrt`.
+**Unit 3** — the conversion operators, measured at **43 on `Half` and 47 on `BFloat16`**. It must
+move the two types in step like every unit before it.
 
 Out of scope permanently, and unchanged by this ticket: **generic-math conformance**
 (`INumber<T>`, `IFloatingPointIeee754<T>`, `IMinMaxValue<T>`). .NET's `BFloat16` implements 36

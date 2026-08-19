@@ -284,6 +284,99 @@ namespace System {
         [[nodiscard]] static Half MinMagnitude(Half x, Half y) noexcept;
 
         // -----------------------------------------------------------------------------------
+        // #2384 unit 2b: the transcendental, root, power and angular families.
+        //
+        // EVERY ONE IS A FLOAT ROUND-TRIP, and that is .NET's own shape rather than a
+        // simplification -- `(Half)MathF.Sqrt((float)x)` and friends, verified member by member
+        // against Half.cs. So unlike units 1 and 2a, there is no bit-level body here to get wrong.
+        //
+        // TEN MEMBERS .NET DECLARES ARE ABSENT, AND THAT IS MEASURED RATHER THAN OVERLOOKED:
+        // Compound, ExpM1, Exp2M1, Exp10M1, LogP1, Log2P1, Log10P1, Lerp, MultiplyAddEstimate and
+        // ClampNative have NO counterpart in this port's System::MathF OR System::Single, so
+        // adding them here would mean widening `float`'s surface first -- a different type's
+        // public API and a different ticket's scope. See the migration note.
+        // -----------------------------------------------------------------------------------
+
+        /** @brief C++ counterpart of .NET `Half.Acos` -- `(Half)MathF.Acos((float)...)`. */
+        [[nodiscard]] static Half Acos(Half x) noexcept { return FromSingle(System::MathF::Acos(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Acosh` -- `(Half)MathF.Acosh((float)...)`. */
+        [[nodiscard]] static Half Acosh(Half x) noexcept { return FromSingle(System::MathF::Acosh(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Asin` -- `(Half)MathF.Asin((float)...)`. */
+        [[nodiscard]] static Half Asin(Half x) noexcept { return FromSingle(System::MathF::Asin(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Asinh` -- `(Half)MathF.Asinh((float)...)`. */
+        [[nodiscard]] static Half Asinh(Half x) noexcept { return FromSingle(System::MathF::Asinh(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Atan` -- `(Half)MathF.Atan((float)...)`. */
+        [[nodiscard]] static Half Atan(Half x) noexcept { return FromSingle(System::MathF::Atan(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Atanh` -- `(Half)MathF.Atanh((float)...)`. */
+        [[nodiscard]] static Half Atanh(Half x) noexcept { return FromSingle(System::MathF::Atanh(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Atan2` -- `(Half)MathF.Atan2((float)...)`. */
+        [[nodiscard]] static Half Atan2(Half y, Half x) noexcept { return FromSingle(System::MathF::Atan2(y.ToSingle(), x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Cbrt` -- `(Half)MathF.Cbrt((float)...)`. */
+        [[nodiscard]] static Half Cbrt(Half x) noexcept { return FromSingle(System::MathF::Cbrt(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Cos` -- `(Half)MathF.Cos((float)...)`. */
+        [[nodiscard]] static Half Cos(Half x) noexcept { return FromSingle(System::MathF::Cos(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Cosh` -- `(Half)MathF.Cosh((float)...)`. */
+        [[nodiscard]] static Half Cosh(Half x) noexcept { return FromSingle(System::MathF::Cosh(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Exp` -- `(Half)MathF.Exp((float)...)`. */
+        [[nodiscard]] static Half Exp(Half x) noexcept { return FromSingle(System::MathF::Exp(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Log` -- `(Half)MathF.Log((float)...)`. */
+        [[nodiscard]] static Half Log(Half x) noexcept { return FromSingle(System::MathF::Log(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Log10` -- `(Half)MathF.Log10((float)...)`. */
+        [[nodiscard]] static Half Log10(Half x) noexcept { return FromSingle(System::MathF::Log10(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Log2` -- `(Half)MathF.Log2((float)...)`. */
+        [[nodiscard]] static Half Log2(Half x) noexcept { return FromSingle(System::MathF::Log2(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Pow` -- `(Half)MathF.Pow((float)...)`. */
+        [[nodiscard]] static Half Pow(Half x, Half y) noexcept { return FromSingle(System::MathF::Pow(x.ToSingle(), y.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Sin` -- `(Half)MathF.Sin((float)...)`. */
+        [[nodiscard]] static Half Sin(Half x) noexcept { return FromSingle(System::MathF::Sin(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Sinh` -- `(Half)MathF.Sinh((float)...)`. */
+        [[nodiscard]] static Half Sinh(Half x) noexcept { return FromSingle(System::MathF::Sinh(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Sqrt` -- `(Half)MathF.Sqrt((float)...)`. */
+        [[nodiscard]] static Half Sqrt(Half x) noexcept { return FromSingle(System::MathF::Sqrt(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Tan` -- `(Half)MathF.Tan((float)...)`. */
+        [[nodiscard]] static Half Tan(Half x) noexcept { return FromSingle(System::MathF::Tan(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Tanh` -- `(Half)MathF.Tanh((float)...)`. */
+        [[nodiscard]] static Half Tanh(Half x) noexcept { return FromSingle(System::MathF::Tanh(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.ScaleB` -- `(Half)MathF.ScaleB((float)...)`. */
+        [[nodiscard]] static Half ScaleB(Half x, SharpRuntime::intcs n) noexcept { return FromSingle(System::MathF::ScaleB(x.ToSingle(), n)); }
+        /** @brief C++ counterpart of .NET `Half.FusedMultiplyAdd` -- `(Half)MathF.FusedMultiplyAdd((float)...)`. */
+        [[nodiscard]] static Half FusedMultiplyAdd(Half left, Half right, Half addend) noexcept { return FromSingle(System::MathF::FusedMultiplyAdd(left.ToSingle(), right.ToSingle(), addend.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.ReciprocalEstimate` -- `(Half)MathF.ReciprocalEstimate((float)...)`. */
+        [[nodiscard]] static Half ReciprocalEstimate(Half x) noexcept { return FromSingle(System::MathF::ReciprocalEstimate(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.ReciprocalSqrtEstimate` -- `(Half)MathF.ReciprocalSqrtEstimate((float)...)`. */
+        [[nodiscard]] static Half ReciprocalSqrtEstimate(Half x) noexcept { return FromSingle(System::MathF::ReciprocalSqrtEstimate(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Ieee754Remainder` -- `(Half)MathF.IEEERemainder((float)...)`. */
+        [[nodiscard]] static Half Ieee754Remainder(Half left, Half right) noexcept { return FromSingle(System::MathF::IEEERemainder(left.ToSingle(), right.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Log` -- `(Half)MathF.Log((float)...)`. */
+        [[nodiscard]] static Half Log(Half x, Half newBase) noexcept { return FromSingle(System::MathF::Log(x.ToSingle(), newBase.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.AcosPi` -- `(Half)Single.AcosPi((float)...)`. */
+        [[nodiscard]] static Half AcosPi(Half x) noexcept { return FromSingle(System::Single::AcosPi(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.AsinPi` -- `(Half)Single.AsinPi((float)...)`. */
+        [[nodiscard]] static Half AsinPi(Half x) noexcept { return FromSingle(System::Single::AsinPi(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.AtanPi` -- `(Half)Single.AtanPi((float)...)`. */
+        [[nodiscard]] static Half AtanPi(Half x) noexcept { return FromSingle(System::Single::AtanPi(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Atan2Pi` -- `(Half)Single.Atan2Pi((float)...)`. */
+        [[nodiscard]] static Half Atan2Pi(Half y, Half x) noexcept { return FromSingle(System::Single::Atan2Pi(y.ToSingle(), x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.CosPi` -- `(Half)Single.CosPi((float)...)`. */
+        [[nodiscard]] static Half CosPi(Half x) noexcept { return FromSingle(System::Single::CosPi(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.SinPi` -- `(Half)Single.SinPi((float)...)`. */
+        [[nodiscard]] static Half SinPi(Half x) noexcept { return FromSingle(System::Single::SinPi(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.TanPi` -- `(Half)Single.TanPi((float)...)`. */
+        [[nodiscard]] static Half TanPi(Half x) noexcept { return FromSingle(System::Single::TanPi(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.DegreesToRadians` -- `(Half)Single.DegreesToRadians((float)...)`. */
+        [[nodiscard]] static Half DegreesToRadians(Half degrees) noexcept { return FromSingle(System::Single::DegreesToRadians(degrees.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.RadiansToDegrees` -- `(Half)Single.RadiansToDegrees((float)...)`. */
+        [[nodiscard]] static Half RadiansToDegrees(Half radians) noexcept { return FromSingle(System::Single::RadiansToDegrees(radians.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Exp10` -- `(Half)Single.Exp10((float)...)`. */
+        [[nodiscard]] static Half Exp10(Half x) noexcept { return FromSingle(System::Single::Exp10(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Exp2` -- `(Half)Single.Exp2((float)...)`. */
+        [[nodiscard]] static Half Exp2(Half x) noexcept { return FromSingle(System::Single::Exp2(x.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.Hypot` -- `(Half)Single.Hypot((float)...)`. */
+        [[nodiscard]] static Half Hypot(Half x, Half y) noexcept { return FromSingle(System::Single::Hypot(x.ToSingle(), y.ToSingle())); }
+        /** @brief C++ counterpart of .NET `Half.RootN` -- `(Half)Single.RootN((float)...)`. */
+        [[nodiscard]] static Half RootN(Half x, SharpRuntime::intcs n) noexcept { return FromSingle(System::Single::RootN(x.ToSingle(), n)); }
+
+        // -----------------------------------------------------------------------------------
         // #2384 unit 2a: rounding, Sign, and the IEEE 754:2019 *Number family.
         //
         // The *Number members are NOT the same as Max/Min: they are `maximumNumber` /

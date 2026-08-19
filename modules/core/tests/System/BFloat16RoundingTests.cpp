@@ -408,12 +408,11 @@ TEST(BFloat16SurfaceTests, Fix2384_TheInStepRequirementHeldWhenUnit1Landed) {
     static_assert(HasBitIncrement<System::Half>, "#2384: units move BOTH 16-bit float types");
     static_assert(HasCopySign<System::Half>,     "#2384: units move BOTH 16-bit float types");
 
-    // Unit 2 has NOT landed, and its absence is still pinned on both types with the same message
-    // the original carried -- so the next unit gets the same signal this one did.
-    static_assert(!HasSqrt<BFloat16>,
-                  "#2384 unit 2 landed on BFloat16 -- it must move System::Half too.");
-    static_assert(!HasSqrt<System::Half>,
-                  "#2384 unit 2 landed on Half -- it must move BFloat16 too.");
+    // UNIT 2b HAS NOW LANDED, on both types in the same change -- which is the signal the two
+    // assertions below used to withhold. #2340's rule held again: Sqrt could not arrive on one
+    // type alone without breaking this.
+    static_assert(HasSqrt<BFloat16>,     "#2384 unit 2b");
+    static_assert(HasSqrt<System::Half>, "#2384 unit 2b -- and it moved BOTH types");
 
     // ...and #2382's members still exist, so no half of this pin is satisfied by the type simply
     // failing to compile.
@@ -683,4 +682,173 @@ TEST(Fix2384Unit2a, Decl2384_TheFourHalfOnlyMembersAreAbsentFromBFloat16Delibera
     using System::Half;
     EXPECT_EQ(Half::MaxNative(Half::FromSingle(1.0f), Half::FromSingle(2.0f)).ToSingle(), 2.0f);
     EXPECT_EQ(Half::MinNative(Half::FromSingle(1.0f), Half::FromSingle(2.0f)).ToSingle(), 1.0f);
+}
+
+// =================================================================================================
+// #2384 unit 2b -- the transcendental, root, power and angular families, on BOTH types.
+//
+// Every one is a float round-trip, which is .NET's own shape (verified member by member against
+// Half.cs and BFloat16.cs), so there is no bit-level body to get wrong here. What IS worth
+// asserting is that each name reaches the RIGHT float function -- a forwarding table is exactly
+// the kind of code where Sin ends up calling Cos and every "does it compile" test still passes.
+// =================================================================================================
+
+namespace {
+    /// Asserts a Half unary member agrees with the float function it forwards to, at 16-bit
+    /// precision. Comparing against FromSingle(expected) rather than a literal is what makes this
+    /// a test of the FORWARDING rather than of MathF's own accuracy.
+    void expectHalfUnary(System::Half (*member)(System::Half), float (*expected)(float), float in,
+                         const char* what) {
+        const System::Half got = member(System::Half::FromSingle(in));
+        const System::Half want = System::Half::FromSingle(expected(in));
+        EXPECT_EQ(got.bits, want.bits) << what << " at " << in;
+    }
+}
+
+TEST(Fix2384Unit2b, EveryUnaryMemberReachesItsOwnFloatFunction) {
+    using System::Half;
+    using MF = System::MathF;
+    using S  = System::Single;
+
+    // 0.5 is chosen so that every one of these is defined and none collapses to a shared value --
+    // Sin(0)==Tan(0)==0 would let a mis-wired table pass.
+    expectHalfUnary(&Half::Acos,  &MF::Acos,  0.5f, "Acos");
+    expectHalfUnary(&Half::Asin,  &MF::Asin,  0.5f, "Asin");
+    expectHalfUnary(&Half::Atan,  &MF::Atan,  0.5f, "Atan");
+    expectHalfUnary(&Half::Cos,   &MF::Cos,   0.5f, "Cos");
+    expectHalfUnary(&Half::Sin,   &MF::Sin,   0.5f, "Sin");
+    expectHalfUnary(&Half::Tan,   &MF::Tan,   0.5f, "Tan");
+    expectHalfUnary(&Half::Cosh,  &MF::Cosh,  0.5f, "Cosh");
+    expectHalfUnary(&Half::Sinh,  &MF::Sinh,  0.5f, "Sinh");
+    expectHalfUnary(&Half::Tanh,  &MF::Tanh,  0.5f, "Tanh");
+    expectHalfUnary(&Half::Asinh, &MF::Asinh, 0.5f, "Asinh");
+    expectHalfUnary(&Half::Atanh, &MF::Atanh, 0.5f, "Atanh");
+    expectHalfUnary(&Half::Acosh, &MF::Acosh, 1.5f, "Acosh");   // domain is [1, inf)
+    expectHalfUnary(&Half::Exp,   &MF::Exp,   0.5f, "Exp");
+    expectHalfUnary(&Half::Log,   &MF::Log,   0.5f, "Log");
+    expectHalfUnary(&Half::Log10, &MF::Log10, 0.5f, "Log10");
+    expectHalfUnary(&Half::Log2,  &MF::Log2,  0.5f, "Log2");
+    expectHalfUnary(&Half::Sqrt,  &MF::Sqrt,  0.5f, "Sqrt");
+    expectHalfUnary(&Half::Cbrt,  &MF::Cbrt,  0.5f, "Cbrt");
+    expectHalfUnary(&Half::ReciprocalEstimate,     &MF::ReciprocalEstimate,     0.5f, "ReciprocalEstimate");
+    expectHalfUnary(&Half::ReciprocalSqrtEstimate, &MF::ReciprocalSqrtEstimate, 0.5f, "ReciprocalSqrtEstimate");
+
+    // The members that forward to System::Single rather than MathF, because MathF has no
+    // counterpart for them -- a real split in this port, not a stylistic one.
+    expectHalfUnary(&Half::AcosPi, &S::AcosPi, 0.5f, "AcosPi");
+    expectHalfUnary(&Half::AsinPi, &S::AsinPi, 0.5f, "AsinPi");
+    expectHalfUnary(&Half::AtanPi, &S::AtanPi, 0.5f, "AtanPi");
+    expectHalfUnary(&Half::CosPi,  &S::CosPi,  0.5f, "CosPi");
+    expectHalfUnary(&Half::SinPi,  &S::SinPi,  0.5f, "SinPi");
+    expectHalfUnary(&Half::TanPi,  &S::TanPi,  0.5f, "TanPi");
+    expectHalfUnary(&Half::Exp2,   &S::Exp2,   0.5f, "Exp2");
+    expectHalfUnary(&Half::Exp10,  &S::Exp10,  0.5f, "Exp10");
+    expectHalfUnary(&Half::DegreesToRadians, &S::DegreesToRadians, 90.0f, "DegreesToRadians");
+    expectHalfUnary(&Half::RadiansToDegrees, &S::RadiansToDegrees, 1.5f,  "RadiansToDegrees");
+
+    // Cross-check that the table is not wired to one shared function: three of the above must
+    // disagree with each other on the same input.
+    const Half half05 = Half::FromSingle(0.5f);
+    EXPECT_NE(Half::Sin(half05).bits, Half::Cos(half05).bits);
+    EXPECT_NE(Half::Sin(half05).bits, Half::Tan(half05).bits);
+    EXPECT_NE(Half::Log(half05).bits, Half::Log2(half05).bits);
+    EXPECT_NE(Half::Exp2(half05).bits, Half::Exp10(half05).bits);
+}
+
+TEST(Fix2384Unit2b, TheMultiArgumentMembersForwardTheirArgumentsInOrder) {
+    // Argument ORDER is the thing a forwarding table gets wrong silently, so every one of these
+    // uses operands that make the two orders give different answers.
+    using System::Half;
+    using System::Numerics::BFloat16;
+    using MF = System::MathF;
+    using S  = System::Single;
+
+    const Half a = Half::FromSingle(2.0f);
+    const Half b = Half::FromSingle(3.0f);
+
+    EXPECT_EQ(Half::Pow(a, b).bits, Half::FromSingle(MF::Pow(2.0f, 3.0f)).bits);
+    EXPECT_NE(Half::Pow(a, b).bits, Half::Pow(b, a).bits) << "8 vs 9 -- order matters";
+
+    EXPECT_EQ(Half::Atan2(a, b).bits, Half::FromSingle(MF::Atan2(2.0f, 3.0f)).bits);
+    EXPECT_NE(Half::Atan2(a, b).bits, Half::Atan2(b, a).bits);
+    EXPECT_EQ(Half::Atan2Pi(a, b).bits, Half::FromSingle(S::Atan2Pi(2.0f, 3.0f)).bits);
+
+    EXPECT_EQ(Half::Log(a, b).bits, Half::FromSingle(MF::Log(2.0f, 3.0f)).bits)
+        << "the two-argument Log takes (value, newBase) in that order";
+    EXPECT_NE(Half::Log(a, b).bits, Half::Log(b, a).bits);
+
+    EXPECT_EQ(Half::Hypot(a, b).bits, Half::FromSingle(S::Hypot(2.0f, 3.0f)).bits);
+    EXPECT_EQ(Half::Ieee754Remainder(b, a).bits,
+              Half::FromSingle(MF::IEEERemainder(3.0f, 2.0f)).bits)
+        << "Ieee754Remainder forwards to MathF::IEEERemainder -- the ONE member whose .NET name "
+           "and this port's MathF name differ";
+
+    // The integer-taking pair: the second argument must NOT be converted through float.
+    EXPECT_EQ(Half::ScaleB(a, 3).bits, Half::FromSingle(MF::ScaleB(2.0f, 3)).bits);
+    EXPECT_EQ(Half::RootN(Half::FromSingle(8.0f), 3).bits,
+              Half::FromSingle(S::RootN(8.0f, 3)).bits);
+
+    // Ternary.
+    EXPECT_EQ(Half::FusedMultiplyAdd(a, b, Half::FromSingle(1.0f)).bits,
+              Half::FromSingle(MF::FusedMultiplyAdd(2.0f, 3.0f, 1.0f)).bits);
+
+    // ...and the same on BFloat16, so the two types really did move together.
+    const BFloat16 ba(2.0f), bb(3.0f);
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::Pow(ba, bb)),
+              std::bit_cast<uint16_t>(BFloat16(MF::Pow(2.0f, 3.0f))));
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::Atan2(ba, bb)),
+              std::bit_cast<uint16_t>(BFloat16(MF::Atan2(2.0f, 3.0f))));
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::Sqrt(BFloat16(4.0f))),
+              std::bit_cast<uint16_t>(BFloat16(2.0f)));
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::RootN(BFloat16(8.0f), 3)),
+              std::bit_cast<uint16_t>(BFloat16(S::RootN(8.0f, 3))));
+}
+
+namespace detail2384 {
+    // Dependent parameters throughout -- gcc evaluates a non-dependent `requires` eagerly and
+    // hard-errors on a missing name instead of yielding false (#2299).
+    template <typename T> concept HasCompound   = requires(T v) { T::Compound(v, v); };
+    template <typename T> concept HasExpM1      = requires(T v) { T::ExpM1(v); };
+    template <typename T> concept HasExp2M1     = requires(T v) { T::Exp2M1(v); };
+    template <typename T> concept HasExp10M1    = requires(T v) { T::Exp10M1(v); };
+    template <typename T> concept HasLogP1      = requires(T v) { T::LogP1(v); };
+    template <typename T> concept HasLog2P1     = requires(T v) { T::Log2P1(v); };
+    template <typename T> concept HasLog10P1    = requires(T v) { T::Log10P1(v); };
+    template <typename T> concept HasLerp       = requires(T v) { T::Lerp(v, v, v); };
+    template <typename T> concept HasMulAddEst  = requires(T v) { T::MultiplyAddEstimate(v, v, v); };
+    template <typename T> concept HasClampNative= requires(T v) { T::ClampNative(v, v, v); };
+    template <typename T> concept HasSqrtM      = requires(T v) { T::Sqrt(v); };
+}
+
+TEST(Fix2384Unit2b, Decl2384_TenMembersAreAbsentBecauseFloatItselfLacksThem) {
+    // MEASURED, not overlooked. .NET declares Compound, ExpM1, Exp2M1, Exp10M1, LogP1, Log2P1,
+    // Log10P1, Lerp, MultiplyAddEstimate and ClampNative on its 16-bit floats, and NONE of them
+    // has a counterpart in this port's System::MathF or System::Single. Adding them here would
+    // mean widening `float`'s OWN surface first -- a different type's public API, and a different
+    // question than "should the 16-bit floats carry the MathF-forwarding surface".
+    //
+    // Pinned so the gap is a recorded boundary rather than an accident, and so whichever ticket
+    // widens System::Single trips this and can complete the 16-bit types in the same change.
+    using System::Half;
+    using System::Numerics::BFloat16;
+    namespace D = detail2384;
+
+    static_assert(!D::HasCompound<Half>   && !D::HasCompound<BFloat16>);
+    static_assert(!D::HasExpM1<Half>      && !D::HasExpM1<BFloat16>);
+    static_assert(!D::HasExp2M1<Half>     && !D::HasExp2M1<BFloat16>);
+    static_assert(!D::HasExp10M1<Half>    && !D::HasExp10M1<BFloat16>);
+    static_assert(!D::HasLogP1<Half>      && !D::HasLogP1<BFloat16>);
+    static_assert(!D::HasLog2P1<Half>     && !D::HasLog2P1<BFloat16>);
+    static_assert(!D::HasLog10P1<Half>    && !D::HasLog10P1<BFloat16>);
+    static_assert(!D::HasLerp<Half>       && !D::HasLerp<BFloat16>);
+
+    // These two are Half-ONLY in .NET, so their absence here is doubly deliberate: absent because
+    // float lacks them, AND absent from BFloat16 because .NET does not declare them there either.
+    static_assert(!D::HasMulAddEst<Half>   && !D::HasMulAddEst<BFloat16>);
+    static_assert(!D::HasClampNative<Half> && !D::HasClampNative<BFloat16>);
+
+    // ...and unit 2b DID land, so this pin is not satisfied by the whole surface being missing.
+    static_assert(D::HasSqrtM<Half> && D::HasSqrtM<BFloat16>,
+                  "#2384 unit 2b landed on both types");
+    SUCCEED();
 }

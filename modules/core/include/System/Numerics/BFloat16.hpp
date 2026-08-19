@@ -269,6 +269,99 @@ public:
     }
 
     // -----------------------------------------------------------------------------------
+    // #2384 unit 2b: the transcendental, root, power and angular families.
+    //
+    // EVERY ONE IS A FLOAT ROUND-TRIP, and that is .NET's own shape rather than a
+    // simplification -- `(BFloat16)MathF.Sqrt((float)x)` and friends, verified member by member
+    // against BFloat16.cs. So unlike units 1 and 2a, there is no bit-level body here to get wrong.
+    //
+    // TEN MEMBERS .NET DECLARES ARE ABSENT, AND THAT IS MEASURED RATHER THAN OVERLOOKED:
+    // Compound, ExpM1, Exp2M1, Exp10M1, LogP1, Log2P1, Log10P1, Lerp, MultiplyAddEstimate and
+    // ClampNative have NO counterpart in this port's System::MathF OR System::Single, so
+    // adding them here would mean widening `float`'s surface first -- a different type's
+    // public API and a different ticket's scope. See the migration note.
+    // -----------------------------------------------------------------------------------
+
+    /** @brief C++ counterpart of .NET `BFloat16.Acos` -- `(BFloat16)MathF.Acos((float)...)`. */
+    [[nodiscard]] static BFloat16 Acos(BFloat16 x) noexcept { return BFloat16(System::MathF::Acos(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Acosh` -- `(BFloat16)MathF.Acosh((float)...)`. */
+    [[nodiscard]] static BFloat16 Acosh(BFloat16 x) noexcept { return BFloat16(System::MathF::Acosh(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Asin` -- `(BFloat16)MathF.Asin((float)...)`. */
+    [[nodiscard]] static BFloat16 Asin(BFloat16 x) noexcept { return BFloat16(System::MathF::Asin(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Asinh` -- `(BFloat16)MathF.Asinh((float)...)`. */
+    [[nodiscard]] static BFloat16 Asinh(BFloat16 x) noexcept { return BFloat16(System::MathF::Asinh(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Atan` -- `(BFloat16)MathF.Atan((float)...)`. */
+    [[nodiscard]] static BFloat16 Atan(BFloat16 x) noexcept { return BFloat16(System::MathF::Atan(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Atanh` -- `(BFloat16)MathF.Atanh((float)...)`. */
+    [[nodiscard]] static BFloat16 Atanh(BFloat16 x) noexcept { return BFloat16(System::MathF::Atanh(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Atan2` -- `(BFloat16)MathF.Atan2((float)...)`. */
+    [[nodiscard]] static BFloat16 Atan2(BFloat16 y, BFloat16 x) noexcept { return BFloat16(System::MathF::Atan2(toFloat(y.bits_), toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Cbrt` -- `(BFloat16)MathF.Cbrt((float)...)`. */
+    [[nodiscard]] static BFloat16 Cbrt(BFloat16 x) noexcept { return BFloat16(System::MathF::Cbrt(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Cos` -- `(BFloat16)MathF.Cos((float)...)`. */
+    [[nodiscard]] static BFloat16 Cos(BFloat16 x) noexcept { return BFloat16(System::MathF::Cos(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Cosh` -- `(BFloat16)MathF.Cosh((float)...)`. */
+    [[nodiscard]] static BFloat16 Cosh(BFloat16 x) noexcept { return BFloat16(System::MathF::Cosh(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Exp` -- `(BFloat16)MathF.Exp((float)...)`. */
+    [[nodiscard]] static BFloat16 Exp(BFloat16 x) noexcept { return BFloat16(System::MathF::Exp(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Log` -- `(BFloat16)MathF.Log((float)...)`. */
+    [[nodiscard]] static BFloat16 Log(BFloat16 x) noexcept { return BFloat16(System::MathF::Log(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Log10` -- `(BFloat16)MathF.Log10((float)...)`. */
+    [[nodiscard]] static BFloat16 Log10(BFloat16 x) noexcept { return BFloat16(System::MathF::Log10(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Log2` -- `(BFloat16)MathF.Log2((float)...)`. */
+    [[nodiscard]] static BFloat16 Log2(BFloat16 x) noexcept { return BFloat16(System::MathF::Log2(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Pow` -- `(BFloat16)MathF.Pow((float)...)`. */
+    [[nodiscard]] static BFloat16 Pow(BFloat16 x, BFloat16 y) noexcept { return BFloat16(System::MathF::Pow(toFloat(x.bits_), toFloat(y.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Sin` -- `(BFloat16)MathF.Sin((float)...)`. */
+    [[nodiscard]] static BFloat16 Sin(BFloat16 x) noexcept { return BFloat16(System::MathF::Sin(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Sinh` -- `(BFloat16)MathF.Sinh((float)...)`. */
+    [[nodiscard]] static BFloat16 Sinh(BFloat16 x) noexcept { return BFloat16(System::MathF::Sinh(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Sqrt` -- `(BFloat16)MathF.Sqrt((float)...)`. */
+    [[nodiscard]] static BFloat16 Sqrt(BFloat16 x) noexcept { return BFloat16(System::MathF::Sqrt(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Tan` -- `(BFloat16)MathF.Tan((float)...)`. */
+    [[nodiscard]] static BFloat16 Tan(BFloat16 x) noexcept { return BFloat16(System::MathF::Tan(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Tanh` -- `(BFloat16)MathF.Tanh((float)...)`. */
+    [[nodiscard]] static BFloat16 Tanh(BFloat16 x) noexcept { return BFloat16(System::MathF::Tanh(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.ScaleB` -- `(BFloat16)MathF.ScaleB((float)...)`. */
+    [[nodiscard]] static BFloat16 ScaleB(BFloat16 x, SharpRuntime::intcs n) noexcept { return BFloat16(System::MathF::ScaleB(toFloat(x.bits_), n)); }
+    /** @brief C++ counterpart of .NET `BFloat16.FusedMultiplyAdd` -- `(BFloat16)MathF.FusedMultiplyAdd((float)...)`. */
+    [[nodiscard]] static BFloat16 FusedMultiplyAdd(BFloat16 left, BFloat16 right, BFloat16 addend) noexcept { return BFloat16(System::MathF::FusedMultiplyAdd(toFloat(left.bits_), toFloat(right.bits_), toFloat(addend.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.ReciprocalEstimate` -- `(BFloat16)MathF.ReciprocalEstimate((float)...)`. */
+    [[nodiscard]] static BFloat16 ReciprocalEstimate(BFloat16 x) noexcept { return BFloat16(System::MathF::ReciprocalEstimate(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.ReciprocalSqrtEstimate` -- `(BFloat16)MathF.ReciprocalSqrtEstimate((float)...)`. */
+    [[nodiscard]] static BFloat16 ReciprocalSqrtEstimate(BFloat16 x) noexcept { return BFloat16(System::MathF::ReciprocalSqrtEstimate(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Ieee754Remainder` -- `(BFloat16)MathF.IEEERemainder((float)...)`. */
+    [[nodiscard]] static BFloat16 Ieee754Remainder(BFloat16 left, BFloat16 right) noexcept { return BFloat16(System::MathF::IEEERemainder(toFloat(left.bits_), toFloat(right.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Log` -- `(BFloat16)MathF.Log((float)...)`. */
+    [[nodiscard]] static BFloat16 Log(BFloat16 x, BFloat16 newBase) noexcept { return BFloat16(System::MathF::Log(toFloat(x.bits_), toFloat(newBase.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.AcosPi` -- `(BFloat16)Single.AcosPi((float)...)`. */
+    [[nodiscard]] static BFloat16 AcosPi(BFloat16 x) noexcept { return BFloat16(System::Single::AcosPi(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.AsinPi` -- `(BFloat16)Single.AsinPi((float)...)`. */
+    [[nodiscard]] static BFloat16 AsinPi(BFloat16 x) noexcept { return BFloat16(System::Single::AsinPi(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.AtanPi` -- `(BFloat16)Single.AtanPi((float)...)`. */
+    [[nodiscard]] static BFloat16 AtanPi(BFloat16 x) noexcept { return BFloat16(System::Single::AtanPi(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Atan2Pi` -- `(BFloat16)Single.Atan2Pi((float)...)`. */
+    [[nodiscard]] static BFloat16 Atan2Pi(BFloat16 y, BFloat16 x) noexcept { return BFloat16(System::Single::Atan2Pi(toFloat(y.bits_), toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.CosPi` -- `(BFloat16)Single.CosPi((float)...)`. */
+    [[nodiscard]] static BFloat16 CosPi(BFloat16 x) noexcept { return BFloat16(System::Single::CosPi(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.SinPi` -- `(BFloat16)Single.SinPi((float)...)`. */
+    [[nodiscard]] static BFloat16 SinPi(BFloat16 x) noexcept { return BFloat16(System::Single::SinPi(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.TanPi` -- `(BFloat16)Single.TanPi((float)...)`. */
+    [[nodiscard]] static BFloat16 TanPi(BFloat16 x) noexcept { return BFloat16(System::Single::TanPi(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.DegreesToRadians` -- `(BFloat16)Single.DegreesToRadians((float)...)`. */
+    [[nodiscard]] static BFloat16 DegreesToRadians(BFloat16 degrees) noexcept { return BFloat16(System::Single::DegreesToRadians(toFloat(degrees.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.RadiansToDegrees` -- `(BFloat16)Single.RadiansToDegrees((float)...)`. */
+    [[nodiscard]] static BFloat16 RadiansToDegrees(BFloat16 radians) noexcept { return BFloat16(System::Single::RadiansToDegrees(toFloat(radians.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Exp10` -- `(BFloat16)Single.Exp10((float)...)`. */
+    [[nodiscard]] static BFloat16 Exp10(BFloat16 x) noexcept { return BFloat16(System::Single::Exp10(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Exp2` -- `(BFloat16)Single.Exp2((float)...)`. */
+    [[nodiscard]] static BFloat16 Exp2(BFloat16 x) noexcept { return BFloat16(System::Single::Exp2(toFloat(x.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.Hypot` -- `(BFloat16)Single.Hypot((float)...)`. */
+    [[nodiscard]] static BFloat16 Hypot(BFloat16 x, BFloat16 y) noexcept { return BFloat16(System::Single::Hypot(toFloat(x.bits_), toFloat(y.bits_))); }
+    /** @brief C++ counterpart of .NET `BFloat16.RootN` -- `(BFloat16)Single.RootN((float)...)`. */
+    [[nodiscard]] static BFloat16 RootN(BFloat16 x, SharpRuntime::intcs n) noexcept { return BFloat16(System::Single::RootN(toFloat(x.bits_), n)); }
+
+    // -----------------------------------------------------------------------------------
     // #2384 unit 2a: rounding, Sign, and the IEEE 754:2019 *Number family.
     //
     // NOTE WHAT IS ABSENT AND WHY. .NET declares MaxNative, MinNative, ClampNative and
