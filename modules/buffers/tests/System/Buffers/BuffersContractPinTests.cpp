@@ -201,7 +201,7 @@ TEST(Fix2057_EveryBufferBackedConstructionYieldsASegment, IncludingTheDegenerate
 }
 
 // ===========================================================================
-// SR-AUD-087 — the segment chain builds nothing (blocked #2058)
+// SR-AUD-087 — the segment chain builds nothing (#2058: DECLARED, not blocked)
 // ===========================================================================
 
 namespace {
@@ -229,21 +229,36 @@ TEST(ReadOnlySequenceSegmentPinTests, ANodeChainCanBeBuiltButNotConsumed) {
     EXPECT_EQ(first.getMemoryProperty().getLengthProperty(), 2);
 
     // ...and there is nothing that turns it into a sequence. ReadOnlySequence<int> has
-    // exactly three constructors -- default, std::vector and raw pointer/length -- and
-    // none of them accepts a segment. #2058 would add one; until then this static_assert
-    // is the pin, and it fails the moment such a constructor appears.
+    // exactly three constructors -- default, std::vector and raw pointer/length -- and none of
+    // them accepts a segment.
+    //
+    // #2058 DECIDED on 2026-08-19: this is a DECLARED LIMITATION, not a pending repair. .NET has
+    // ReadOnlySequence(startSegment, startIndex, endSegment, endIndex) (ReadOnlySequence.cs:94);
+    // adding it here would be a public object-layout change on a type consumers hold by value,
+    // plus multi-segment rewrites of First, six Slice overloads, two GetPosition overloads,
+    // TryGet, ToArray, CopyTo, the enumerator and SequenceReader's snapshot. That was offered and
+    // declined. These static_asserts are the declaration and they fail the moment it is withdrawn.
     static_assert(!std::is_constructible_v<ReadOnlySequence<int>,
                                            ReadOnlySequenceSegment<int>*, intcs,
                                            ReadOnlySequenceSegment<int>*, intcs>,
-                  "a segment-chain constructor now exists -- #2058 has landed");
+                  "a segment-chain constructor now exists -- #2058's declared limitation "
+                  "has been withdrawn and the header note must be rewritten");
     static_assert(!std::is_constructible_v<ReadOnlySequence<int>,
                                            ReadOnlySequenceSegment<int>*>,
-                  "a segment constructor now exists -- #2058 has landed");
+                  "a segment constructor now exists -- see above");
 }
 
 TEST(ReadOnlySequenceSegmentPinTests, EverySequenceReportsASingleSegment) {
+    // In .NET this is a real question -- IsSingleSegment is `_startObject == _endObject`
+    // (ReadOnlySequence.cs:41-45) -- and here it is a hard-coded true. #2058 declares that, so the
+    // pin asserts it holds for EVERY constructor this port offers rather than for a sample: an
+    // answer that is constant is only demonstrably constant if every door is tried.
+    std::vector<int> raw{1, 2, 3};
     EXPECT_TRUE(ReadOnlySequence<int>().getIsSingleSegmentProperty());
     EXPECT_TRUE(ReadOnlySequence<int>(std::vector<int>{1, 2, 3}).getIsSingleSegmentProperty());
+    EXPECT_TRUE(ReadOnlySequence<int>(std::vector<int>{}).getIsSingleSegmentProperty());
+    EXPECT_TRUE(ReadOnlySequence<int>(raw.data(), 3).getIsSingleSegmentProperty());
+    EXPECT_TRUE(ReadOnlySequence<int>(raw.data(), 0).getIsSingleSegmentProperty());
 }
 
 // ===========================================================================

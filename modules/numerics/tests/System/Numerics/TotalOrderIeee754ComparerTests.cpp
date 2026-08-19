@@ -3,11 +3,14 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <limits>
+#include <bit>
+#include <cstdint>
 #include <type_traits>
 #include <utility>
 
 #include "System/Collections/Generic/IComparer.hpp"
 #include "System/Collections/Generic/IEqualityComparer.hpp"
+#include "System/Double.hpp"
 #include "System/Half.hpp"
 #include "System/Numerics/DivisionRounding.hpp"
 #include "System/Numerics/TotalOrderIeee754Comparer.hpp"
@@ -151,6 +154,40 @@ TEST(TotalOrderIeee754ComparerTests, Fix2170_BindsPolymorphicallyAsIEqualityComp
     // And the other base still works from the same object.
     const System::Collections::Generic::IComparer<double>& asCompare = cmp;
     EXPECT_LT(asCompare.Compare(-0.0, 0.0), 0);
+}
+
+TEST(TotalOrderIeee754ComparerTests, Decl2392_TheBitPatternHashIsADecisionNotAnOmission) {
+    // #2392, decided 2026-08-19. .NET's GetHashCode is obj.GetHashCode() -- the VALUE's hash --
+    // and Double.GetHashCode normalizes so that "all NaNs and both zeros have the same hash code".
+    // This port hashes the BIT PATTERN instead. Adopting .NET's coarser hash was offered and
+    // declined.
+    //
+    // The four pins below are stated as a DIFFERENCE FROM .NET rather than only as a property of
+    // this port, so a future reader sees the gap rather than inferring parity.
+    TotalOrderIeee754Comparer<double> cmp;
+    EXPECT_NE(cmp.GetHashCode(-0.0), cmp.GetHashCode(0.0))
+        << "#2392: .NET returns EQUAL here; this port distinguishes the signed zeros";
+
+    const double nanA = std::bit_cast<double>(
+        std::bit_cast<uint64_t>(std::numeric_limits<double>::quiet_NaN()) | 0x1ull);
+    const double nanB = std::bit_cast<double>(
+        std::bit_cast<uint64_t>(std::numeric_limits<double>::quiet_NaN()) | 0x2ull);
+    EXPECT_NE(cmp.GetHashCode(nanA), cmp.GetHashCode(nanB))
+        << "#2392: .NET returns EQUAL here too; this port distinguishes NaN payloads";
+
+    // THE HALF THAT MAKES THE DECISION AVAILABLE AT ALL: the contract still holds. Equality here
+    // IS bit-pattern identity, so equal values can never hash differently -- which is why BOTH
+    // hashes are legal and the choice is about distribution, not correctness.
+    EXPECT_TRUE(cmp.Equals(nanA, nanA));
+    EXPECT_EQ(cmp.GetHashCode(nanA), cmp.GetHashCode(nanA));
+    EXPECT_FALSE(cmp.Equals(-0.0, 0.0)) << "unequal, so their hashes are permitted to differ";
+
+    // And .NET's own source of that coarseness is present and correct in this port -- it is the
+    // COMPARER that diverges, not Double::GetHashCode. Pinned so a future reader does not
+    // "fix" the wrong one.
+    EXPECT_EQ(System::Double::GetHashCode(-0.0), System::Double::GetHashCode(0.0))
+        << "#2392: Double::GetHashCode already matches .NET, normalization included";
+    EXPECT_EQ(System::Double::GetHashCode(nanA), System::Double::GetHashCode(nanB));
 }
 
 TEST(TotalOrderIeee754ComparerTests, Decl2170_IEquatableIsNotReproduced) {

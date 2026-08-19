@@ -108,7 +108,7 @@ TEST(MarshalByRefObjectNewTests, Fix2297_TheBaseIsNoLongerDirectlyConstructible)
     EXPECT_NO_THROW(Derived obj; (void)obj);
 }
 
-TEST(MarshalByRefObjectNewTests, Fix2297_GetLifetimeServiceThrowsAndTheVirtualOneIsStillAbsent) {
+TEST(MarshalByRefObjectNewTests, Fix2297_GetLifetimeServiceThrows_And2374_AddedTheVirtualOne) {
     // GetLifetimeService() is added: .NET keeps it precisely so a caller receives
     // PlatformNotSupportedException (`MarshalByRefObject.cs:17-21`), and its absence here turned
     // that observable diagnostic into a compile error at an unrelated place. It is NOT virtual in
@@ -123,16 +123,58 @@ TEST(MarshalByRefObjectNewTests, Fix2297_GetLifetimeServiceThrowsAndTheVirtualOn
         EXPECT_STREQ(e.what(), "Remoting is not supported on this platform.");
     }
 
-    // InitializeLifetimeService() is DELIBERATELY still absent: .NET's is virtual, and this class
-    // already has a vtable, so adding it inserts a SLOT -- a vtable change here and in both
-    // derived classes. SA-3 excludes those explicitly. Ticket #2374 carries the approval request,
-    // and this assertion is what makes its arrival visible rather than silent.
-    // The `requires` form needs the name to be findable at all, so it is written as a
-    // detection idiom over a dependent type instead -- an absent member must be expressible as
+    // INVERTED BY #2374 (2026-08-19). Its predecessor asserted that InitializeLifetimeService()
+    // was ABSENT and said "this assertion is what makes its arrival visible rather than silent" --
+    // the approval was granted per action, so it now records the arrival.
+    //
+    // The detection idiom is KEPT rather than replaced by a direct call, because it is what makes
+    // presence and absence expressible in the same form: an absent member must be expressible as
     // absent, not as a hard error.
-    static_assert(!detail2297::HasInitializeLifetimeService<Derived>,
-                  "#2374 landed: InitializeLifetimeService() is present, so re-derive the vtable "
-                  "pins in AppDomain and ContextBoundObject");
+    static_assert(detail2297::HasInitializeLifetimeService<Derived>,
+                  "#2374: InitializeLifetimeService() is present");
+
+    // VIRTUAL, and that is the whole point -- a non-virtual member of the same name would satisfy
+    // the detection idiom above, compile at every call site, and silently defeat the one thing
+    // .NET's member exists for: letting a derived type override the lease policy. So presence is
+    // not enough to assert; overridability is.
+    static_assert(std::is_polymorphic_v<System::MarshalByRefObject>);
+    EXPECT_THROW((void)obj.InitializeLifetimeService(), System::PlatformNotSupportedException);
+    try {
+        (void)obj.InitializeLifetimeService();
+        ADD_FAILURE() << "expected PlatformNotSupportedException";
+    } catch (const System::PlatformNotSupportedException& e) {
+        EXPECT_STREQ(e.what(), "Remoting is not supported on this platform.");
+    }
+}
+
+namespace detail2374 {
+    /// A derived type that OVERRIDES the lease policy -- the capability #2374 bought, and the one
+    /// a non-virtual member would have silently withheld.
+    struct LeaseOverriding : System::MarshalByRefObject {
+        mutable bool called = false;
+        void* InitializeLifetimeService() override {
+            called = true;
+            return nullptr;   // deliberately does NOT throw
+        }
+    };
+}
+
+TEST(MarshalByRefObjectTests, Fix2374_ADerivedTypeCanOverrideTheLeasePolicy) {
+    // This is what the vtable slot was paid for. Called through a BASE reference, so it is
+    // dynamic dispatch that is asserted rather than a same-name member found by static lookup --
+    // a non-virtual member would run the BASE body here and throw.
+    detail2374::LeaseOverriding derived;
+    System::MarshalByRefObject& asBase = derived;
+    EXPECT_NO_THROW((void)asBase.InitializeLifetimeService());
+    EXPECT_TRUE(derived.called) << "#2374: the override must be dispatched through the base";
+
+    // And the base's own body still throws, so the override is a real replacement rather than the
+    // base having stopped throwing.
+    struct Plain : System::MarshalByRefObject {};
+    Plain plain;
+    System::MarshalByRefObject& plainAsBase = plain;
+    EXPECT_THROW((void)plainAsBase.InitializeLifetimeService(),
+                 System::PlatformNotSupportedException);
 }
 
 // ---------------------------------------------------------------------------

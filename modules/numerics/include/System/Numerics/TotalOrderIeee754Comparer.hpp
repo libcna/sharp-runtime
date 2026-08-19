@@ -91,14 +91,27 @@ namespace System::Numerics {
      * on an empty type already expresses. Adding a third base to say it would buy nothing and cost
      * a third vptr.
      *
-     * @note **`GetHashCode` diverges from .NET and the divergence is deliberate here.** .NET's is
-     * `obj.GetHashCode()` (`TotalOrderIeee754Comparer.cs:198-202`), i.e. the *value's own* hash,
-     * which `Double.GetHashCode` normalizes so that "all NaNs and both zeros have the same hash
-     * code". This port hashes the **bit pattern**, so `-0.0` and `+0.0` hash differently and so do
-     * two NaN payloads. Both satisfy the hash contract (equal implies equal hash) because equality
-     * here *is* bit-pattern identity; .NET's is merely coarser. The difference is nonetheless
-     * directly observable through this public member, and closing it would invert five shipped
-     * pins, so it is filed as its own ticket rather than bundled into #2170.
+     * @note **`GetHashCode` diverges from .NET, and the divergence is a DECISION** — ticket
+     * **#2392**, decided 2026-08-19. .NET's is `obj.GetHashCode()`
+     * (`TotalOrderIeee754Comparer.cs:198-202`), i.e. the *value's own* hash, which
+     * `Double.GetHashCode` normalizes so that, in its own comment, "all NaNs and both zeros have
+     * the same hash code" — and **this port's `Double::GetHashCode` already matches .NET exactly**,
+     * normalization included. This comparer instead hashes the **bit pattern**:
+     *
+     * | | .NET | this port |
+     * |---|---|---|
+     * | `GetHashCode(-0.0) == GetHashCode(+0.0)` | `true` | `false` |
+     * | two distinct NaN payloads hash equal | `true` | `false` |
+     *
+     * **The hash contract holds either way**, and that is what makes the choice available:
+     * equality here *is* bit-pattern identity, so two values that compare equal always have
+     * identical patterns and therefore identical hashes. .NET's is simply **coarser** — it
+     * collides values this comparer distinguishes. Neither is wrong; .NET's loses distribution
+     * that total order exists to provide.
+     *
+     * Adopting .NET's was offered and **declined**: it would invert five shipped pins and remove a
+     * distinction the total-order predicate is defined to make. The finer hash is therefore kept
+     * **deliberately**, not by omission, and the pins below are what say so.
      */
     template<typename T>
     struct TotalOrderIeee754Comparer;

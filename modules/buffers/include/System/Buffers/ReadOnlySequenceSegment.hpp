@@ -20,14 +20,28 @@ namespace System::Buffers {
  * `getIsSingleSegmentProperty()` is a hard-coded `true`. Linking nodes therefore builds a
  * list nothing consumes (SR-AUD-087).
  *
- * The node shape is retained so that ported C# code declaring segment types still
- * compiles. Implementing the segment-chain constructor is blocked ticket **#2058**: it
- * needs new public members on `ReadOnlySequence<T>` (an object-layout change) plus
- * multi-segment rewrites of `First`, all six `Slice` overloads, both `GetPosition`
- * overloads, `TryGet`, `ToArray`, `CopyTo` and the enumerator, and of
- * `SequenceReader<T>`'s single-segment snapshot. See
- * docs/BuffersNamespaceReviewPlan.md §4.8. The current limitation is pinned by a
- * permanent test.
+ * @note **DECLARED LIMITATION (SR-AUD-087, ticket #2058, decided 2026-08-19).** This is not a
+ * pending repair: **this port models single-segment sequences only**, and multi-segment support
+ * was offered and declined.
+ *
+ * .NET's contract is the opposite and is worth stating exactly, so the gap is explicit rather than
+ * inferred: `ReadOnlySequence<T>` has
+ * `ReadOnlySequence(ReadOnlySequenceSegment<T> startSegment, int startIndex,
+ * ReadOnlySequenceSegment<T> endSegment, int endIndex)`
+ * (`ReadOnlySequence.cs:94`), and its `IsSingleSegment` is `_startObject == _endObject`
+ * (`ReadOnlySequence.cs:41-45`) — a real question with a real answer. Here it is a hard-coded
+ * `true`.
+ *
+ * **What it would have cost, measured**: new public members on `ReadOnlySequence<T>` — a public
+ * object-layout change on a type consumers hold by value — plus multi-segment rewrites of `First`,
+ * all six `Slice` overloads, both `GetPosition` overloads, `TryGet`, `ToArray`, `CopyTo` and the
+ * enumerator, and of `SequenceReader<T>`'s single-segment snapshot. See
+ * docs/BuffersNamespaceReviewPlan.md §4.8.
+ *
+ * **The node shape is retained deliberately**, so that ported C# code declaring segment types
+ * still compiles: a chain can be built and walked through `Next`/`RunningIndex`/`Memory`, it
+ * simply cannot be handed to a `ReadOnlySequence<T>`. Pinned by
+ * `ReadOnlySequenceSegmentPinTests`, written to fail the moment such a constructor appears.
  *
  * @tparam T The element type.
  */
