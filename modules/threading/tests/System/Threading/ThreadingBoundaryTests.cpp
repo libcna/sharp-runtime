@@ -1042,11 +1042,17 @@ namespace {
     }
 }
 
-TEST(ReaderWriterWriterPreferenceTests, Decl1957_TheWaitingWriterCountIsLayoutNeutral) {
-    static_assert(sizeof(System::Threading::ReaderWriterLockSlim) == 120,
-                  "#1957/SR-AUD-204 must not change ReaderWriterLockSlim's layout");
+TEST(ReaderWriterWriterPreferenceTests, Decl1957_TheWaiterCountsLayout) {
+    // #1957/SR-AUD-204 added waitingWriters_ and was LAYOUT-NEUTRAL: 120 before and after, the
+    // intcs landing in padding the type already had.
+    //
+    // #2389 then added waitingReaders_ and waitingUpgraders_ for Dispose's waiter check, and
+    // those did NOT fit: 120 -> 128. That is a real object-layout change under SA-3, and every
+    // consumer must be recompiled. Pinned here so a third counter cannot arrive unnoticed.
+    static_assert(sizeof(System::Threading::ReaderWriterLockSlim) == 128,
+                  "#2389 grew ReaderWriterLockSlim 120 -> 128; a further change needs its own pin");
     static_assert(alignof(System::Threading::ReaderWriterLockSlim) == 8);
-    EXPECT_EQ(sizeof(System::Threading::ReaderWriterLockSlim), 120u);
+    EXPECT_EQ(sizeof(System::Threading::ReaderWriterLockSlim), 128u);
 }
 
 TEST(ReaderWriterWriterPreferenceTests, Fix1957_ANewReaderWaitsBehindABlockedWriter) {
@@ -1291,4 +1297,146 @@ TEST(DisposalIsARealStateTests, Decl1956_ITimerChangeReturnsFalseAndDoesNotThrow
                                            System::TimeSpan::FromMilliseconds(1)))
         << "ITimer::Change must NOT throw -- that is the one member excluded from this group";
     EXPECT_FALSE(result) << "a disposed timer reports false, it does not claim success";
+}
+
+// =============================================================================================
+// Ticket #2389 — Dispose() also refuses a lock that has WAITERS, not only one with a held mode.
+//
+// .NET performs BOTH checks, in this order (ReaderWriterLockSlim.cs:1250-1258):
+//   if (WaitingReadCount > 0 || WaitingUpgradeCount > 0 || WaitingWriteCount > 0) throw ...;
+//   if (IsReadLockHeld || IsUpgradeableReadLockHeld || IsWriteLockHeld)           throw ...;
+// #1956 landed the second; this ticket adds the counters and the first.
+//
+// EVERY CASE BELOW DISPOSES FROM A THREAD THAT HOLDS NOTHING, and that is not incidental. The
+// first draft had the disposing thread also holding a mode, so the HELD-MODE check fired and the
+// waiter check was never exercised: mutations M1 ("remove the waiter check") and M2 ("count only
+// writers") both went UNCAUGHT. A third thread must hold the lock, a second must wait for it, and
+// the disposer must hold nothing -- only then is the waiter check the one that can throw.
+//
+// The two new counters affect NO admission predicate -- only writer-waiting does, which is
+// SR-AUD-204's rule and .NET's. They exist for Dispose alone.
+// =============================================================================================
+
+namespace {
+    // WHY THESE CASES RETRY RATHER THAN SLEEP-AND-HOPE.
+    //
+    // The first version set up the scenario, slept 150 ms, and disposed once. It passed in
+    // isolation and FAILED inside the full gate: 150 ms is not a guarantee that the waiting
+    // thread has reached the wait and been counted -- under gate load it had not. A test that is
+    // intermittently green is not evidence, and this repository has twice REPAIRED such a test
+    // rather than tuned its sleep (#2352, #2166).
+    //
+    // The scenario is therefore rebuilt from scratch on each attempt, with a growing settle, and
+    // the case passes the moment Dispose refuses. This is sound rather than merely tolerant: it
+    // can ONLY pass if the waiter check genuinely fires, so a mutation that removes it fails all
+    // attempts and is still caught by name.
+    template <typename SetUpHolder, typename StartWaiter>
+    void ExpectDisposeEventuallyRefusesBecauseOfAWaiter(SetUpHolder setUpHolder,
+                                                        StartWaiter startWaiter) {
+        for (int attempt = 1; attempt <= 6; ++attempt) {
+            System::Threading::ReaderWriterLockSlim lock;
+            std::atomic<bool> holding{false}, release{false}, waiterStarted{false};
+
+            std::thread holder([&] {
+                setUpHolder(lock, /*enter=*/true);
+                holding.store(true);
+                while (!release.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                setUpHolder(lock, /*enter=*/false);
+            });
+            while (!holding.load()) std::this_thread::yield();
+
+            std::thread waiter([&] { waiterStarted.store(true); startWaiter(lock); });
+            while (!waiterStarted.load()) std::this_thread::yield();
+            std::this_thread::sleep_for(std::chrono::milliseconds(50 * attempt));
+
+            bool refused = false;
+            try {
+                lock.Dispose();   // this thread holds NOTHING, so only the waiter check can throw
+            } catch (const System::Threading::SynchronizationLockException&) {
+                refused = true;
+            }
+
+            release.store(true);
+            holder.join();
+            waiter.join();
+
+            if (refused) { SUCCEED(); return; }
+        }
+        FAIL() << "Dispose() accepted a lock that had a waiter, on every one of six attempts";
+    }
+
+    /// Holds `lock` in the given mode on its own thread until `release` is set, so the disposing
+    /// thread can hold nothing at all.
+    struct HolderThread {
+        std::thread            t;
+        std::atomic<bool>      holding{false};
+        std::atomic<bool>      release{false};
+
+        template <typename Enter, typename Exit>
+        void start(Enter enter, Exit exit) {
+            t = std::thread([this, enter, exit] {
+                enter();
+                holding.store(true);
+                while (!release.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                exit();
+            });
+            while (!holding.load()) std::this_thread::yield();
+        }
+        void stop() { release.store(true); if (t.joinable()) t.join(); }
+    };
+}
+
+TEST(ReaderWriterDisposeWaiterCheckTests, Fix2389_DisposingWithAWaitingWriterThrows) {
+    ExpectDisposeEventuallyRefusesBecauseOfAWaiter(
+        [](System::Threading::ReaderWriterLockSlim& l, bool enter) {
+            if (enter) l.EnterReadLock(); else l.ExitReadLock();
+        },
+        [](System::Threading::ReaderWriterLockSlim& l) { (void)l.TryEnterWriteLock(3000); });
+}
+TEST(ReaderWriterDisposeWaiterCheckTests, Fix2389_DisposingWithAWaitingReaderThrows) {
+    ExpectDisposeEventuallyRefusesBecauseOfAWaiter(
+        [](System::Threading::ReaderWriterLockSlim& l, bool enter) {
+            if (enter) l.EnterWriteLock(); else l.ExitWriteLock();
+        },
+        [](System::Threading::ReaderWriterLockSlim& l) { (void)l.TryEnterReadLock(3000); });
+}
+TEST(ReaderWriterDisposeWaiterCheckTests, Fix2389_DisposingWithAWaitingUpgraderThrows) {
+    ExpectDisposeEventuallyRefusesBecauseOfAWaiter(
+        [](System::Threading::ReaderWriterLockSlim& l, bool enter) {
+            if (enter) l.EnterWriteLock(); else l.ExitWriteLock();
+        },
+        [](System::Threading::ReaderWriterLockSlim& l) { (void)l.TryEnterUpgradeableReadLock(3000); });
+}
+TEST(ReaderWriterDisposeWaiterCheckTests, Fix2389_OnceTheWaiterGivesUpDisposalSucceeds) {
+    // The counters must come back down on a TIMEOUT too, or a lock that ever had a waiter could
+    // never be disposed again -- a permanent failure, not a transient one.
+    System::Threading::ReaderWriterLockSlim lock;
+    HolderThread holder;
+    holder.start([&] { lock.EnterWriteLock(); }, [&] { lock.ExitWriteLock(); });
+
+    std::thread writer([&] { EXPECT_FALSE(lock.TryEnterWriteLock(100)); });
+    writer.join();
+    std::thread reader([&] { EXPECT_FALSE(lock.TryEnterReadLock(100)); });
+    reader.join();
+    std::thread upgrader([&] { EXPECT_FALSE(lock.TryEnterUpgradeableReadLock(100)); });
+    upgrader.join();
+
+    holder.stop();
+    EXPECT_NO_THROW(lock.Dispose()) << "timed-out waiters of all three kinds must stop counting";
+}
+
+TEST(ReaderWriterDisposeWaiterCheckTests, Fix2389_AnIdleLockStillDisposesQuietly) {
+    System::Threading::ReaderWriterLockSlim lock;
+    EXPECT_NO_THROW(lock.Dispose());
+    EXPECT_NO_THROW(lock.Dispose()) << "still idempotent";
+}
+
+TEST(ReaderWriterDisposeWaiterCheckTests, Decl2389_TheHeldModeCheckStillFiresOnItsOwn) {
+    // #1956's half, asserted separately so the two checks cannot be confused for one another:
+    // no waiters at all, and the disposing thread holds a mode.
+    System::Threading::ReaderWriterLockSlim lock;
+    lock.EnterReadLock();
+    EXPECT_THROW(lock.Dispose(), System::Threading::SynchronizationLockException);
+    lock.ExitReadLock();
+    EXPECT_NO_THROW(lock.Dispose());
 }

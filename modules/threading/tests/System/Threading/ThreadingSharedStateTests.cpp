@@ -46,10 +46,19 @@ using namespace System::Threading;
 
 // Measured on the verified Linux/GCC baseline before and after #1955 and found identical
 // (build-probe/1955_probe1_layout_{before,after}.log). Every one of these headers carries its
-// implementation inline, so a growth here is a consumer-visible ABI change that needs its own
-// explicit user approval, exactly as tickets #1788 and #1789 required.
+// implementation inline, so a growth here is a consumer-visible ABI change -- which is why the
+// numbers are pinned and every change to one must be deliberate.
+//
+// UPDATED 2026-08-19 by ticket #2389, and the update is the point rather than an inconvenience:
+// this gate is what caught the growth. ReaderWriterLockSlim went 120 -> 128 when #2389 added
+// waitingReaders_ and waitingUpgraders_ for Dispose's waiter check. (#1957/SR-AUD-204's earlier
+// waitingWriters_ was layout-NEUTRAL -- it landed in padding the type already had, and this gate
+// stayed green through it, which is the evidence that 128 is a real change and not drift.)
+// It lands under docs/StandingApprovals.md SA-3: private data members, sizeof pinned here and in
+// ReaderWriterWriterPreferenceTests.Decl1957_TheWaiterCountsLayout, migration note recording the
+// full-consumer-rebuild requirement, and the full gate.
 TEST(ThreadingSharedStateTests, RepairedTypes_LayoutUnchanged) {
-    EXPECT_EQ(sizeof(ReaderWriterLockSlim), 120u);
+    EXPECT_EQ(sizeof(ReaderWriterLockSlim), 128u);   // #2389: was 120
     EXPECT_EQ(sizeof(SemaphoreSlim), 104u);
     EXPECT_EQ(sizeof(ManualResetEventSlim), 112u);
     EXPECT_EQ(sizeof(CountdownEvent), 104u);

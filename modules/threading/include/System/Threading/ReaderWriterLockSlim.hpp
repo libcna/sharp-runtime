@@ -106,6 +106,25 @@ namespace System::Threading {
         // (ReaderWriterLockSlim.cs:1039-1042), so a writer that TIMES OUT stops blocking readers;
         // the RAII guard in TryEnterWriteLock does the same here.
         intcs waitingWriters_ = 0;
+        // Ticket #2389. .NET's Dispose refuses a lock that has WAITERS as well as one with a
+        // held mode, and it counts all three kinds (ReaderWriterLockSlim.cs:1254). #1956
+        // implemented the held-mode check only, because these two counters did not exist; they
+        // do now, on the same RAII pattern waitingWriters_ uses.
+        //
+        // These are NOT consulted by any admission predicate -- only writer-waiting affects
+        // admission, which is #1957/SR-AUD-204's rule and .NET's. They exist for Dispose.
+        intcs waitingReaders_ = 0;
+        intcs waitingUpgraders_ = 0;
+
+        /// Increments a waiter count for the duration of a wait and restores it on every exit.
+        struct WaiterCountGuard {
+            intcs&                   count;
+            std::condition_variable& cv;
+            bool                     notifyOnLast;
+            ~WaiterCountGuard() {
+                if (--count == 0 && notifyOnLast) cv.notify_all();
+            }
+        };
         bool writerActive_ = false;
         bool upgradeableActive_ = false;
         // Ticket #1955 / cause T-A of docs/ThreadingNamespaceReviewPlan.md. This was an
@@ -236,6 +255,9 @@ namespace System::Threading {
             // holds the read, write or upgrade lock never reaches here -- every one of those
             // cases returned above -- so writer preference can only delay a genuinely NEW
             // reader, which is precisely .NET's contract and cannot deadlock a recursive one.
+            // #2389: counted for Dispose's benefit only -- a waiting reader blocks nothing.
+            ++waitingReaders_;
+            WaiterCountGuard readerWaitGuard{waitingReaders_, cv_, /*notifyOnLast=*/false};
             if (!waitFor(lk, millisecondsTimeout,
                          [&] { return !writerActive_ && waitingWriters_ == 0; }))
                 return false;
@@ -304,13 +326,7 @@ namespace System::Threading {
             // Declared after `lk` so it is destroyed BEFORE the lock is released: the decrement
             // and the notify both happen under the mutex.
             ++waitingWriters_;
-            struct WaitingWriterGuard {
-                intcs&                   count;
-                std::condition_variable& cv;
-                ~WaitingWriterGuard() {
-                    if (--count == 0) cv.notify_all();
-                }
-            } waitingWriterGuard{waitingWriters_, cv_};
+            WaiterCountGuard waitingWriterGuard{waitingWriters_, cv_, /*notifyOnLast=*/true};
 
             bool acquired = upgradingToWrite
                 ? waitFor(lk, millisecondsTimeout, [&] { return readers_ == 0; })
@@ -384,6 +400,9 @@ namespace System::Threading {
                 throw LockRecursionException("Upgradeable lock may not be acquired with read lock held.");
 
             std::unique_lock<std::mutex> lk(stateMtx_);
+            // #2389: counted for Dispose's benefit only.
+            ++waitingUpgraders_;
+            WaiterCountGuard upgraderWaitGuard{waitingUpgraders_, cv_, /*notifyOnLast=*/false};
             if (!waitFor(lk, millisecondsTimeout, [&] { return !writerActive_ && !upgradeableActive_; })) return false;
             upgradeableActive_ = true;
             ++counts.upgrade;
@@ -409,19 +428,29 @@ namespace System::Threading {
          * owning a mode on a disposed object. .NET refuses
          * (`ReaderWriterLockSlim.cs:1250-1258`).
          *
-         * @note **.NET performs TWO checks here and this port performs one**, which is stated
-         * rather than glossed. The reference tests, in this order:
+         * @throws System::Threading::SynchronizationLockException if any thread is WAITING to
+         *         acquire the lock.
+         *
+         * Both checks are .NET's, in .NET's order (`ReaderWriterLockSlim.cs:1250-1258`):
          * @code
          * if (WaitingReadCount > 0 || WaitingUpgradeCount > 0 || WaitingWriteCount > 0) throw ...;
          * if (IsReadLockHeld || IsUpgradeableReadLockHeld || IsWriteLockHeld)          throw ...;
          * @endcode
-         * The second is implemented here. The first needs per-mode WAITER counts, of which this
-         * port has only `waitingWriters_` (added by SR-AUD-204); counting waiting readers and
-         * upgraders is additional state on three more paths and is ticket **#2389**. The
-         * narrowing is therefore a strict subset of .NET's -- this port never refuses a disposal
-         * .NET would accept.
+         * #1956 landed the second; ticket **#2389** added the waiter counts and the first.
+         *
+         * @note The order is transcribed rather than chosen. Both arms raise the same message
+         * here, so which one fires is currently unobservable -- but the ordering is .NET's and a
+         * test pins it, so it cannot be inverted casually if the messages ever diverge.
          */
         void Dispose() override {
+            std::unique_lock<std::mutex> lk(stateMtx_);
+            if (waitingReaders_ > 0 || waitingUpgraders_ > 0 || waitingWriters_ > 0) {
+                throw System::Threading::SynchronizationLockException(
+                    "The lock is being disposed while still being used. It either is being held "
+                    "by a thread and/or has active waiters waiting to acquire the lock.");
+            }
+            lk.unlock();
+
             auto& map = threadCounts();
             auto it = map.find(id_);
             if (it != map.end() &&
