@@ -10,6 +10,7 @@
 #include <thread>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IDisposable.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Threading/Timeout.hpp"
 #include "System/TimeSpan.hpp"
 
@@ -26,6 +27,17 @@ namespace System::Threading {
         std::mutex mtx_;
         std::condition_variable cv_;
         std::atomic<bool> disposed_{false};
+
+        // Ticket #1957 / SR-AUD-201. .NET's State carries `private bool _activeWait`
+        // (PeriodicTimer.cs:192) for exactly this, and its WaitForNextTickAsync opens by
+        // testing it and throwing (PeriodicTimer.cs:199-203) under the comment
+        // "WaitForNextTickAsync should only be used by one consumer at a time. Failing to do
+        // so is an error."
+        //
+        // Without it, two concurrent waiters both returned true for ONE tick -- the audit's
+        // probe measured `concurrent=1,1` -- so a caller that accidentally shared a timer got
+        // twice the intended work rate with no diagnostic at all.
+        bool activeWait_ = false;
 
     public:
         /**
@@ -78,7 +90,36 @@ namespace System::Threading {
          */
         bool WaitForNextTick() {
             std::unique_lock<std::mutex> lock(mtx_);
+
+            // FIRST, before every other test, because that is where .NET puts it: the
+            // _activeWait check precedes both the cancellation short-circuit and the
+            // already-signalled fast path (PeriodicTimer.cs:197-213). So a second consumer
+            // arriving while the first waits is refused even if the timer has since been
+            // disposed -- it is the CONCURRENT USE that is the error, not the timer's state.
+            //
+            // NO TEST FORCES THIS ORDERING, and that is recorded rather than hidden: moving the
+            // check below the disposed test changes the answer only when a second consumer
+            // arrives after Dispose() but before the parked first consumer reacquires the mutex
+            // and clears the flag. Dispose() releases the mutex before notify_all, so which of
+            // the two acquires it next is unspecified -- a test for it would be flaky, and a
+            // gate that is intermittently green is not evidence (#2352, #2166). The ordering is
+            // here because it is .NET's.
+            if (activeWait_) {
+                throw System::InvalidOperationException(
+                    "WaitForNextTick should only be used by one consumer at a time.");
+            }
+
             if (disposed_.load()) return false;
+
+            // Cleared on EVERY exit -- the ordinary returns, the disposed return, and any
+            // exception -- so a caller that abandons a wait does not lock the timer out
+            // permanently. .NET clears it in the completion path (PeriodicTimer.cs:296).
+            activeWait_ = true;
+            struct ActiveWaitGuard {
+                bool& flag;
+                ~ActiveWaitGuard() { flag = false; }
+            } guard{activeWait_};
+
             if (infinite_) {
                 cv_.wait(lock, [this] { return disposed_.load(); });
                 return false;

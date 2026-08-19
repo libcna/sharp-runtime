@@ -739,3 +739,106 @@ TEST(ThreadingArgumentDomainTests, PeriodicTimer_CeilingIsTestedAfterTruncation)
     EXPECT_THROW(PeriodicTimer(System::TimeSpan::FromMilliseconds(kMax + 1.0)),
                  System::ArgumentOutOfRangeException);
 }
+
+// =============================================================================================
+// Ticket #1957 / SR-AUD-201 — PeriodicTimer::WaitForNextTick is single-consumer.
+//
+// Two concurrent waiters both returned true for ONE tick (the audit's probe measured
+// `concurrent=1,1`), so a caller that accidentally shared a timer got twice the intended work
+// rate with no diagnostic at all.
+//
+// .NET carries `private bool _activeWait` (PeriodicTimer.cs:192) and opens
+// WaitForNextTickAsync by testing it and throwing (PeriodicTimer.cs:199-203), under the comment
+// "WaitForNextTickAsync should only be used by one consumer at a time. Failing to do so is an
+// error." The type's own summary says the same: "This timer is intended to be used only by a
+// single consumer at a time" (PeriodicTimer.cs:13-14).
+//
+// This resolves the design record's one [unverified] flag, which asked "whether .NET throws or
+// blocks the second consumer must be confirmed against the reference before landing"
+// (docs/ThreadingNamespaceReviewPlan.md section 20.2 item 4). It throws.
+//
+// Landed under SA-3 (a private data member, sizeof pinned) + SA-5 (the behaviour is derived).
+// =============================================================================================
+
+TEST(PeriodicTimerSingleConsumerTests, Decl1957_TheGuardCostsNoLayout) {
+    // SA-3's pinned measurement. The new bool fits in padding the type already had, so the size
+    // is unchanged and no consumer needs a rebuild for layout -- measured 128 before and 128
+    // after (build-probe/1957_probe1_layout.cpp).
+    static_assert(sizeof(System::Threading::PeriodicTimer) == 128,
+                  "#1957/SR-AUD-201 must not grow PeriodicTimer");
+    static_assert(alignof(System::Threading::PeriodicTimer) == 8);
+    EXPECT_EQ(sizeof(System::Threading::PeriodicTimer), 128u);
+}
+
+TEST(PeriodicTimerSingleConsumerTests, Fix1957_ASecondConcurrentConsumerThrows) {
+    System::Threading::PeriodicTimer timer(System::TimeSpan::FromMilliseconds(3000));
+
+    std::atomic<bool> firstIsWaiting{false};
+    std::atomic<bool> secondThrew{false};
+    std::atomic<bool> secondReturned{false};
+
+    // The first consumer parks in a long wait. Detached with a bounded handshake, because a
+    // regression here is a HANG rather than a wrong value, and joining a stuck thread would take
+    // the whole executable down instead of failing one assertion.
+    std::thread first([&] {
+        firstIsWaiting.store(true);
+        (void)timer.WaitForNextTick();
+    });
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(4);
+    while (!firstIsWaiting.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    ASSERT_TRUE(firstIsWaiting.load()) << "the first consumer never started";
+    // Give the first consumer time to reach the wait and publish activeWait_ under the mutex.
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+
+    std::thread second([&] {
+        try {
+            (void)timer.WaitForNextTick();
+            secondReturned.store(true);
+        } catch (const System::InvalidOperationException&) {
+            secondThrew.store(true);
+        } catch (...) {
+        }
+    });
+    second.join();
+
+    EXPECT_TRUE(secondThrew.load())
+        << "a second concurrent consumer must be refused, not silently served";
+    EXPECT_FALSE(secondReturned.load())
+        << "two waiters must not both consume the same tick";
+
+    timer.Dispose();
+    first.join();
+}
+
+TEST(PeriodicTimerSingleConsumerTests, Fix1957_TheFlagIsClearedSoSequentialWaitsStillWork) {
+    // The half a naive guard gets wrong: if the flag is not cleared on every exit, the FIRST
+    // wait locks the timer out for ever and ordinary sequential use breaks.
+    System::Threading::PeriodicTimer timer(System::TimeSpan::FromMilliseconds(1));
+    EXPECT_TRUE(timer.WaitForNextTick());
+    EXPECT_TRUE(timer.WaitForNextTick());
+    EXPECT_TRUE(timer.WaitForNextTick());
+}
+
+TEST(PeriodicTimerSingleConsumerTests, Fix1957_TheFlagIsClearedAfterADisposedReturn) {
+    // The exit path that returns false rather than a tick must clear the flag too, or a disposed
+    // timer would start throwing instead of returning false to subsequent callers.
+    System::Threading::PeriodicTimer timer(System::TimeSpan::FromMilliseconds(1));
+    timer.Dispose();
+    EXPECT_FALSE(timer.WaitForNextTick());
+    EXPECT_FALSE(timer.WaitForNextTick()) << "a disposed timer keeps returning false, not throwing";
+}
+
+TEST(PeriodicTimerSingleConsumerTests, Fix1957_SingleConsumerUseIsCompletelyUnchanged) {
+    // The contract everybody actually uses: one consumer, ticks delivered, disposal ends it.
+    System::Threading::PeriodicTimer timer(System::TimeSpan::FromMilliseconds(1));
+    int ticks = 0;
+    for (int i = 0; i < 5; ++i) {
+        ASSERT_TRUE(timer.WaitForNextTick());
+        ++ticks;
+    }
+    EXPECT_EQ(ticks, 5);
+    timer.Dispose();
+    EXPECT_FALSE(timer.WaitForNextTick());
+}
