@@ -168,6 +168,67 @@ namespace System {
         [[nodiscard]] double ToDouble() const noexcept { return static_cast<double>(ToSingle()); }
 
         /** @brief Explicit conversion to a 32-bit float. */
+        // -----------------------------------------------------------------------------------
+        // #2384 unit 3: the conversion operators. THIS UNIT LANDS THE `from Half` DIRECTION ONLY,
+        // and the `to Half` direction is BLOCKED ON A DECISION -- measured, not guessed.
+        //
+        // .NET declares 43 conversions on Half. Four groups cannot be transcribed here:
+        //
+        //  1. THE 13 `operator checked` VARIANTS. C# selects them inside a `checked` context;
+        //     C++ has no such context and no way to declare a conversion distinguished only by
+        //     it. Not a cost question -- there is nothing to write.
+        //
+        //  2. `nint` / `nuint`. Measured on this platform: `std::intptr_t` IS `long`, and
+        //     `longcs` is `int64_t`, which is also `long`. A separate overload is a REDEFINITION,
+        //     not an addition -- so these conversions exist, through `longcs`/`ulongcs`, which
+        //     are the same type.
+        //
+        //  3. `ushort` -> Half. THE SIGNATURE IS ALREADY TAKEN, BY THE OPPOSITE MEANING:
+        //     `Half(uint16_t)` above is the RAW BIT PATTERN, while .NET's
+        //     `explicit operator Half(ushort)` is `(Half)(float)value`. `ushortcs` and `uint16_t`
+        //     are the same type, so the two cannot coexist.
+        //
+        //  4. EVERY OTHER `to Half` INTEGER CONVERSION, for a reason measured rather than
+        //     predicted. Adding `explicit Half(intcs)` makes C++ overload resolution prefer it
+        //     over `Half(uint16_t)` for an INT LITERAL -- an exact match beats a conversion -- so
+        //     `Half(0x7BFF)` silently stops meaning "these bits" and starts meaning "the number
+        //     31743". This type's OWN constants are written that way, and landing the
+        //     constructors turned 44 shipped tests red, including `Half::MaxValue` and
+        //     `Half::NegativeInfinity` themselves. Resolving it means renaming the raw-bits
+        //     constructor, which is a public source break with a SILENT meaning change across 66
+        //     first-party sites -- a decision, not a transcription. Ticket #2395.
+        //
+        // The `from Half` direction below has none of those problems: a conversion operator
+        // cannot be hijacked by a literal and collides with nothing.
+        //
+        // ONE DELIBERATE DIVERGENCE IS ALREADY DECIDABLE, and it belongs with #2395: .NET makes
+        // the `byte` and `sbyte` conversions IMPLICIT. Reproduced as implicit converting
+        // constructors they make EVERY int argument ambiguous -- measured: `int -> bytecs -> Half`
+        // and `int -> sbytecs -> Half` are equally viable, because C++ permits a standard
+        // conversion before a user-defined one and C# does not. So whatever #2395 decides, those
+        // two must be `explicit`: what is lost is the IMPLICITNESS, never the conversion.
+        // -----------------------------------------------------------------------------------
+
+        /** @brief Converts to `char16_t`, truncating toward zero. .NET: `explicit operator char(Half)`. */
+        explicit operator SharpRuntime::charcs()  const noexcept { return static_cast<SharpRuntime::charcs>(ToSingle()); }
+        /** @brief Converts to an 8-bit unsigned value, truncating toward zero. */
+        explicit operator SharpRuntime::bytecs()  const noexcept { return static_cast<SharpRuntime::bytecs>(ToSingle()); }
+        /** @brief Converts to an 8-bit signed value, truncating toward zero. */
+        explicit operator SharpRuntime::sbytecs() const noexcept { return static_cast<SharpRuntime::sbytecs>(ToSingle()); }
+        /** @brief Converts to a 16-bit signed value, truncating toward zero. */
+        explicit operator SharpRuntime::shortcs() const noexcept { return static_cast<SharpRuntime::shortcs>(ToSingle()); }
+        /** @brief Converts to a 16-bit unsigned value, truncating toward zero. */
+        explicit operator SharpRuntime::ushortcs() const noexcept { return static_cast<SharpRuntime::ushortcs>(ToSingle()); }
+        /** @brief Converts to a 32-bit signed value, truncating toward zero. */
+        explicit operator SharpRuntime::intcs()   const noexcept { return static_cast<SharpRuntime::intcs>(ToSingle()); }
+        /** @brief Converts to a 32-bit unsigned value, truncating toward zero. */
+        explicit operator SharpRuntime::uintcs()  const noexcept { return static_cast<SharpRuntime::uintcs>(ToSingle()); }
+        /** @brief Converts to a 64-bit signed value, truncating toward zero. Also serves .NET's
+         *  `nint` conversion, which is the same C++ type here. */
+        explicit operator SharpRuntime::longcs()  const noexcept { return static_cast<SharpRuntime::longcs>(ToSingle()); }
+        /** @brief Converts to a 64-bit unsigned value, truncating toward zero. Also serves `nuint`. */
+        explicit operator SharpRuntime::ulongcs() const noexcept { return static_cast<SharpRuntime::ulongcs>(ToSingle()); }
+
         explicit operator float() const noexcept { return ToSingle(); }
         /** @brief Explicit conversion to a 64-bit double. */
         explicit operator double() const noexcept { return ToDouble(); }

@@ -167,10 +167,71 @@ Seven mutations, all caught: `Sin` wired to `Cos`; `Atan2` arguments swapped; tw
 swapped; `ScaleB`'s integer argument routed through `float`; `Exp2` wired to `Exp10`;
 `BFloat16::Sqrt` wired to `Cbrt`; and `Ieee754Remainder` wired to `Pow`.
 
-## What is still to come
+---
 
-**Unit 3** — the conversion operators, measured at **43 on `Half` and 47 on `BFloat16`**. It must
-move the two types in step like every unit before it.
+# Unit 3 — the conversion operators, `from` direction only
+
+Landed 2026-08-19, same day. Purely additive: **nine `from` conversions on each type**, on top of
+the `float` and `double` operators that already existed.
+
+## What landed
+
+`explicit operator` to `charcs`, `bytecs`, `sbytecs`, `shortcs`, `ushortcs`, `intcs`, `uintcs`,
+`longcs`, `ulongcs` — each truncating **toward zero**, which is where "truncate" and "floor" part
+company for negatives, and each `explicit`, so a 16-bit float can never silently become an integer
+in arithmetic or overload resolution.
+
+## What did not, and the reason is measured rather than argued
+
+.NET declares 43 conversions on `Half` and 47 on `BFloat16`. **Four groups cannot be transcribed:**
+
+1. **The 13 `operator checked` variants.** C# selects them inside a `checked` context; C++ has no
+   such context and no way to declare a conversion distinguished only by it. Not a cost question —
+   there is nothing to write.
+2. **`nint` / `nuint`.** Measured on this platform: `std::intptr_t` **is** `long`, and `longcs` is
+   `int64_t`, which is also `long`. A separate overload is a **redefinition**, not an addition — so
+   these conversions do exist, through `longcs`/`ulongcs`, which are the same type.
+3. **`ushort` → `Half`.** The signature is already taken, **by the opposite meaning**:
+   `Half(uint16_t)` is the raw bit pattern; .NET's is `(Half)(float)value`.
+4. **Every other `to` conversion**, for a reason found by building it rather than by predicting it.
+
+## The finding that blocked half the unit
+
+Adding `explicit Half(intcs)` makes C++ overload resolution prefer it for an **int literal** — an
+exact match beats an `int → uint16_t` conversion — so `Half(0x7BFF)` silently stops meaning *"these
+bits"* and starts meaning *"the number 31743"*.
+
+**This type's own constants are written that way.** The constructors were written and built, and
+**44 shipped tests turned red**, `Half::MaxValue` and `Half::NegativeInfinity` among them. A minimal
+probe isolates it: with only a `uint16_t` constructor, `H(0x7BFF).bits` is `31743`; add an `int32_t`
+constructor and the same expression takes it.
+
+Two further measurements shape the decision, and both were found by *writing the test*:
+
+* the raw-bits constructor **already** accepts any integer convertible to `uint16_t`, so
+  `Half(someSByte)` compiles today and means bits. So *"is it constructible"* cannot be the pin —
+  only the **meaning** can be, which is how `Decl2395_*` is written;
+* **the two types have different shapes of the same hazard.** `BFloat16` has *both* a `uint16_t` and
+  a `float` constructor, so an int literal is **ambiguous** there and does not compile at all, while
+  on `Half` it silently picks raw bits. One decision, two migrations.
+
+Resolving it means renaming the raw-bits constructor — a public source break across **66**
+first-party sites **with a silent meaning change** for any site not migrated, which is the dangerous
+class. That is **#2395**, a decision rather than a transcription.
+
+## One divergence that is already decidable
+
+.NET makes the `byte` and `sbyte` conversions **implicit**. Reproduced as implicit converting
+constructors they make **every `int` argument ambiguous** — measured: `int → bytecs → Half` and
+`int → sbytecs → Half` are equally viable, because C++ permits a standard conversion before a
+user-defined one and C# does not. So whatever #2395 decides, those two must be `explicit`. **What is
+lost is the implicitness, never the conversion.**
+
+## Mutation testing
+
+Four mutations, all caught: the `int` conversion rounding instead of truncating; the `short`
+conversion flooring instead of truncating toward zero; a conversion made implicit (compile error);
+and `BFloat16`'s `int` conversion reading the raw bits instead of the value.
 
 Out of scope permanently, and unchanged by this ticket: **generic-math conformance**
 (`INumber<T>`, `IFloatingPointIeee754<T>`, `IMinMaxValue<T>`). .NET's `BFloat16` implements 36

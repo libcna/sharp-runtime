@@ -852,3 +852,99 @@ TEST(Fix2384Unit2b, Decl2384_TenMembersAreAbsentBecauseFloatItselfLacksThem) {
                   "#2384 unit 2b landed on both types");
     SUCCEED();
 }
+
+// =================================================================================================
+// #2384 unit 3 -- the conversion operators, `from` direction, on BOTH types.
+//
+// The `to` direction is blocked on ticket #2395; the reason is measured and pinned below rather
+// than described, because it is the kind of hazard that reads as theoretical until it is shown.
+// =================================================================================================
+
+TEST(Fix2384Unit3, EveryFromConversionTruncatesTowardZero) {
+    using System::Half;
+    using System::Numerics::BFloat16;
+
+    const Half h = Half::FromSingle(3.75f);
+    EXPECT_EQ(static_cast<SharpRuntime::intcs>(h),   3) << "truncates, does not round";
+    EXPECT_EQ(static_cast<SharpRuntime::longcs>(h),  3);
+    EXPECT_EQ(static_cast<SharpRuntime::shortcs>(h), 3);
+    EXPECT_EQ(static_cast<SharpRuntime::bytecs>(h),  3);
+    EXPECT_EQ(static_cast<SharpRuntime::uintcs>(h),  3u);
+    EXPECT_EQ(static_cast<SharpRuntime::ulongcs>(h), 3u);
+    EXPECT_EQ(static_cast<SharpRuntime::ushortcs>(h),3u);
+    EXPECT_EQ(static_cast<SharpRuntime::charcs>(h),  3);
+
+    // Toward zero for NEGATIVES too, which is where "truncate" and "floor" part company.
+    const Half neg = Half::FromSingle(-3.75f);
+    EXPECT_EQ(static_cast<SharpRuntime::intcs>(neg),   -3) << "toward zero, not -4";
+    EXPECT_EQ(static_cast<SharpRuntime::longcs>(neg),  -3);
+    EXPECT_EQ(static_cast<SharpRuntime::shortcs>(neg), -3);
+    EXPECT_EQ(static_cast<SharpRuntime::sbytecs>(neg), -3);
+
+    const BFloat16 b(3.75f);
+    EXPECT_EQ(static_cast<SharpRuntime::intcs>(b),  3);
+    EXPECT_EQ(static_cast<SharpRuntime::longcs>(b), 3);
+    EXPECT_EQ(static_cast<SharpRuntime::sbytecs>(BFloat16(-3.75f)), -3);
+
+    // The float/double operators that predate this unit still work and are unaffected.
+    EXPECT_FLOAT_EQ(static_cast<float>(h), 3.75f);
+    EXPECT_DOUBLE_EQ(static_cast<double>(h), 3.75);
+}
+
+TEST(Fix2384Unit3, EveryFromConversionIsExplicit) {
+    // .NET's `from Half` conversions are all `explicit`, and so are these -- a Half must never
+    // silently become an integer in arithmetic or overload resolution. Dependent parameters, per
+    // the #2299 gcc trap.
+    using System::Half;
+    using System::Numerics::BFloat16;
+    static_assert(!std::is_convertible_v<Half, SharpRuntime::intcs>);
+    static_assert(!std::is_convertible_v<Half, SharpRuntime::longcs>);
+    static_assert(!std::is_convertible_v<Half, float>);
+    static_assert(std::is_constructible_v<SharpRuntime::intcs, Half>);
+    static_assert(std::is_constructible_v<SharpRuntime::longcs, Half>);
+    static_assert(!std::is_convertible_v<BFloat16, SharpRuntime::intcs>);
+    static_assert(std::is_constructible_v<SharpRuntime::intcs, BFloat16>);
+    SUCCEED();
+}
+
+TEST(Fix2384Unit3, Decl2395_TheToDirectionWouldHijackEveryIntegerLiteral) {
+    // THE MEASUREMENT THAT BLOCKED THE OTHER HALF OF THIS UNIT, pinned as a live demonstration
+    // rather than as prose -- it reads as theoretical until it is shown.
+    //
+    // `Half(uint16_t)` is the RAW BIT PATTERN. Adding .NET's `explicit operator Half(int)` as a
+    // constructor makes C++ prefer it for an INT LITERAL, because an exact match beats an
+    // int -> uint16_t conversion. So `Half(0x7BFF)` would silently stop meaning "these bits" and
+    // start meaning "the number 31743". This type's OWN constants are written that way, and
+    // landing the constructors turned 44 shipped tests red -- Half::MaxValue and
+    // Half::NegativeInfinity among them.
+    using System::Half;
+    using System::Numerics::BFloat16;
+
+    // What the raw-bits constructor means TODAY, from an int literal. THIS is the pin: if a
+    // value-taking constructor is ever added, these two assertions flip, and #2395's decision
+    // must have been taken first.
+    EXPECT_EQ(Half(0x3C00).bits, 0x3C00u) << "an int literal reaches the RAW-BITS constructor";
+    EXPECT_FLOAT_EQ(Half(0x3C00).ToSingle(), 1.0f) << "...so 0x3C00 is the number 1.0, not 15360";
+    EXPECT_EQ(Half::One.bits, 0x3C00u);
+    EXPECT_EQ(Half::MaxValue.bits, 0x7BFFu);
+    EXPECT_EQ(Half::NegativeInfinity.bits, 0xFC00u);
+
+    // A SECOND MEASURED DIFFERENCE, found by writing this case rather than by reading the types:
+    // the raw-bits constructor already accepts ANY integer that converts to uint16_t, so
+    // `Half(someSByte)` compiles TODAY and means raw bits. So "is it constructible" cannot be the
+    // pin -- only the MEANING can be, which is what the assertions above check.
+    static_assert(std::is_constructible_v<Half, SharpRuntime::sbytecs>,
+                  "the raw-bits constructor already accepts a narrower integer");
+    EXPECT_EQ(Half(static_cast<SharpRuntime::sbytecs>(3)).bits, 3u)
+        << "and it means BITS -- .NET's value conversion would give 0x4200 (3.0)";
+
+    // AND A THIRD, which is a real difference between the port's two 16-bit floats: BFloat16 has
+    // BOTH a uint16_t and a float constructor, so an int literal is AMBIGUOUS there and does not
+    // compile at all -- while on Half it silently picks raw bits. The hazard therefore has
+    // different shapes on the two types, and #2395 must decide for both.
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16(static_cast<uint16_t>(0x3F80))), 0x3F80u);
+    EXPECT_FLOAT_EQ(static_cast<float>(BFloat16(static_cast<uint16_t>(0x3F80))), 1.0f);
+    static_assert(!std::is_constructible_v<BFloat16, int>,
+                  "#2395: an int literal is AMBIGUOUS on BFloat16 (uint16_t vs float ctor), where "
+                  "on Half it silently picks raw bits -- the same decision, two different shapes");
+}

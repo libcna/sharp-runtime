@@ -123,6 +123,35 @@ public:
     [[nodiscard]] uint16_t getBitsProperty() const { return bits_; }
 
     /** Converts to float (lossless — BFloat16 is a subset of float32). */
+    // -----------------------------------------------------------------------------------
+    // #2384 unit 3: the conversion operators, `from BFloat16` direction only.
+    //
+    // The `to BFloat16` direction is blocked on the same decision as Half's -- see Half.hpp for
+    // the measurement. In short: `BFloat16(uint16_t)` here is the RAW BIT PATTERN, and adding any
+    // value-taking integer constructor lets C++ overload resolution hijack every
+    // `BFloat16(<int literal>)` call, because an exact `int` match beats an `int -> uint16_t`
+    // conversion. 46 first-party sites use the raw form. Ticket #2395.
+    // -----------------------------------------------------------------------------------
+
+    /** @brief Converts to `char16_t`, truncating toward zero. */
+    explicit operator SharpRuntime::charcs()  const { return static_cast<SharpRuntime::charcs>(toFloat(bits_)); }
+    /** @brief Converts to an 8-bit unsigned value, truncating toward zero. */
+    explicit operator SharpRuntime::bytecs()  const { return static_cast<SharpRuntime::bytecs>(toFloat(bits_)); }
+    /** @brief Converts to an 8-bit signed value, truncating toward zero. */
+    explicit operator SharpRuntime::sbytecs() const { return static_cast<SharpRuntime::sbytecs>(toFloat(bits_)); }
+    /** @brief Converts to a 16-bit signed value, truncating toward zero. */
+    explicit operator SharpRuntime::shortcs() const { return static_cast<SharpRuntime::shortcs>(toFloat(bits_)); }
+    /** @brief Converts to a 16-bit unsigned value, truncating toward zero. */
+    explicit operator SharpRuntime::ushortcs() const { return static_cast<SharpRuntime::ushortcs>(toFloat(bits_)); }
+    /** @brief Converts to a 32-bit signed value, truncating toward zero. */
+    explicit operator SharpRuntime::intcs()   const { return static_cast<SharpRuntime::intcs>(toFloat(bits_)); }
+    /** @brief Converts to a 32-bit unsigned value, truncating toward zero. */
+    explicit operator SharpRuntime::uintcs()  const { return static_cast<SharpRuntime::uintcs>(toFloat(bits_)); }
+    /** @brief Converts to a 64-bit signed value, truncating toward zero. Also serves `nint`. */
+    explicit operator SharpRuntime::longcs()  const { return static_cast<SharpRuntime::longcs>(toFloat(bits_)); }
+    /** @brief Converts to a 64-bit unsigned value, truncating toward zero. Also serves `nuint`. */
+    explicit operator SharpRuntime::ulongcs() const { return static_cast<SharpRuntime::ulongcs>(toFloat(bits_)); }
+
     explicit operator float()  const { return toFloat(bits_); }
     /** Converts to double. */
     explicit operator double() const { return static_cast<double>(toFloat(bits_)); }
