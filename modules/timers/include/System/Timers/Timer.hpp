@@ -6,6 +6,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/EventHandler.hpp"
 #include "System/TimeSpan.hpp"
+#include "System/Object.hpp"
 #include "System/Timers/ElapsedEventArgs.hpp"
 
 namespace System::Threading {
@@ -38,7 +39,7 @@ namespace System::Timers {
      * needs a broader ownership change (e.g. `enable_shared_from_this`/`weak_ptr` in the
      * callback), out of scope for a single audit pass.
      */
-    class Timer {
+    class Timer : public System::Object {
         double interval_ = 100;
         bool enabled_ = false;
         bool autoReset_ = true;
@@ -51,6 +52,14 @@ namespace System::Timers {
         void startTimerThread();
 
     public:
+        /**
+         * @brief Returns this type's name.
+         *
+         * Required because `System::Object` is abstract through its pure virtual `GetTypeName()`.
+         * #2155 gave `Timer` that base so `Elapsed` can report its sender.
+         */
+        GetTypeNameHPP()
+
         /**
          * @brief Event handler collection for the Elapsed event.
          *
@@ -67,11 +76,22 @@ namespace System::Timers {
          * - the timer **keeps running**. A periodic timer whose handler throws on every tick loops
          *   silently at the configured interval rather than stopping.
          *
-         * @note The sender passed to handlers is currently `nullptr` rather than the raising
-         * timer (SR-AUD-239). That is not an oversight: `EventHandler<T>::Raise` types its sender
-         * as `System::Object*`, this type does not derive from `System::Object`, and giving it that
-         * base is an object-layout and vtable change (`sizeof` 104 → 112, non-polymorphic →
-         * polymorphic) held by the blocked ticket #2155.
+         * @note **The sender is the raising timer** (SR-AUD-239, ticket #2155, landed 2026-08-19).
+         * .NET passes it too — `intervalElapsed(this, elapsedEventArgs)` (`Timer.cs:313`) — and this
+         * port reported `nullptr` for a purely structural reason: `EventHandler<T>::Raise` types its
+         * sender as `System::Object*` and `Timer` had no such base, so `nullptr` was the only value
+         * that compiled.
+         *
+         * **The obvious alternative does not exist here.** .NET's `Timer` derives from `Component`
+         * (`Timer.cs:15`), not from `Object` directly — and this port has **no `ComponentModel`
+         * `Component` class at all** (measured: no `Component.hpp` anywhere in `modules/`). So the
+         * `Object` base is the only available route, and the divergence is in the **base**, not in
+         * the observable sender.
+         *
+         * The cost, granted per action: `sizeof(Timer)` **104 → 112** and a **new vtable** —
+         * non-polymorphic to polymorphic. That is a silent binary break; every consumer must
+         * rebuild. Measured at the time of the grant: **zero** `System::Timers` sites in `cna` and
+         * **zero** in `mobile-eggbert`.
          */
         System::EventHandler<ElapsedEventArgs> Elapsed;
 

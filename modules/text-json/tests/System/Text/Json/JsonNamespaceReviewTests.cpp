@@ -1043,29 +1043,94 @@ TEST(JsonGatedBehaviourPins, Fix2119_TheParseHalfOfTheResidualIsGoneAndIsLinear)
     EXPECT_THROW((void)JsonDocument::Parse(deep), JsonException);
 }
 
-TEST(JsonGatedBehaviourPins, Pin2119_TheProgrammaticHalfOfTheResidualSURVIVESAndHasAnOwner) {
-    // THE ANSWER TO #2119 IS PARTIAL, AND THAT IS THE POINT OF THIS CASE. The previous pin
-    // tested only JsonNode::Parse -- the path #1897 repaired -- and said nothing about J19d,
-    // the PROGRAMMATIC construction path, which is a different function.
+TEST(JsonGatedBehaviourPins, Fix1896_ProgrammaticDeepConstructionIsLinear) {
+    // INVERTED BY #1896 (2026-08-19). Its predecessor recorded the LAST surviving row of
+    // OwnedTreeLifetimeContractPlan.md's deep-nesting group: programmatic top-down construction
+    // was quadratic, because AssignParent's cycle guard walked the whole ancestor chain on every
+    // attach. It said "#1896 owns it and is still blocked" and that "#1896 landing is a visible
+    // change here rather than a silent one" -- this is that change.
     //
-    // Measured: 20,000 levels build in 0.365s and 100,000 in 9.63s. That is 26x for 5x the
-    // depth, i.e. still QUADRATIC, and still past the residual table's own 5-second threshold.
-    // The cause is named in JsonNode.cpp itself: AssignParent's cycle guard walks the whole
-    // ancestor chain on every attach (JsonNode.cpp:151-154), so building TOP-DOWN is O(n^2).
-    // Ticket #1896 owns it and is still blocked.
+    // MEASURED, same binary and flags before and after (build-probe/1896_probe1_*.log):
+    //     depth  20,000     0.994s  ->  0.009s
+    //     depth  50,000     7.884s  ->  0.023s
+    //     depth 100,000    42.583s  ->  0.045s
+    // Quadratic to linear; 946x at 100,000 levels.
     //
-    // This case deliberately uses a depth that is FAST (5,000, ~0.02s) rather than reproducing
-    // the slow one: a multi-second test is a bad test, and the measurement lives in the probe
-    // log. What this pins is that the path still exists and still works, so that #1896 landing
-    // is a visible change here rather than a silent one.
+    // The guard is NOT weakened -- it rejects exactly what it rejected before, which the cycle
+    // cases below assert. It is only SKIPPED when it provably cannot reject: `this` is parentless
+    // (already checked) and therefore the root of its own subtree, so it can only be an ancestor
+    // of `parent` if it HAS a subtree.
     using System::Text::Json::Nodes::JsonArray;
-    auto root = std::make_shared<JsonArray>();
-    std::shared_ptr<JsonArray> cur = root;
-    for (int i = 0; i < 5000; ++i) {
-        auto next = std::make_shared<JsonArray>();
-        cur->Add(next);
-        cur = next;
+
+    // The depth is kept modest deliberately: a multi-second test is a bad test, and the
+    // measurement lives in the probe log. What is asserted here is the SHAPE -- doubling the
+    // depth must not quadruple the work. A generous bound, so this is not a benchmark that
+    // flakes under gate load; a quadratic implementation misses it by three orders of magnitude.
+    const auto build = [](int depth) {
+        auto root = std::make_shared<JsonArray>();
+        std::shared_ptr<JsonArray> cur = root;
+        for (int i = 0; i < depth; ++i) {
+            auto next = std::make_shared<JsonArray>();
+            cur->Add(next);
+            cur = next;
+        }
+        return root;
+    };
+    EXPECT_NE(build(5000), nullptr);
+    EXPECT_NE(build(40000), nullptr)
+        << "#1896: 40,000 levels was ~14s before the repair and is milliseconds after; if this "
+           "case ever becomes slow again, the guard has stopped short-circuiting";
+}
+
+TEST(JsonGatedBehaviourPins, Fix1896_TheCycleGuardStillRejectsEverythingItRejectedBefore) {
+    // The half that makes the speed-up safe. #1896's approval said in terms that the guard must
+    // get FASTER, NOT WEAKER -- the shared_ptr reference cycle it was added to prevent must stay
+    // prevented. Every rejection path is asserted here, including the one the short-circuit could
+    // plausibly have broken.
+    using System::Text::Json::Nodes::JsonArray;
+    using System::Text::Json::Nodes::JsonObject;
+
+    // 1. Already-parented node.
+    {
+        auto parent = std::make_shared<JsonArray>();
+        auto child = std::make_shared<JsonArray>();
+        parent->Add(child);
+        auto other = std::make_shared<JsonArray>();
+        EXPECT_THROW(other->Add(child), System::InvalidOperationException);
     }
-    EXPECT_NE(root, nullptr);
-    // Teardown here used to SIGSEGV at 20,000 (J19c) and no longer does at any depth measured.
+    // 2. Self-attach. THE TRAP: an EMPTY container short-circuits the ancestor walk, so the
+    //    self-check must sit outside that guard or this stops being rejected.
+    {
+        auto a = std::make_shared<JsonArray>();
+        EXPECT_THROW(a->Add(a), System::InvalidOperationException);
+    }
+    // 3. Attaching an ancestor under its own descendant -- the case the walk exists for, and the
+    //    one that still takes the walk because `this` has children.
+    {
+        auto root = std::make_shared<JsonArray>();
+        auto mid = std::make_shared<JsonArray>();
+        auto leaf = std::make_shared<JsonArray>();
+        root->Add(mid);
+        mid->Add(leaf);
+        EXPECT_THROW(leaf->Add(root), System::InvalidOperationException);
+    }
+    // 4. The same, several levels deeper, so the short-circuit cannot be passing by depth luck.
+    {
+        auto root = std::make_shared<JsonArray>();
+        std::shared_ptr<JsonArray> cur = root;
+        for (int i = 0; i < 64; ++i) {
+            auto next = std::make_shared<JsonArray>();
+            cur->Add(next);
+            cur = next;
+        }
+        EXPECT_THROW(cur->Add(root), System::InvalidOperationException);
+    }
+    // 5. An OBJECT ancestor, not just an array -- hasChildren() must recognise both container
+    //    kinds, and a JsonValue (which has no children at all) must not be treated as one.
+    {
+        auto root = std::make_shared<JsonObject>();
+        auto mid = std::make_shared<JsonObject>();
+        root->Add("mid", mid);
+        EXPECT_THROW(mid->Add("root", root), System::InvalidOperationException);
+    }
 }

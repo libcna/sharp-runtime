@@ -84,10 +84,24 @@ TEST(XObjectTests, GetDocumentProperty_NullForStandaloneElement) {
     EXPECT_EQ(e.getDocumentProperty(), nullptr);
 }
 
-TEST(XObjectTests, ChangedChangingEventAccessors_DoNotThrow) {
+TEST(XObjectTests, ChangedChangingEventAccessors_ReturnUsableRegistrations) {
+    // THIS IS THE TEST THE #2198 AUDIT CALLED OUT. As `..._DoNotThrow` it asserted only that
+    // registration does not throw, which PRESERVED the inert surface rather than describing it --
+    // it kept passing while nothing was ever notified. #2199 made notification real, so it now
+    // asserts the thing that actually distinguishes a working registration from a discarded one.
     XElement e("a");
-    EXPECT_NO_THROW(e.add_Changed([](void*, const auto&) {}));
-    EXPECT_NO_THROW(e.add_Changing([](void*, const auto&) {}));
+    int fired = 0;
+    const auto tok = e.add_Changed([&](void*, const auto&) { ++fired; });
+    const auto tok2 = e.add_Changing([](void*, const auto&) {});
+    EXPECT_FALSE(tok.IsEmpty());
+    EXPECT_FALSE(tok2.IsEmpty());
+
+    e.setNameProperty(System::Xml::Linq::XName("b"));
+    EXPECT_EQ(fired, 1);
+
+    EXPECT_TRUE(e.remove_Changed(tok));
+    e.setNameProperty(System::Xml::Linq::XName("c"));
+    EXPECT_EQ(fired, 1);
 }
 
 // ===========================================================================

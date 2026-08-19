@@ -9,6 +9,9 @@
 
 namespace System::Timers {
 
+    GetTypeNameCPP(Timer, "System.Timers.Timer")
+
+
 namespace {
     constexpr double kMaxInterval = 2147483647.0; // int32 max, matching .NET's validation
 
@@ -111,7 +114,9 @@ void Timer::startTimerThread() {
                     enabled_ = false;
                 }
                 ElapsedEventArgs args(System::DateTime::getNowProperty());
-                Elapsed.Raise(nullptr, args);
+                // #2155: the raising timer, matching .NET's intervalElapsed(this, ...)
+                // at Timer.cs:313. Reported nullptr until Timer gained the Object base.
+                Elapsed.Raise(this, args);
             } catch (...) {
             }
         },

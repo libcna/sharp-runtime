@@ -587,13 +587,24 @@ TEST(XLinqLifetimeTests, RetainedNode_ReportsNoParentEvenIfTheFreedOwnersStorage
 
 // --- Representation invariants ------------------------------------------------------------
 
-static_assert(sizeof(XObject) == 16, "#1890: XObject must stay 16 bytes");
-static_assert(sizeof(XNode) == 16, "#1890: XNode must stay 16 bytes");
-static_assert(sizeof(XContainer) == 40, "#1890: XContainer must stay 40 bytes");
-static_assert(sizeof(XElement) == 128, "#1890: XElement must stay 128 bytes");
-static_assert(sizeof(XAttribute) == 120, "#1890: XAttribute must stay 120 bytes");
-static_assert(sizeof(XText) == 48, "#1890: XText must stay 48 bytes");
-static_assert(sizeof(XDocument) == 56, "#1890: XDocument must stay 56 bytes");
+// UPDATED BY #2199 on 2026-08-19, which grew every one of these by exactly ONE POINTER: the
+// unique_ptr to XObject's Changed/Changing registration block. The growth was granted per action
+// (docs/StandingApprovals.md SA-13) after being declined for a different purpose on 2026-07-31.
+// #1890's invariant is unchanged in KIND -- these figures must still not move without an
+// approval; only the numbers did.
+static_assert(sizeof(XObject) == 24, "#1890/#2199: XObject must stay 24 bytes (was 16)");
+static_assert(sizeof(XNode) == 24, "#1890/#2199: XNode must stay 24 bytes (was 16)");
+static_assert(sizeof(XContainer) == 48, "#1890/#2199: XContainer must stay 48 bytes (was 40)");
+static_assert(sizeof(XElement) == 136, "#1890/#2199: XElement must stay 136 bytes (was 128)");
+static_assert(sizeof(XAttribute) == 128, "#1890/#2199: XAttribute must stay 128 bytes (was 120)");
+static_assert(sizeof(XText) == 56, "#1890/#2199: XText must stay 56 bytes (was 48)");
+static_assert(sizeof(XDocument) == 64, "#1890/#2199: XDocument must stay 64 bytes (was 56)");
+
+// The growth is exactly one pointer on EVERY type, asserted as a relationship so a second member
+// added later cannot hide behind a literal that someone updated by hand.
+static_assert(sizeof(XObject) == 16 + sizeof(void*));
+static_assert(sizeof(XElement) == 128 + sizeof(void*));
+static_assert(sizeof(XAttribute) == 120 + sizeof(void*));
 static_assert(alignof(XElement) == 8 && alignof(XAttribute) == 8, "#1890: alignment unchanged");
 static_assert(std::has_virtual_destructor_v<XObject>, "#1890: destruction stays virtual");
 static_assert(std::is_nothrow_destructible_v<XContainer>, "#1890: ~XContainer must be noexcept");
@@ -604,11 +615,15 @@ static_assert(!std::is_copy_assignable_v<XElement>, "#1890: XObject copy-assign 
 static_assert(!std::is_move_constructible_v<XElement>, "#1890: XObject move stays deleted");
 
 TEST(XLinqLifetimeTests, PublicLayoutIsUnchangedByTheDetachContract) {
-    EXPECT_EQ(sizeof(XObject), 16u);
-    EXPECT_EQ(sizeof(XNode), 16u);
-    EXPECT_EQ(sizeof(XContainer), 40u);
-    EXPECT_EQ(sizeof(XElement), 128u);
-    EXPECT_EQ(sizeof(XAttribute), 120u);
-    EXPECT_EQ(sizeof(XText), 48u);
-    EXPECT_EQ(sizeof(XDocument), 56u);
+    // UPDATED BY #2199: every figure grew by exactly one pointer for XObject's Changed/Changing
+    // registration block. The property this case guards is unchanged -- the DETACH CONTRACT costs
+    // no layout -- so it is written relative to #2199's approved baseline rather than restated as
+    // fresh literals, which keeps it about detachment rather than about notification.
+    EXPECT_EQ(sizeof(XObject), 16u + sizeof(void*));
+    EXPECT_EQ(sizeof(XNode), 16u + sizeof(void*));
+    EXPECT_EQ(sizeof(XContainer), 40u + sizeof(void*));
+    EXPECT_EQ(sizeof(XElement), 128u + sizeof(void*));
+    EXPECT_EQ(sizeof(XAttribute), 120u + sizeof(void*));
+    EXPECT_EQ(sizeof(XText), 48u + sizeof(void*));
+    EXPECT_EQ(sizeof(XDocument), 56u + sizeof(void*));
 }

@@ -32,7 +32,13 @@ namespace System::Xml::Linq {
         /** @return The comment text. */
         [[nodiscard]] const std::string& getValueProperty() const { return value_; }
         /** @brief Sets the comment text. */
-        void setValueProperty(const std::string& value) { value_ = value; }
+        /** @brief Sets the comment text, raising a Value pair (#2199), as .NET does
+         *  (XComment.cs:82-84). */
+        void setValueProperty(const std::string& value) {
+            const bool notify = NotifyChanging(this, XObjectChangeEventArgs::Value);
+            value_ = value;
+            if (notify) NotifyChanged(this, XObjectChangeEventArgs::Value);
+        }
 
         void WriteTo(System::Xml::XmlWriter& writer) const override;
         [[nodiscard]] SharpRuntime::intcs GetDeepHashCode() const override {

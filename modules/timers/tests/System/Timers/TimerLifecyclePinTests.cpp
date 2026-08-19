@@ -152,18 +152,20 @@ TEST(TimerLifecyclePinTests, DisposeIsClose) {
 // The review's deferred and out-of-scope items, pinned so none can move silently
 // ---------------------------------------------------------------------------
 
-TEST(TimerReviewPinTests, TimerRemainsANonPolymorphicNonObjectType_SeeBlockedTicket2155) {
-    // The same compile-time pin as TimerExceptionBoundaryPinTests, restated here because this is
-    // the file a future reader of ticket #2155 will open. Both fail the build if #2155 lands.
-    static_assert(!std::is_convertible_v<Timer*, System::Object*>,
-                  "#2155 landed without updating its pin");
-    static_assert(!std::is_polymorphic_v<Timer>, "#2155 landed without updating its pin");
-    EXPECT_FALSE((std::is_convertible_v<Timer*, System::Object*>));
+TEST(TimerReviewPinTests, Fix2155_TimerIsNowAPolymorphicObjectType) {
+    // INVERTED BY #2155. Its predecessor said "both fail the build if #2155 lands" -- and BOTH DID,
+    // at compile time, which is the evidence the pin was load-bearing rather than decorative. It is
+    // restated here because this is the file a future reader of #2155 opens first.
+    static_assert(std::is_convertible_v<Timer*, System::Object*>,
+                  "#2155: Timer derives from System::Object so Elapsed can report its sender");
+    static_assert(std::is_polymorphic_v<Timer>, "#2155: and is therefore polymorphic");
+    EXPECT_TRUE((std::is_convertible_v<Timer*, System::Object*>));
 }
 
 TEST(TimerReviewPinTests, TimerIsStillNonCopyable) {
     // Not a finding — recorded because #2155's base-class change is the kind of edit that quietly
-    // reintroduces a copy constructor.
+    // reintroduces a copy constructor. #2155 HAS NOW LANDED and this still holds, which is exactly
+    // why the pin was written before it rather than after.
     static_assert(!std::is_copy_constructible_v<Timer>);
     static_assert(!std::is_copy_assignable_v<Timer>);
     SUCCEED();

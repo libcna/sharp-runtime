@@ -170,9 +170,15 @@ namespace System::Xml::Linq {
         if (XElement* owner = attr->getParentProperty()) {
             owner->RemoveAttribute(attr.get());
         }
+        // #2199: .NET's AppendAttribute (XElement.cs:1913-1919) -- sender is the ATTRIBUTE, the
+        // chain walked is this element's. Placed after the duplicate check and the detach, so a
+        // refused Add raises nothing and a re-parented attribute raises its Remove pair first.
+        XAttribute* const raw = attr.get();
+        const bool notify = NotifyChanging(raw, XObjectChangeEventArgs::Add);
         AdoptObject(*attr, this);
         attributes_.push_back(std::move(attr));
         RelinkAttributes();
+        if (notify) NotifyChanged(raw, XObjectChangeEventArgs::Add);
     }
 
     void XElement::Add(const std::string& text) {
@@ -199,21 +205,32 @@ namespace System::Xml::Linq {
     }
 
     void XElement::RemoveAttributes() {
-        for (auto& a : attributes_) {
+        // #2199: one Remove pair PER ATTRIBUTE, matching .NET (XElement.cs:940-952), and each is
+        // detached BETWEEN its own Changing and Changed so a handler sees the same state .NET's
+        // would.
+        while (!attributes_.empty()) {
+            const std::shared_ptr<XAttribute> a = attributes_.front();
+            const bool notify = NotifyChanging(a.get(), XObjectChangeEventArgs::Remove);
             AdoptObject(*a, nullptr);
             a->setNextAttributeProperty(nullptr);
+            attributes_.erase(attributes_.begin());
+            if (notify) NotifyChanged(a.get(), XObjectChangeEventArgs::Remove);
         }
-        attributes_.clear();
+        RelinkAttributes();
     }
 
     void XElement::RemoveAttribute(XAttribute* attr) {
         auto it = std::find_if(attributes_.begin(), attributes_.end(),
                                 [attr](const std::shared_ptr<XAttribute>& a) { return a.get() == attr; });
         if (it == attributes_.end()) return;
+        // #2199: .NET's RemoveAttribute (XElement.cs:2082-2099). Nothing is raised for an
+        // attribute that was not ours, because the early return above precedes this.
+        const bool notify = NotifyChanging(attr, XObjectChangeEventArgs::Remove);
         AdoptObject(**it, nullptr);
         (*it)->setNextAttributeProperty(nullptr);
         attributes_.erase(it);
         RelinkAttributes();
+        if (notify) NotifyChanged(attr, XObjectChangeEventArgs::Remove);
     }
 
     void XElement::RemoveAll() {
@@ -239,6 +256,10 @@ namespace System::Xml::Linq {
     }
 
     void XElement::setValueProperty(const std::string& v) {
+        // #2199 raises NOTHING of its own here, and that is .NET's behaviour rather than an
+        // omission: XElement's Value setter is `RemoveNodes(); Add(value);` (XElement.cs), so a
+        // subscriber sees a Remove pair per existing child followed by an Add pair -- NOT a single
+        // Value notification. Adding one here would be inventing an event .NET does not raise.
         RemoveNodes();
         if (!v.empty()) XContainer::Add(std::make_shared<XText>(v));
     }

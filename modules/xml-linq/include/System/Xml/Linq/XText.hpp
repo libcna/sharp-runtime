@@ -28,7 +28,12 @@ namespace System::Xml::Linq {
         /** @return The text content of this node. */
         [[nodiscard]] virtual const std::string& getValueProperty() const { return text_; }
         /** @brief Sets the text content of this node. */
-        virtual void setValueProperty(const std::string& value) { text_ = value; }
+        /** @brief Sets the text, raising a Value pair (#2199), as .NET does (XText.cs). */
+        virtual void setValueProperty(const std::string& value) {
+            const bool notify = NotifyChanging(this, XObjectChangeEventArgs::Value);
+            text_ = value;
+            if (notify) NotifyChanged(this, XObjectChangeEventArgs::Value);
+        }
 
         void WriteTo(System::Xml::XmlWriter& writer) const override;
         [[nodiscard]] SharpRuntime::intcs GetDeepHashCode() const override {

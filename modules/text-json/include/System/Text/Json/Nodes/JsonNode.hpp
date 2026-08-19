@@ -64,6 +64,14 @@ namespace System::Text::Json::Nodes {
          */
         void AssignParent(JsonNode* parent);
 
+    private:
+        /** @return true if this node currently contains other nodes. #1896's cycle-guard
+         *  short-circuit; see AssignParent. Non-virtual by design -- a virtual would be a vtable
+         *  change this repair does not need. */
+        [[nodiscard]] bool hasChildren() const;
+
+    public:
+
         /** @brief Internal: clears the parent container pointer. Not part of .NET's public surface (mirrors JsonNode.cs's internal DetachParent). */
         void DetachParent() { parent_ = nullptr; }
 

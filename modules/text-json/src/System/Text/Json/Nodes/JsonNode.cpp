@@ -139,6 +139,22 @@ namespace System::Text::Json::Nodes {
         drainPendingRelease(worklist);
     }
 
+    /**
+     * @return true if this node can contain other nodes AND currently does.
+     *
+     * Used only by AssignParent's cycle guard (#1896). Deliberately a file-local helper on the
+     * existing type rather than a new virtual: a virtual would be a vtable change, which is a
+     * heavier approval than this repair needs, and the two container types are already visible
+     * here for AsArray/AsObject. Both counts are O(1).
+     */
+    bool JsonNode::hasChildren() const {
+        if (const auto* asObject = dynamic_cast<const JsonObject*>(this))
+            return asObject->getCountProperty() > 0;
+        if (const auto* asArray = dynamic_cast<const JsonArray*>(this))
+            return asArray->getCountProperty() > 0;
+        return false;   // a JsonValue has no children at all
+    }
+
     void JsonNode::AssignParent(JsonNode* parent) {
         // Verified against JsonNode.cs's internal AssignParent: real .NET throws
         // InvalidOperationException both when this node already has a parent (attaching it
@@ -148,9 +164,33 @@ namespace System::Text::Json::Nodes {
         // already an ancestor of, or equal to, `parent`).
         if (getParentProperty())
             throw System::InvalidOperationException("The node already has a parent.");
-        for (JsonNode* p = parent; p; p = p->getParentProperty()) {
-            if (p == this)
-                throw System::InvalidOperationException("A node cycle was detected.");
+
+        // #1896: the cycle guard used to walk from `parent` to the root UNCONDITIONALLY, which is
+        // O(depth) per attach and therefore O(depth^2) to build a deep tree top-down -- measured
+        // at 9.63s for 100,000 levels against 0.365s for 20,000.
+        //
+        // THE WALK IS UNCHANGED IN WHAT IT REJECTS; IT IS ONLY REACHED WHEN IT CAN REJECT.
+        // The guard asks "is `this` an ancestor-or-self of `parent`?". Two facts make that
+        // answerable in O(1) for every case a walk would answer "no":
+        //
+        //   * `this` is PARENTLESS -- the check above has already thrown otherwise -- so `this` is
+        //     the root of its own subtree;
+        //   * therefore `this` can be an ancestor of `parent` only if `parent` lies inside
+        //     `this`'s subtree, which requires `this` to HAVE a subtree.
+        //
+        // So: `parent == this` is the self-attach case and is caught directly; otherwise a
+        // CHILDLESS `this` cannot contain `parent`, and the walk is skipped. Both counts are O(1)
+        // (a vector size), and both headers were already included here for AsArray/AsObject.
+        //
+        // This is why the approved object-layout growth was NOT taken: the repair needs no cached
+        // root, no cached depth and no new member. sizeof(JsonNode) is unchanged.
+        if (parent == this)
+            throw System::InvalidOperationException("A node cycle was detected.");
+        if (hasChildren()) {
+            for (JsonNode* p = parent; p; p = p->getParentProperty()) {
+                if (p == this)
+                    throw System::InvalidOperationException("A node cycle was detected.");
+            }
         }
         parent_ = parent;
     }

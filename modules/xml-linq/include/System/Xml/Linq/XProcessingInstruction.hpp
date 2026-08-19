@@ -60,12 +60,24 @@ namespace System::Xml::Linq {
         /** @return The target application for this processing instruction. */
         [[nodiscard]] const std::string& getTargetProperty() const { return target_; }
         /** @brief Sets the target application. */
-        void setTargetProperty(const std::string& target) { target_ = target; }
+        /** @brief Sets the target, raising a **Name** pair (#2199) -- .NET uses Name, not Value,
+         *  for this member (XProcessingInstruction.cs:108-110). */
+        void setTargetProperty(const std::string& target) {
+            const bool notify = NotifyChanging(this, XObjectChangeEventArgs::Name);
+            target_ = target;
+            if (notify) NotifyChanged(this, XObjectChangeEventArgs::Name);
+        }
 
         /** @return The content of this processing instruction. */
         [[nodiscard]] const std::string& getDataProperty() const { return data_; }
         /** @brief Sets the content. */
-        void setDataProperty(const std::string& data) { data_ = data; }
+        /** @brief Sets the data, raising a **Value** pair (#2199)
+         *  (XProcessingInstruction.cs:73-75). */
+        void setDataProperty(const std::string& data) {
+            const bool notify = NotifyChanging(this, XObjectChangeEventArgs::Value);
+            data_ = data;
+            if (notify) NotifyChanged(this, XObjectChangeEventArgs::Value);
+        }
 
         void WriteTo(System::Xml::XmlWriter& writer) const override;
         [[nodiscard]] SharpRuntime::intcs GetDeepHashCode() const override {

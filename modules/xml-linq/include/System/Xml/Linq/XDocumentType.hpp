@@ -48,22 +48,42 @@ namespace System::Xml::Linq {
         /** @return The name of this DTD. */
         [[nodiscard]] const std::string& getNameProperty() const { return name_; }
         /** @brief Sets the name of this DTD. */
-        void setNameProperty(const std::string& name) { name_ = name; }
+        /** @brief Raises a **Name** pair (#2199), matching .NET (XDocumentType.cs:84-86). */
+        void setNameProperty(const std::string& name) {
+            const bool notify = NotifyChanging(this, XObjectChangeEventArgs::Name);
+            name_ = name;
+            if (notify) NotifyChanged(this, XObjectChangeEventArgs::Name);
+        }
 
         /** @return The public identifier, or "" if absent. */
         [[nodiscard]] const std::string& getPublicIdProperty() const { return publicId_; }
         /** @brief Sets the public identifier. */
-        void setPublicIdProperty(const std::string& publicId) { publicId_ = publicId; }
+        /** @brief Raises a **Value** pair (#2199), matching .NET (XDocumentType.cs:115-117). */
+        void setPublicIdProperty(const std::string& publicId) {
+            const bool notify = NotifyChanging(this, XObjectChangeEventArgs::Value);
+            publicId_ = publicId;
+            if (notify) NotifyChanged(this, XObjectChangeEventArgs::Value);
+        }
 
         /** @return The system identifier, or "" if absent. */
         [[nodiscard]] const std::string& getSystemIdProperty() const { return systemId_; }
         /** @brief Sets the system identifier. */
-        void setSystemIdProperty(const std::string& systemId) { systemId_ = systemId; }
+        /** @brief Raises a **Value** pair (#2199), matching .NET (XDocumentType.cs:132-134). */
+        void setSystemIdProperty(const std::string& systemId) {
+            const bool notify = NotifyChanging(this, XObjectChangeEventArgs::Value);
+            systemId_ = systemId;
+            if (notify) NotifyChanged(this, XObjectChangeEventArgs::Value);
+        }
 
         /** @return The internal subset, or "" if absent/not parsed (see class doc-comment). */
         [[nodiscard]] const std::string& getInternalSubsetProperty() const { return internalSubset_; }
         /** @brief Sets the internal subset. */
-        void setInternalSubsetProperty(const std::string& internalSubset) { internalSubset_ = internalSubset; }
+        /** @brief Raises a **Value** pair (#2199), matching .NET (XDocumentType.cs:66-68). */
+        void setInternalSubsetProperty(const std::string& internalSubset) {
+            const bool notify = NotifyChanging(this, XObjectChangeEventArgs::Value);
+            internalSubset_ = internalSubset;
+            if (notify) NotifyChanged(this, XObjectChangeEventArgs::Value);
+        }
 
         void WriteTo(System::Xml::XmlWriter& writer) const override;
         [[nodiscard]] SharpRuntime::intcs GetDeepHashCode() const override {

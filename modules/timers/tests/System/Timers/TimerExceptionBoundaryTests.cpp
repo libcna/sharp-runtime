@@ -220,14 +220,17 @@ TEST(TimerExceptionBoundaryTests, CloseAfterAFailedCallbackStillWorks) {
 // PINS — what this ticket deliberately did NOT change
 // ---------------------------------------------------------------------------
 
-TEST(TimerExceptionBoundaryPinTests, ElapsedStillReportsANullSender_SeeBlockedTicket2155) {
-    // SR-AUD-239. `EventHandler<T>::Raise` types its sender as `System::Object*`, and this type is
-    // not convertible to it, so nullptr is the only value that compiles. Giving Timer the
-    // System::Object base is an object-layout and vtable change (sizeof 104 -> 112,
-    // non-polymorphic -> polymorphic) held by the BLOCKED ticket #2155.
-    static_assert(!std::is_convertible_v<Timer*, System::Object*>,
-                  "#2155 landed without updating its pin");
-    static_assert(!std::is_polymorphic_v<Timer>, "#2155 landed without updating its pin");
+TEST(TimerExceptionBoundaryPinTests, Fix2155_ElapsedReportsTheRaisingTimerAsItsSender) {
+    // INVERTED BY #2155 (2026-08-19). Its predecessor asserted a nullptr sender and said in terms
+    // "#2155 landed without updating its pin" -- the approval was granted per action, so the pin
+    // now records what was bought.
+    //
+    // .NET passes the timer too: intervalElapsed(this, elapsedEventArgs) (Timer.cs:313). The port
+    // reported nullptr for a purely STRUCTURAL reason -- EventHandler<T>::Raise types its sender as
+    // System::Object* and Timer had no such base, so nullptr was the only value that compiled.
+    static_assert(std::is_convertible_v<Timer*, System::Object*>,
+                  "#2155: Timer now derives from System::Object");
+    static_assert(std::is_polymorphic_v<Timer>, "#2155: and is therefore polymorphic");
 
     FireLatch latch;
     System::Object* seen = reinterpret_cast<System::Object*>(1);
@@ -240,7 +243,40 @@ TEST(TimerExceptionBoundaryPinTests, ElapsedStillReportsANullSender_SeeBlockedTi
     timer.Start();
     ASSERT_TRUE(latch.waitFor(1));
     timer.Stop();
-    EXPECT_EQ(seen, nullptr);
+
+    // Not merely non-null -- it is THIS timer. A mutation passing some other Object* would satisfy
+    // a null check and fail this one.
+    EXPECT_EQ(seen, static_cast<System::Object*>(&timer));
+}
+
+TEST(TimerExceptionBoundaryPinTests, Fix2155_TheLayoutCostIsExactlyOneVptr) {
+    // The price the approval paid for, pinned so it cannot grow unnoticed: sizeof 104 -> 112 and a
+    // new vtable. Measured in build-probe before and after.
+    //
+    // Asserted as a RELATIONSHIP as well as a literal, so a platform with a different pointer width
+    // keeps the pin meaningful and a SECOND base (or a stored member) still breaks it.
+    static_assert(sizeof(Timer) == 112, "#2155: 104 + one vptr");
+    static_assert(sizeof(Timer) == 104 + sizeof(void*), "#2155: the growth is exactly one vptr");
+    static_assert(alignof(Timer) == 8);
+
+    // The vptr is the FIRST subobject: an Object* obtained from a Timer* points at the same
+    // address. Pinned because it is the half sizeof cannot express.
+    Timer timer(5);
+    EXPECT_EQ(reinterpret_cast<const char*>(static_cast<System::Object*>(&timer)),
+              reinterpret_cast<const char*>(&timer));
+
+    // And the base's pure virtual really is satisfied by this type rather than by a sibling.
+    EXPECT_EQ(timer.GetTypeName(), "System.Timers.Timer");
+}
+
+TEST(TimerExceptionBoundaryPinTests, Decl2155_TheDivergenceIsInTheBaseNotTheSender) {
+    // .NET's Timer derives from Component (Timer.cs:15), NOT from Object directly. This port has
+    // NO ComponentModel Component class at all, so the Object base is the only available route.
+    // Pinned as a DECLARATION so that a future Component, if one is ever added, is a deliberate
+    // re-basing rather than a silent one -- and so the divergence is recorded where it is, in the
+    // BASE, not in the observable sender, which now matches .NET exactly.
+    static_assert(std::is_base_of_v<System::Object, Timer>);
+    SUCCEED();
 }
 
 // The layer below -- System::Threading::Timer -- deliberately does NOT catch its own callback

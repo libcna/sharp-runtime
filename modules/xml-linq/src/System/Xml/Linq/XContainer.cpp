@@ -106,8 +106,13 @@ namespace System::Xml::Linq {
         auto it = std::find_if(children_.begin(), children_.end(),
                                 [n](const std::shared_ptr<XNode>& c) { return c.get() == n; });
         if (it == children_.end()) return;
+        // #2199: Changing before, Changed after, sender is the CHILD while the chain walked is
+        // THIS container's -- .NET's own asymmetry (XContainer.cs:404,416). Nothing is raised for
+        // a node that was not a child, because the early return above precedes this.
+        const bool notify = NotifyChanging(n, XObjectChangeEventArgs::Remove);
         AdoptObject(**it, nullptr);
         children_.erase(it);
+        if (notify) NotifyChanged(n, XObjectChangeEventArgs::Remove);
     }
 
     void XContainer::InsertNodeAt(size_t index, const std::shared_ptr<XNode>& n) {
@@ -123,21 +128,56 @@ namespace System::Xml::Linq {
         // node into its own subtree, which previously created a permanent shared_ptr reference
         // cycle (the container ends up holding, transitively, a shared_ptr back to itself) and
         // a stack overflow in any recursive traversal (Nodes()/ToString()/etc.).
-        for (XContainer* ancestorOrSelf = this; ancestorOrSelf; ancestorOrSelf = ancestorOrSelf->parent_) {
-            if (ancestorOrSelf == n.get()) {
-                throw System::InvalidOperationException("Cannot add a node as a child of itself or of one of its own descendants.");
+        // #1896: this walk used to run UNCONDITIONALLY, which is O(depth) per insert and therefore
+        // O(depth^2) to build a deep tree top-down -- measured at 120.0s for 100,000 levels against
+        // 4.7s for 20,000 (build-probe/1896_probe1_before.log).
+        //
+        // IT IS UNCHANGED IN WHAT IT REJECTS; IT IS ONLY REACHED WHEN IT CAN REJECT. The guard asks
+        // "is `n` an ancestor-or-self of `this`?", and two facts answer that in O(1) whenever the
+        // answer is no:
+        //
+        //   * a node that is not an XContainer has no children and cannot be anybody's ancestor;
+        //   * a container with NO children cannot contain `this` either -- unless it IS `this`,
+        //     which is checked directly.
+        //
+        // A CHILDLESS CONTAINER STILL NEEDS THE SELF-CHECK, and that is the trap: `n == this` is a
+        // cycle even when `this` is empty, so the equality test must sit OUTSIDE the emptiness
+        // guard. Dropping it is a mutation the tests catch.
+        //
+        // This is why the approved object-layout growth was NOT taken: no cached root, no cached
+        // depth, no new member. Every sizeof is unchanged by this ticket.
+        if (n.get() == this) {
+            throw System::InvalidOperationException("Cannot add a node as a child of itself or of one of its own descendants.");
+        }
+        if (auto* candidate = dynamic_cast<XContainer*>(n.get()); candidate != nullptr && !candidate->children_.empty()) {
+            for (XContainer* ancestorOrSelf = this; ancestorOrSelf; ancestorOrSelf = ancestorOrSelf->parent_) {
+                if (ancestorOrSelf == n.get()) {
+                    throw System::InvalidOperationException("Cannot add a node as a child of itself or of one of its own descendants.");
+                }
             }
         }
         if (n->parent_ != nullptr) {
             n->parent_->RemoveNode(n.get());
         }
         index = std::min(index, children_.size());
+        // #2199: Changing before the insertion, Changed after, guarded on `notify` -- .NET's
+        // InsertNode does exactly this (XLinq.cs:156,177), with the added node as sender and this
+        // container's chain walked.
+        //
+        // PLACEMENT IS DELIBERATE AND DIVERGES BY A HAIR. .NET raises Changing before its own
+        // `n.parent != null` throw, so it can notify for a change that then fails. This port's
+        // guards are different -- ValidateNode and the self-insertion check above, both of which
+        // REFUSE the operation -- and notifying for a change that is then refused would be worse
+        // than not notifying at all. So the pair sits after validation and around the mutation.
+        // The detach of `n` from a previous parent above raises its own Remove pair, as it should.
+        const bool notify = NotifyChanging(n.get(), XObjectChangeEventArgs::Add);
         // Adopt only once the insertion has actually happened. The reverse order left `n`
         // reporting this container as its parent while the container did not hold it, if the
         // vector growth threw -- a node claiming an owner that has never heard of it, whose
         // own Remove() would then silently do nothing (ticket #1891).
         children_.insert(children_.begin() + static_cast<std::ptrdiff_t>(index), n);
         AdoptObject(*n, this);
+        if (notify) NotifyChanged(n.get(), XObjectChangeEventArgs::Add);
     }
 
     void XContainer::Add(std::shared_ptr<XNode> node) {
@@ -232,10 +272,19 @@ namespace System::Xml::Linq {
     }
 
     void XContainer::RemoveNodes() {
-        for (const auto& child : children_) {
+        // #2199: one Remove pair PER CHILD, as .NET does -- its RemoveNodes loops and notifies for
+        // each node individually (XContainer.cs:400-416), so a handler counting removals sees the
+        // child count rather than one bulk event.
+        //
+        // The children are detached one at a time and each is detached BETWEEN its own Changing
+        // and Changed, so a handler observing during the walk sees exactly the state .NET's would.
+        while (!children_.empty()) {
+            const std::shared_ptr<XNode> child = children_.front();
+            const bool notify = NotifyChanging(child.get(), XObjectChangeEventArgs::Remove);
             AdoptObject(*child, nullptr);
+            children_.erase(children_.begin());
+            if (notify) NotifyChanged(child.get(), XObjectChangeEventArgs::Remove);
         }
-        children_.clear();
     }
 
 } // namespace System::Xml::Linq

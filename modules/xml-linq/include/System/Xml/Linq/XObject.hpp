@@ -2,7 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <memory>
+#include <utility>
+#include <vector>
 #include "System/Xml/Linq/XObjectChangeEventArgs.hpp"
 #include "System/Xml/XmlNodeType.hpp"
 
@@ -19,6 +24,43 @@ namespace System::Xml::Linq {
      */
     using XObjectChangeEventHandler = std::function<void(void* sender, const XObjectChangeEventArgs& e)>;
 
+
+    /**
+     * @brief An opaque handle to one `Changed`/`Changing` registration.
+     *
+     * **This type has no .NET counterpart and its existence is the one deliberate divergence in
+     * ticket #2199.** .NET removes a registration by passing the *delegate* back
+     * (`obj.Changed -= handler`), which works because a C# delegate is equality-comparable.
+     * `XObjectChangeEventHandler` is a `std::function`, and `std::function` has **no `operator==`
+     * against another `std::function`** — proved at compile time, not assumed — so a
+     * handler-taking `remove_*` cannot identify which registration a caller means.
+     *
+     * Two alternatives were offered and declined on 2026-08-19
+     * (`docs/StandingApprovals.md` SA-13): keeping .NET's signature and removing **all**
+     * registrations, which silently drops a third party's subscription; and keeping it and
+     * **throwing** from `remove_*`, which leaves a subscriber unable ever to unsubscribe. The
+     * token was chosen so the divergence is visible **in the type** rather than hidden in the
+     * behaviour.
+     *
+     * Ids are drawn from a process-wide counter, so a token issued by one `XObject` can never
+     * accidentally match a registration on another; passing a foreign or default-constructed token
+     * to `remove_*` simply removes nothing and returns `false`.
+     */
+    class XObjectChangeRegistration {
+        friend class XObject;
+        std::uint64_t id_ = 0;
+        explicit XObjectChangeRegistration(std::uint64_t id) noexcept : id_(id) {}
+
+    public:
+        /** @brief Constructs a token that names no registration. */
+        XObjectChangeRegistration() = default;
+
+        /** @return true if this token names no registration. */
+        [[nodiscard]] bool IsEmpty() const noexcept { return id_ == 0; }
+
+        [[nodiscard]] bool operator==(const XObjectChangeRegistration&) const noexcept = default;
+    };
+
     /**
      * @brief Represents a node or an attribute in an XML tree. Abstract base of the whole
      * System.Xml.Linq node hierarchy (XNode, XContainer, XElement, XDocument, ...) and of XAttribute.
@@ -32,19 +74,93 @@ namespace System::Xml::Linq {
      *   code realistically never depends on it.
      * - BaseUri / IXmlLineInfo (HasLineInfo/LineNumber/LinePosition) — depend on the annotation
      *   system above; LoadOptions::SetBaseUri/SetLineInfo already document that they're no-ops.
-     * - Changed/Changing events — the four accessors below take a handler and **discard** it,
-     *   and no mutation anywhere in the hierarchy raises anything. See their doc-comments for
-     *   the two measured blockers that keep it that way; the contract is pinned by
-     *   `XLinqChangeNotificationTests.cpp` so a half-implementation cannot land silently
-     *   (ticket #2198, SR-AUD-336). Implementation is ticket **#2199**, blocked on two
-     *   approvals recorded in `docs/SystemXmlLinqNamespaceReviewPlan.md` §12.3.
+     *
+     * @note **Changed/Changing events ARE implemented** as of ticket **#2199** (SR-AUD-336,
+     * 2026-08-19). They were inert -- the four accessors took a handler and discarded it, and no
+     * mutation raised anything. Both of #2199's gates were opened on the same day: the layout
+     * growth `sizeof(XObject)` 16 -> 24 (and every derived node type with it), and the removal
+     * design, which is a **registration token** rather than .NET's handler-taking `remove_*`. See
+     * `XObjectChangeRegistration` and `docs/Migration-XObjectChangeNotification.md`.
      */
     class XObject {
         friend class XContainer;
 
+        /**
+         * Per-object `Changed`/`Changing` registrations. Held behind a `unique_ptr` and allocated
+         * only on first registration, so an unobserved tree pays one null pointer and no
+         * allocation -- the closest analogue of .NET's annotation slot, which is likewise absent
+         * until something is annotated.
+         */
+        struct ChangeRegistrations {
+            std::vector<std::pair<std::uint64_t, XObjectChangeEventHandler>> changed;
+            std::vector<std::pair<std::uint64_t, XObjectChangeEventHandler>> changing;
+
+            [[nodiscard]] bool empty() const noexcept {
+                return changed.empty() && changing.empty();
+            }
+
+            /** Keeps the process-wide live count honest when an observed object is destroyed. */
+            ~ChangeRegistrations();
+        };
+        std::unique_ptr<ChangeRegistrations> changeRegistrations_;
+
+        /** Process-wide, so a token from one object can never match a registration on another. */
+        static std::uint64_t nextRegistrationId() noexcept;
+
+        /**
+         * @return true if ANY `XObject` in this process currently carries a registration.
+         *
+         * #1896's second half. The ancestor walk is O(depth) per mutation, so building a deep tree
+         * is O(depth^2) even when NOTHING is subscribed -- and .NET has exactly the same shape
+         * (`XObject.cs:424-427` skips annotation-less ancestors cheaply but still visits every
+         * one). Measured here: 100,000 levels cost 89.3s with the walk and 0.03s without.
+         *
+         * A single process-wide count makes the unobserved case O(1) and is EXACT rather than
+         * approximate: if no registration exists anywhere, no walk can find one, so `notify` is
+         * false and no handler is skipped. When registrations do exist the walk runs in full, so
+         * behaviour is identical to .NET's; only the nobody-is-listening case is faster.
+         */
+        static bool anyRegistrationsExist() noexcept;
+
+        static void noteRegistrationAdded() noexcept;
+        static void noteRegistrationsRemoved(std::size_t count) noexcept;
+
+        static bool eraseRegistration(
+            std::vector<std::pair<std::uint64_t, XObjectChangeEventHandler>>& list,
+            const XObjectChangeRegistration& registration) noexcept;
+
+        /** Shared body of NotifyChanging/NotifyChanged -- .NET's two are identical but for the
+         *  delegate they invoke (XObject.cs:418-460). */
+        bool walkAndNotify(void* sender, const XObjectChangeEventArgs& e, bool changingHalf);
+
     protected:
         /** Nearest containing XContainer (XElement or XDocument), or nullptr if this object is detached/root. Non-owning. */
         XContainer* parent_ = nullptr;
+
+        /**
+         * @brief Raises `Changing` on this object and every ancestor, innermost first.
+         *
+         * C++ counterpart of .NET `XObject.NotifyChanging` (`XObject.cs:440-460`). @p sender is
+         * the object being changed, which is not necessarily `this` -- for `Add` and `Remove`
+         * .NET raises on the *parent* with the *child* as sender.
+         *
+         * @return true if **any** object on the chain carries registrations at all. This is .NET's
+         * own return value and it is deliberately *not* "a changing handler ran": the reference
+         * tests `Annotation<XObjectChangeAnnotation>() != null` and only then invokes
+         * `a.changing?.Invoke(...)`, so a caller who subscribed to `Changed` **alone** still makes
+         * this return true -- and therefore still receives `Changed`. Getting that wrong silently
+         * disables `Changed`-only subscriptions.
+         */
+        bool NotifyChanging(void* sender, const XObjectChangeEventArgs& e);
+
+        /**
+         * @brief Raises `Changed` on this object and every ancestor, innermost first.
+         *
+         * C++ counterpart of .NET `XObject.NotifyChanged` (`XObject.cs:418-438`). Every .NET call
+         * site guards this on the value `NotifyChanging` returned -- `if (notify) NotifyChanged(...)`
+         * -- and this port does the same.
+         */
+        bool NotifyChanged(void* sender, const XObjectChangeEventArgs& e);
 
     public:
         XObject() = default;
@@ -73,46 +189,59 @@ namespace System::Xml::Linq {
         [[nodiscard]] XDocument* getDocumentProperty() const;
 
         /**
-         * @brief **Inert.** Accepts @p handler and discards it; no mutation ever invokes it.
+         * @brief Registers @p handler to be called **after** a change to this object or any
+         * descendant.
          *
-         * C++ counterpart of .NET XObject.Changed's add accessor, provided so ported code
-         * compiles. Measured across nine mutation doors — `setValueProperty`,
-         * `setNameProperty`, `Add(node)`, `Add(attribute)`, `RemoveAll`, and a handler on an
-         * ancestor observing a descendant — every one delivers **zero** notifications
-         * (`build-probe/2195_probe1_surface.log`, block `E*`).
+         * C++ counterpart of .NET `XObject.Changed`'s add accessor. Implemented by ticket **#2199**
+         * (SR-AUD-336), landed 2026-08-19; before it, this member accepted a handler and
+         * **discarded** it and no mutation anywhere in the hierarchy raised anything.
          *
-         * @note **Two measured blockers keep it inert, and both need a decision this port
-         * cannot take on its own** (ticket #2199; `docs/SystemXmlLinqNamespaceReviewPlan.md`
-         * §12.3):
-         * 1. **There is nowhere to put a handler.** .NET stores these registrations in
-         *    `XObject`'s annotation slot, and annotations are documented out of scope above.
-         *    Adding a handler field grows `sizeof(XObject)` from 16 to 24 — measured; there is
-         *    no padding — and every derived node type with it. That exact growth was declined
-         *    for a different purpose on 2026-07-31 (ticket #1896), so it has to be asked again.
-         * 2. **A registration cannot be named for removal.** See @c remove_Changed.
+         * @return A token naming this registration. **This return value is the divergence from
+         * .NET** — see @c XObjectChangeRegistration for why a handler cannot name itself in C++.
          *
-         * The inert contract is pinned by `XLinqChangeNotificationTests.cpp`, which fails the
-         * moment notification is partially implemented — the previous coverage asserted only
-         * that registration does not throw, which *preserved* the behaviour instead of
-         * describing it.
+         * @note **Notifications bubble.** A handler registered on an ancestor sees changes to every
+         * descendant, innermost object first, matching .NET's walk up the parent chain
+         * (`XObject.cs:418-438`). The `sender` a handler receives is the object being **changed**,
+         * which for `Add` and `Remove` is the *child*, while the object whose chain is walked is
+         * the *parent* — .NET's own asymmetry (`XLinq.cs:156,177`), transcribed.
+         *
+         * @note An **empty** `std::function` may be registered and is simply never invoked. It
+         * still counts as a registration, so it still makes this object a notification point for
+         * its descendants — which is .NET's behaviour, where the annotation exists whether or not
+         * either delegate is null.
+         *
+         * @note Handlers are invoked from a **snapshot**, so a handler may register or unregister
+         * during a notification without invalidating the walk; the change takes effect on the next
+         * notification.
          */
-        void add_Changed(const XObjectChangeEventHandler& /*handler*/) {}
+        [[nodiscard]] XObjectChangeRegistration add_Changed(const XObjectChangeEventHandler& handler);
+
         /**
-         * @brief **Inert.** Accepts @p handler and discards it.
+         * @brief Removes the `Changed` registration named by @p registration.
          *
-         * @note This member is the harder half of SR-AUD-336, and it is not implementable at
-         * *any* layout cost as declared. `XObjectChangeEventHandler` is a bare `std::function`
-         * alias, and `std::function` has no `operator==` against another `std::function`, so
-         * there is no way to identify which registration a caller means. Proved at compile
-         * time in `build-probe/2195_probe3_events.cpp` rather than asserted. Resolving it needs
-         * either a public shape change (registration returns a token that removal consumes) or
-         * a documented deviation from .NET's delegate semantics — approval XL-2 on #2199.
+         * @return true if a registration was removed; false if the token names none — including a
+         * default-constructed token and one issued by a **different** `XObject`, since ids are
+         * process-wide.
+         *
+         * @note **This signature diverges from .NET deliberately**, which removes by passing the
+         * delegate back. `XObjectChangeEventHandler` is a `std::function` and has no `operator==`,
+         * so no handler-taking overload can identify a registration. The two alternatives —
+         * removing *all* registrations, or throwing — were offered and declined on 2026-08-19.
          */
-        void remove_Changed(const XObjectChangeEventHandler& /*handler*/) {}
-        /** @brief **Inert.** Accepts a handler and discards it — see @c add_Changed. */
-        void add_Changing(const XObjectChangeEventHandler& /*handler*/) {}
-        /** @brief **Inert.** Accepts a handler and discards it — see @c remove_Changed. */
-        void remove_Changing(const XObjectChangeEventHandler& /*handler*/) {}
+        bool remove_Changed(const XObjectChangeRegistration& registration) noexcept;
+
+        /**
+         * @brief Registers @p handler to be called **before** a change to this object or any
+         * descendant. See @c add_Changed for the bubbling, sender and snapshot rules.
+         * @return A token naming this registration.
+         */
+        [[nodiscard]] XObjectChangeRegistration add_Changing(const XObjectChangeEventHandler& handler);
+
+        /**
+         * @brief Removes the `Changing` registration named by @p registration.
+         * @return true if a registration was removed. See @c remove_Changed.
+         */
+        bool remove_Changing(const XObjectChangeRegistration& registration) noexcept;
     };
 
 } // namespace System::Xml::Linq

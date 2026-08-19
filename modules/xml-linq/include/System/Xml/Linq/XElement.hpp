@@ -84,8 +84,17 @@ namespace System::Xml::Linq {
 
         /** @return The qualified name of the element. */
         [[nodiscard]] const XName& getNameProperty() const { return name_; }
-        /** @brief Sets the qualified name of the element. */
-        void setNameProperty(const XName& name) { name_ = name; }
+        /**
+         * @brief Sets the qualified name of the element.
+         *
+         * Raises a **Name** change pair on this element and every ancestor (#2199), matching
+         * .NET's `XElement.Name` setter (`XElement.cs:276-278`).
+         */
+        void setNameProperty(const XName& name) {
+            const bool notify = NotifyChanging(this, XObjectChangeEventArgs::Name);
+            name_ = name;
+            if (notify) NotifyChanged(this, XObjectChangeEventArgs::Name);
+        }
 
         /**
          * @return The text contents of this element. If there is text content interspersed with

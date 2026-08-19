@@ -65,8 +65,12 @@ namespace System::Xml::Linq {
     }
 
     void XAttribute::setValueProperty(const std::string& v) {
+        // Validation FIRST, so a refused value raises nothing. #2199 then raises a Value pair on
+        // this attribute and every ancestor, matching .NET (XAttribute.cs:168-170).
         ValidateAttribute(name_, v);
+        const bool notify = NotifyChanging(this, XObjectChangeEventArgs::Value);
         value_ = v;
+        if (notify) NotifyChanged(this, XObjectChangeEventArgs::Value);
     }
 
     bool XAttribute::getIsNamespaceDeclarationProperty() const {
