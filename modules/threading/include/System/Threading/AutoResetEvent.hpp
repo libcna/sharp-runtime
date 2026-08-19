@@ -3,9 +3,11 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <mutex>
+#include <atomic>
 #include <condition_variable>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/Threading/WaitHandle.hpp"
 
 namespace System::Threading {
@@ -23,24 +25,43 @@ namespace System::Threading {
         std::mutex              mutex_;
         std::condition_variable cv_;
         bool                    signaled_;
+        // Ticket #1956 / cause T-G (SR-AUD-208). Close() was an EMPTY BODY, so a closed handle
+        // stayed fully usable: measured, Close() followed by WaitOne(0) returned success. .NET's
+        // WaitHandle.Close() is `=> Dispose()`, Dispose(bool) is `_waitHandle?.Close()`, and every
+        // wait path then opens with `ObjectDisposedException.ThrowIf(waitHandle is null, this)`
+        // (WaitHandle.cs:87-98, 118). The header here already CLAIMED Close "closes the handle",
+        // so the documentation and the behaviour disagreed.
+        //
+        // std::atomic<bool> is 1 byte and 1-byte aligned, and it lands in padding these types
+        // already had -- the sizes are unchanged, pinned by a layout test. Landed under SA-5 (a
+        // call that succeeds today starts throwing) with SA-3's layout condition discharged.
+        std::atomic<bool> closed_{false};
+
+        void ThrowIfClosed() const {
+            if (closed_.load(std::memory_order_acquire))
+                throw System::ObjectDisposedException("The handle has been closed.");
+        }
     public:
         /** @param initialState If true, the event starts in the signaled state. */
         explicit AutoResetEvent(bool initialState = false) : signaled_(initialState) {}
 
         /** Sets the event to signaled, releasing one waiting thread; the event then resets automatically. */
         void Set() {
+            ThrowIfClosed();
             { std::lock_guard<std::mutex> lk(mutex_); signaled_ = true; }
             cv_.notify_one();
         }
 
         /** Resets the event to non-signaled. */
         void Reset() {
+            ThrowIfClosed();
             std::lock_guard<std::mutex> lk(mutex_);
             signaled_ = false;
         }
 
         /** Blocks until the event is signaled (then auto-resets). */
         void WaitOne() {
+            ThrowIfClosed();
             std::unique_lock<std::mutex> lk(mutex_);
             cv_.wait(lk, [this]{ return signaled_; });
             signaled_ = false;
@@ -59,6 +80,7 @@ namespace System::Threading {
          * semantics returns almost immediately instead of throwing.
          */
         bool WaitOne(intcs milliseconds) {
+            ThrowIfClosed();
             WaitHandle::ValidateTimeout(milliseconds);
             std::unique_lock<std::mutex> lk(mutex_);
             // -1 (Timeout.Infinite) waits indefinitely; std::chrono's wait_for treats a
@@ -74,8 +96,13 @@ namespace System::Threading {
             return ok;
         }
 
-        /** Releases resources (no-op; provided for .NET API compatibility). */
-        void Close() {}
+        /**
+         * @brief Closes the handle. Every later Set, Reset or WaitOne throws
+         *        System::ObjectDisposedException.
+         *
+         * Idempotent, as .NET's is: Close() is `=> Dispose()` and disposing twice is defined.
+         */
+        void Close() { closed_.store(true, std::memory_order_release); }
     };
 
 } // namespace System::Threading

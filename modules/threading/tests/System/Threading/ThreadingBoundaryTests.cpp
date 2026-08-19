@@ -33,6 +33,7 @@
 #include "System/Exception.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/NullReferenceException.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/OperationCanceledException.hpp"
 #include "System/Threading/Barrier.hpp"
 #include "System/Threading/CancellationToken.hpp"
@@ -40,15 +41,20 @@
 #include "System/Threading/CancellationTokenSource.hpp"
 #include "System/Threading/EventWaitHandle.hpp"
 #include "System/Threading/LazyInitializer.hpp"
+#include "System/Threading/AutoResetEvent.hpp"
+#include "System/Threading/ManualResetEvent.hpp"
+#include "System/Threading/Mutex.hpp"
 #include "System/Threading/PeriodicTimer.hpp"
 #include "System/Threading/ReaderWriterLockSlim.hpp"
 #include "System/Threading/Semaphore.hpp"
+#include "System/Threading/SynchronizationLockException.hpp"
 #include "System/Threading/SpinWait.hpp"
 #include "System/Threading/SynchronizationContext.hpp"
 #include "System/Threading/Thread.hpp"
 #include "System/Threading/ThreadPool.hpp"
 #include "System/Threading/ThreadLocal.hpp"
 #include "System/Threading/Timer.hpp"
+#include "System/TimeProvider.hpp"
 #include "System/TimeSpan.hpp"
 
 using namespace System::Threading;
@@ -1135,4 +1141,154 @@ TEST(ReaderWriterWriterPreferenceTests, Fix1957_AnUpgraderWaitingForWriteAlsoBlo
     lock.ExitReadLock();
     upgrader.join();
     EXPECT_TRUE(upgraded.load());
+}
+
+// =============================================================================================
+// Ticket #1956 (cause T-G) — disposal is a real state across System::Threading.
+//
+// Four findings, ONE guard idiom, and one member deliberately EXCLUDED from it.
+//
+//   SR-AUD-208  Mutex/AutoResetEvent/ManualResetEvent::Close() were EMPTY BODIES, so a closed
+//               handle stayed fully usable -- Close() then WaitOne(0) returned success. The
+//               headers already CLAIMED Close "closes the handle", so documentation and
+//               behaviour disagreed.
+//   SR-AUD-219  ThreadLocal::IsValueCreated was the one accessor on the type that did not check,
+//               so a disposed instance answered `false` -- indistinguishable from "alive, no
+//               value yet".
+//   SR-AUD-203  ReaderWriterLockSlim::Dispose() succeeded with a lock held.
+//   (T-G/timer)  ITimer::Change returned true unconditionally, so a disposed timer reported it
+//               had been rescheduled.
+//
+// .NET: WaitHandle.Close() is `=> Dispose()` and every wait path then throws
+// ObjectDisposedException (WaitHandle.cs:87-98, 118); ThreadLocal<T>.IsValueCreated opens with
+// ObjectDisposedException.ThrowIf (ThreadLocal.cs:478-488); ReaderWriterLockSlim.Dispose throws
+// SynchronizationLockException (ReaderWriterLockSlim.cs:1250-1258).
+//
+// BUT ITimer::Change must NOT throw: .NET's Timer.Change opens `if (_canceled) { return false; }`
+// (Timer.cs:539-542). A false RETURN is the documented contract, and making it throw for
+// symmetry would contradict the interface. The design record excluded it and the reference
+// confirms the exclusion -- that asymmetry is pinned below rather than left to look like an
+// oversight.
+//
+// Landed under SA-5 (the approval question was "may a previously-succeeding call start
+// throwing?", which SA-5 grants verbatim), with SA-3's layout condition discharged: all three
+// wait-handle sizes are UNCHANGED, the flags landing in padding they already had.
+// =============================================================================================
+
+TEST(DisposalIsARealStateTests, Decl1956_TheClosedFlagsAreLayoutNeutral) {
+    static_assert(sizeof(System::Threading::Mutex) == 64, "#1956 must not grow Mutex");
+    static_assert(sizeof(System::Threading::AutoResetEvent) == 96, "#1956 must not grow AutoResetEvent");
+    static_assert(sizeof(System::Threading::ManualResetEvent) == 96, "#1956 must not grow ManualResetEvent");
+    EXPECT_EQ(sizeof(System::Threading::Mutex), 64u);
+    EXPECT_EQ(sizeof(System::Threading::AutoResetEvent), 96u);
+    EXPECT_EQ(sizeof(System::Threading::ManualResetEvent), 96u);
+}
+
+TEST(DisposalIsARealStateTests, Fix1956_AClosedAutoResetEventRefusesEveryOperation) {
+    System::Threading::AutoResetEvent e(false);
+    e.Close();
+    EXPECT_THROW(e.Set(), System::ObjectDisposedException);
+    EXPECT_THROW(e.Reset(), System::ObjectDisposedException);
+    EXPECT_THROW(e.WaitOne(), System::ObjectDisposedException);
+    EXPECT_THROW((void)e.WaitOne(0), System::ObjectDisposedException);
+    EXPECT_NO_THROW(e.Close()) << "Close stays idempotent, as .NET's Dispose is";
+}
+
+TEST(DisposalIsARealStateTests, Fix1956_AClosedManualResetEventRefusesEveryOperation) {
+    System::Threading::ManualResetEvent e(false);
+    e.Close();
+    EXPECT_THROW(e.Set(), System::ObjectDisposedException);
+    EXPECT_THROW(e.Reset(), System::ObjectDisposedException);
+    EXPECT_THROW(e.WaitOne(), System::ObjectDisposedException);
+    EXPECT_THROW((void)e.WaitOne(0), System::ObjectDisposedException);
+    EXPECT_NO_THROW(e.Close());
+}
+
+TEST(DisposalIsARealStateTests, Fix1956_AClosedMutexRefusesEveryOperation) {
+    // THE MEASURED DEFECT: before the repair, Close() then WaitOne(0) returned TRUE.
+    System::Threading::Mutex m(false);
+    m.Close();
+    EXPECT_THROW((void)m.WaitOne(), System::ObjectDisposedException);
+    EXPECT_THROW((void)m.WaitOne(0), System::ObjectDisposedException);
+    EXPECT_THROW(m.ReleaseMutex(), System::ObjectDisposedException);
+    EXPECT_NO_THROW(m.Close());
+}
+
+TEST(DisposalIsARealStateTests, Fix1956_MutexCloseReachesTheOverriddenDispose) {
+    // Mutex overrides Dispose() rather than shadowing Close(), so the inherited
+    // WaitHandle::Close() -- which is `{ Dispose(); }` -- reaches it. That is .NET's own
+    // arrangement (`public virtual void Close() => Dispose();`). Both spellings must work, and
+    // through a base reference too.
+    {
+        System::Threading::Mutex m(false);
+        m.Dispose();
+        EXPECT_THROW((void)m.WaitOne(0), System::ObjectDisposedException);
+    }
+    {
+        System::Threading::Mutex m(false);
+        System::Threading::WaitHandle& base = m;
+        base.Close();
+        EXPECT_THROW((void)m.WaitOne(0), System::ObjectDisposedException);
+    }
+}
+
+TEST(DisposalIsARealStateTests, Fix1956_ADisposedThreadLocalRefusesIsValueCreated) {
+    // It used to answer `false`, which a caller cannot tell from "alive, and no value yet".
+    System::Threading::ThreadLocal<int> local(std::function<int()>([] { return 7; }));
+    EXPECT_FALSE(local.getIsValueCreatedProperty());
+    EXPECT_EQ(local.getValueProperty(), 7);
+    EXPECT_TRUE(local.getIsValueCreatedProperty());
+    local.Dispose();
+    EXPECT_THROW((void)local.getIsValueCreatedProperty(), System::ObjectDisposedException);
+}
+
+TEST(DisposalIsARealStateTests, Fix1956_DisposingAHeldReaderWriterLockThrows) {
+    {
+        System::Threading::ReaderWriterLockSlim lock;
+        lock.EnterReadLock();
+        EXPECT_THROW(lock.Dispose(), System::Threading::SynchronizationLockException);
+        lock.ExitReadLock();
+        EXPECT_NO_THROW(lock.Dispose()) << "released, so disposal is now allowed";
+    }
+    {
+        System::Threading::ReaderWriterLockSlim lock;
+        lock.EnterWriteLock();
+        EXPECT_THROW(lock.Dispose(), System::Threading::SynchronizationLockException);
+        lock.ExitWriteLock();
+        EXPECT_NO_THROW(lock.Dispose());
+    }
+    {
+        System::Threading::ReaderWriterLockSlim lock;
+        lock.EnterUpgradeableReadLock();
+        EXPECT_THROW(lock.Dispose(), System::Threading::SynchronizationLockException);
+        lock.ExitUpgradeableReadLock();
+        EXPECT_NO_THROW(lock.Dispose());
+    }
+}
+
+TEST(DisposalIsARealStateTests, Fix1956_AnUnheldReaderWriterLockDisposesQuietly) {
+    System::Threading::ReaderWriterLockSlim lock;
+    EXPECT_NO_THROW(lock.Dispose());
+    EXPECT_NO_THROW(lock.Dispose()) << "disposal stays idempotent";
+}
+
+TEST(DisposalIsARealStateTests, Decl1956_ITimerChangeReturnsFalseAndDoesNotThrow) {
+    // THE DELIBERATE EXCLUSION, pinned so a later "consistency" pass cannot quietly make it
+    // throw. .NET: `if (_canceled) { return false; }` (Timer.cs:539-542).
+    std::atomic<int> fired{0};
+    auto timer = System::TimeProvider::getSystemProperty().CreateTimer(
+        [&](void*) { ++fired; }, nullptr,
+        System::TimeSpan::FromMilliseconds(10000), System::TimeSpan::FromMilliseconds(10000));
+    ASSERT_NE(timer, nullptr);
+
+    EXPECT_TRUE(timer->Change(System::TimeSpan::FromMilliseconds(5000),
+                              System::TimeSpan::FromMilliseconds(5000)))
+        << "a live timer reschedules";
+
+    timer->Dispose();
+    bool result = true;
+    EXPECT_NO_THROW(result = timer->Change(System::TimeSpan::FromMilliseconds(1),
+                                           System::TimeSpan::FromMilliseconds(1)))
+        << "ITimer::Change must NOT throw -- that is the one member excluded from this group";
+    EXPECT_FALSE(result) << "a disposed timer reports false, it does not claim success";
 }

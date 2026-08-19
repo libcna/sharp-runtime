@@ -399,7 +399,39 @@ namespace System::Threading {
          * still owns a mode, where .NET throws SynchronizationLockException -- is cause T-G
          * and belongs to approval-gated ticket #1956; it is deliberately not changed here.
          */
-        void Dispose() override { disposed_.store(true, std::memory_order_release); }
+        /**
+         * @brief Disposes the lock.
+         * @throws System::Threading::SynchronizationLockException if the calling thread still
+         *         holds the read, write or upgradeable-read mode.
+         *
+         * Ticket #1956 / cause T-G (SR-AUD-203, dispose-while-held half). This used to set the
+         * flag unconditionally, so disposing with a lock held succeeded and left the holder
+         * owning a mode on a disposed object. .NET refuses
+         * (`ReaderWriterLockSlim.cs:1250-1258`).
+         *
+         * @note **.NET performs TWO checks here and this port performs one**, which is stated
+         * rather than glossed. The reference tests, in this order:
+         * @code
+         * if (WaitingReadCount > 0 || WaitingUpgradeCount > 0 || WaitingWriteCount > 0) throw ...;
+         * if (IsReadLockHeld || IsUpgradeableReadLockHeld || IsWriteLockHeld)          throw ...;
+         * @endcode
+         * The second is implemented here. The first needs per-mode WAITER counts, of which this
+         * port has only `waitingWriters_` (added by SR-AUD-204); counting waiting readers and
+         * upgraders is additional state on three more paths and is ticket **#2389**. The
+         * narrowing is therefore a strict subset of .NET's -- this port never refuses a disposal
+         * .NET would accept.
+         */
+        void Dispose() override {
+            auto& map = threadCounts();
+            auto it = map.find(id_);
+            if (it != map.end() &&
+                (it->second.reader > 0 || it->second.writer > 0 || it->second.upgrade > 0)) {
+                throw System::Threading::SynchronizationLockException(
+                    "The lock is being disposed while still being used. It either is being held "
+                    "by a thread and/or has active waiters waiting to acquire the lock.");
+            }
+            disposed_.store(true, std::memory_order_release);
+        }
 
         /** Returns whether the current thread holds a read lock. */
         [[nodiscard]] bool getIsReadLockHeldProperty() const {

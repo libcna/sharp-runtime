@@ -118,8 +118,18 @@ namespace System::Threading {
         /** Releases this instance's slot in the current thread's storage on destruction. */
         ~ThreadLocal() override { storageMap().erase(id_); }
 
-        /** Returns true if the value has been initialised for the current thread. */
+        /**
+         * @brief Returns true if the value has been initialised for the current thread.
+         * @throws System::ObjectDisposedException if this instance has been disposed.
+         *
+         * Ticket #1956 / cause T-G (SR-AUD-219). This was the ONE accessor on the type that did
+         * not check, so a disposed ThreadLocal answered `false` -- indistinguishable from "alive,
+         * and no value yet". .NET checks here too: `ObjectDisposedException.ThrowIf(id < 0, this)`
+         * opens `ThreadLocal<T>.IsValueCreated` (ThreadLocal.cs:478-488), the same guard its
+         * `Value` getter uses.
+         */
         [[nodiscard]] bool getIsValueCreatedProperty() const {
+            ThrowIfDisposed();
             return storageMap().find(id_) != storageMap().end();
         }
 
