@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <vector>
+#include <algorithm>
 #include "System/ArgumentException.hpp"
 #include "System/Runtime/InteropServices/Architecture.hpp"
 #include "System/Runtime/InteropServices/OSPlatform.hpp"
@@ -68,4 +70,52 @@ TEST(RuntimeInformationTests, ProcessArchitecture_MatchesOSArchitecture) {
 // ProcessArchitecture happens to return" (which would pass vacuously if both were wrong the same way).
 TEST(RuntimeInformationTests, OSArchitecture_IsX64OnThisSandbox) {
     EXPECT_EQ(RuntimeInformation::getOSArchitectureProperty(), Architecture::X64);
+}
+
+// ===========================================================================
+// #1983 -- OSArchitecture reports the OS, and an unknown target is a build error.
+//
+// The ticket was blocked on "three independent absences, ALL of which must be
+// resolved before any code is written". Two of the three are gone: a MinGW-w64
+// cross-compiler is present (x86_64-w64-mingw32-g++) and /rv/tmp/runtime is
+// present. The third -- a mixed-bitness Windows host on which to OBSERVE the
+// difference -- remains, and it gates runtime observation rather than
+// implementation. That is exactly the position #2378 was in, and this ticket
+// takes its evidence pattern: cross-compile the Windows arm and prove by symbol
+// inspection that it is confined, then state the runtime limit.
+// ===========================================================================
+
+TEST(RuntimeInformationTests, Fix1983_OSArchitectureIsAValidEnumeratorAndAgreesHere) {
+    const Architecture os = RuntimeInformation::getOSArchitectureProperty();
+    const Architecture process = RuntimeInformation::getProcessArchitectureProperty();
+
+    // Every value must be one this port declares -- a fabricated or garbage answer fails here.
+    const std::vector<Architecture> known{
+        Architecture::X86,   Architecture::X64,         Architecture::Arm,
+        Architecture::Arm64, Architecture::Wasm,        Architecture::S390x,
+        Architecture::LoongArch64, Architecture::Armv6, Architecture::Ppc64le,
+        Architecture::RiscV64};
+    EXPECT_NE(std::find(known.begin(), known.end(), os), known.end());
+    EXPECT_NE(std::find(known.begin(), known.end(), process), known.end());
+
+    // On a NON-WOW64 host the two agree, and this container is one. That is the control the
+    // Windows repair needs: the two are allowed to differ, and here they must not, so a repair
+    // that started reporting something unrelated shows up immediately.
+    EXPECT_EQ(os, process)
+        << "this host is not mixed-bitness, so the OS and process architectures must agree";
+}
+
+TEST(RuntimeInformationTests, Fix1983_TheProcessArchitectureIsTheCompilationTarget) {
+    // ProcessArchitecture is a statement about the compilation target, not a runtime query --
+    // which is why .NET's ends in `#error Unknown Architecture` rather than a fallback, and why
+    // this port's `return Architecture::X64` for an unrecognised target was a fabrication. The
+    // #error itself is verified at COMPILE time (see the migration note); what can be asserted
+    // here is that the answer matches the target this suite was built for.
+#if defined(__x86_64__)
+    EXPECT_EQ(RuntimeInformation::getProcessArchitectureProperty(), Architecture::X64);
+#elif defined(__aarch64__)
+    EXPECT_EQ(RuntimeInformation::getProcessArchitectureProperty(), Architecture::Arm64);
+#else
+    SUCCEED() << "no assertion for this target; the #error guarantees the list covers it";
+#endif
 }
