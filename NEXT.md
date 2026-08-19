@@ -3,6 +3,125 @@
 
 # NEXT.md
 
+> **Test-count floor, 2026-08-19 — 17,597 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,597 run: 17,597 passed, 0 failed, 0 skipped**, recounted from the
+> per-executable logs and **reproduced independently on the committed state** (`8b08571b`, tree
+> clean, `HEAD == origin/next`, zero warnings). Every checkpoint below this one ends with *"the
+> gate is not green"*; this one does not. Two of the three historical failure sources were
+> environmental and are simply absent in this container; the third was a real repair (#2351).
+>
+> **BOTH WORK QUEUES ARE EMPTY.** `ticket` has **0 `todo`**; `task` has **0** unclassified
+> (14,979 ignored / 1,082 ported / 140 ignore). Ticket totals: **2,379 done, 9 blocked, 1
+> needs_user, 5 wontfix**. **192 tickets closed since the 2026-08-12 block below, 43 of them on
+> 2026-08-19 alone.** A new session will find nothing to pick up: what remains needs the user or
+> an external event, and each is itemised in §2 below.
+
+## Handoff for a new context, 2026-08-19 (queue exhausted)
+
+### 0. READ THIS FIRST — four environment facts every older block in this file gets WRONG
+
+The blocks below were written when the container was different. **Do not trust their environment
+claims**; these were re-measured on 2026-08-19:
+
+| Fact | What older blocks say | What is true now |
+|---|---|---|
+| `/rv/tmp/runtime` | "absent" — dozens of tickets are recorded as blocked on this | **PRESENT.** A .NET **11 preview** snapshot, so a behaviour read from it is .NET 11's, not timeless parity. This is what **SA-5** rests on |
+| `ccache` | "absent" | **present** (4.11.2) |
+| `cna`, `mobile-eggbert` | "may not be inspected" / "outside this checkout" | **both present** and readable. **SA-2 condition 5 requires measuring against them**; editing needs a per-action instruction |
+| `ping_group_range` | `1 0` (closed) — five `PingTests` fail | `0 2147483647` (**open**). The five `PingTests` pass. The gate for **#1962** moved to **`CAP_NET_RAW`, which this uid does NOT have** |
+
+**A ticket whose only recorded gate is "`/rv` absent" or "consumers may not be inspected" is
+therefore NOT blocked here.** Re-verify before treating it as such — that single correction is
+what unblocked most of the 192 tickets closed since 2026-08-12.
+
+Two more standing facts a new context needs:
+
+- **`cna` builds against the SIBLING checkout `../sharp-runtime`, which is on `develop`.** It does
+  **not** see `next`. So a repair landed here reaches `cna` **at the merge**, not now — and a
+  spelling that must work in `cna` has to compile against **both** versions. This is the trap
+  #2366 hit (`std::nullopt` does not compile against `develop`; `{}` means *remove* under both)
+  and the reason **#2381 could not be carried out** even though the user granted it.
+- **Standing approvals are `docs/StandingApprovals.md`, SA-1 … SA-13** (rule 14). Read it before
+  recording anything as blocked on an approval.
+
+### 1. `cna` HAS TEN UNCOMMITTED FILES AND THEY ARE THIS PROGRAMME'S WORK
+
+Left deliberately uncommitted: both tickets carried a per-action instruction to **edit**, and
+**no commit or push was authorised**.
+
+| Ticket | Files | What |
+|---|---|---|
+| **#2377** | 7 exception `.cpp` + `GamerServicesExceptionsTests.cpp` | each derived exception names **its own** type in its default message; the inherited one names the **base**, which is a lie (sharp-runtime #2323's rule) |
+| **#2366** | `Texture2DTests.cpp`, `headless_coverage_gaps_test.cpp` | `SetEnvironmentVariable(..., "")` stopped meaning *remove* (#2313); `{}` is used because it means *remove* under **both** sharp-runtime versions |
+
+**Measured, and not resolved:** the `CnaTests` binary in `cna/cmake-build-debug` (built *after*
+these edits) has **`TwoProcessLoopbackTest.HostMigrationPromotesOneSurvivorAndTheOtherReconnects…`
+timing out at 30 s**, and the same binary **segfaults when stdout is redirected**. That test
+references none of the edited types and no `what()`, and the edits are message strings plus two
+`SetEnvironmentVariable` call sites — but **causation was not proven**, because proving it means
+stashing in the user's tree, which needs a per-action instruction. Also honest: the "68/68"
+recorded for `CnaTests` at #2366/#2377 was a **smaller configuration** and did **not** cover this
+suite.
+
+### 2. Everything that is NOT done, with its measured blocker
+
+**One decision unblocks five tickets.** #1940 is the root: #1942, #1943 and #1945 depend on it
+directly and #1944 through #1943.
+
+| # | Status | Why it cannot proceed autonomously |
+|---|---|---|
+| **1940** | **needs_user** | Three decision-ready questions, all costed by measurement — see §3. **Highest leverage item in the repository.** |
+| 1942, 1943, 1944, 1945 | blocked | the #1929 date/time exact-parsing chain, all rooted at #1940. #1941 (a dependency of 1942 and 1945) is **done** |
+| 1980 | blocked | **G-3 alone.** G-1/G-2/G-4/G-5 landed 2026-08-19. G-3 reparents `AmbiguousImplementationException` and introduces `OSPlatformAttribute` as a base — a vtable **and** layout change SA-3 excludes, which also breaks `catch (const SystemException&)` |
+| 1997 | blocked | **A-2 and A-4 alone.** A-1/A-3 landed 2026-08-19. A-2's cost is **measured, not estimated** — a first cut of `CheckHostName` written against `IPAddress` was rejected by the module-boundary validator. A-4 is a vtable **and** access-level change |
+| 1962 | blocked | the gate is now **`CAP_NET_RAW`**, not `ping_group_range`. The raw-socket path this ticket adds **cannot be exercised here at all**, so it would ship unverified — SA-6's position, except that here the environment gates observation of the *only* thing the ticket adds |
+| 1773 | blocked | waits on `cna`/`mobile-eggbert` intentionally upgrading to a sharp-runtime revision containing the `ICollection::CopyTo` boundary |
+| 2381 | blocked | **granted by the user and still impossible**: `cna` builds against `develop`, which has no `DateTimeKind` at all, and no expression means *preserve the kind* there. Blocked **on the merge**, not on a decision. The exact merge-time diff is recorded on the ticket |
+
+`wontfix` (5, do not reopen without a reason): #1772, #1892, #1893, #1926, #2282.
+
+### 3. #1940 — the one decision worth taking first
+
+Re-measured 2026-08-19; the ticket's own cost premise was **wrong for one viable shape**.
+
+- **The reference cannot settle this.** `DateTime.cs`, `CultureInfo.cs` and `DateTimeFormatInfo.cs`
+  are all in `System.Private.CoreLib` — .NET has **no component boundary here**, so SA-5 does not
+  reach the question.
+- **The structural blocker is a cycle**, named precisely: `Globalization` declares
+  `PUBLIC_DEPENDENCIES Core.Base`, so `DateTime` (Core.Base) cannot name `DateTimeFormatInfo`
+  (Globalization) without an edge the validator rejects.
+- **Three shapes, costed by measurement:** (A) an abstraction in `Core.Base` that
+  `DateTimeFormatInfo` implements — feasible today, because `IFormatProvider::GetFormat` already
+  returns `void*` keyed by `std::type_info`; (B) move `DateTime` to a new component — **34
+  including files across eight modules**; (C) move `DateTimeFormatInfo` into `Core.Base` — **two
+  header files**, it is header-only, does not name `CultureInfo`, its only non-Core.Base include
+  is an enum, its four includers are all inside Globalization, and ownership is by **logical path
+  uniqueness**, so **not one include line changes**. Recommendation: **C, then A's overloads**.
+- **A live defect sits inside this ticket and is deliberately NOT landed.** .NET's
+  `s_currentThreadCulture` is `[ThreadStatic]`; this port's `currentCulture_`/`currentUICulture_`
+  are process-wide `inline static` members written without synchronisation, under a doc-comment
+  that says *"the current **thread's** culture"*. The naive repair is wrong: .NET falls back
+  through `DefaultThreadCurrentCulture`, so plain `thread_local` would **silently remove** the
+  process-wide setting this port has today. The faithful repair is a two-property model, which
+  adds public surface inside the parked area.
+
+### 4. How to resume
+
+1. `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, title FROM ticket WHERE status='todo' ORDER BY ticket_no;"` — **expect nothing.**
+2. If it is still empty, the work is a **rule-14 sweep**: re-read each blocked ticket's recorded
+   gate against `docs/StandingApprovals.md` and §0 above. That is how #1894 and many others closed.
+3. Do not start #1940, #1980 G-3, #1997 A-4 or #1962 without the user. Do not edit `cna` or
+   `mobile-eggbert` without a per-action instruction, and never commit there.
+4. The gate script must run **every executable separately and continue past failures**; both
+   repository runners stop at the first failure and cannot produce a whole-repository total.
+   **Recount from the per-executable logs**, never from an accumulator.
+5. Build in `build/` with `--parallel 2` only. Never in `/tmp` or the scratchpad.
+
+
+---
+
+*Everything below is retained historically. Its environment claims are stale — see §0 above.*
+
 > **Test-count floor, 2026-08-12 — 17,057 / 38 (#2104).** The complete 38-executable gate
 > reads **17,057 run: 17,049 passed, 2 skipped, 6 failed** (17,049 + 6 + 2 = 17,057), **+8** on
 > the 17,049 below — exactly the eight pins #2104 added (`SharpRuntimeTests_IO` 660 → 668; no

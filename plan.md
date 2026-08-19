@@ -1,5 +1,46 @@
 # Sharp Runtime plan
 
+*Last verified: 2026-08-19 — branch **`next`** at `8b08571b`, **pushed and verified on the
+remote**, working tree clean. Gate **17,597 across 38 executables: 17,597 passed, 0 failed, 0
+skipped — GREEN**, recounted from the per-executable logs and reproduced independently on the
+committed state, with zero build warnings. Graph **41 / 93**, seams **3 / 20**, negative fixtures
+**48 / 245**. **BOTH WORK QUEUES ARE EMPTY**: `ticket` has 0 `todo` (2,379 done, 9 blocked, 1
+needs_user, 5 wontfix) and `task` has 0 unclassified. **192 tickets closed since the 2026-08-10
+snapshot below, 43 of them on 2026-08-19.***
+
+***FOUR ENVIRONMENT CLAIMS IN EVERY OLDER SNAPSHOT BELOW ARE NOW FALSE, and correcting them is
+what unblocked most of those 192 tickets.*** *`/rv/tmp/runtime` is **PRESENT** — a .NET **11
+preview** snapshot, so a behaviour read from it must be reported as .NET 11's rather than as
+timeless parity; this is what **SA-5** rests on. `ccache` is **present** (4.11.2). **Both
+downstream consumers are present and readable**, and SA-2 condition 5 **requires** measuring
+against them — editing either needs a per-action instruction and committing there is never
+authorised. `ping_group_range` is **open**, so the five `PingTests` pass and #1962's gate has
+moved to **`CAP_NET_RAW`**, which this uid does not have. **A ticket whose only recorded gate is
+"`/rv` absent" or "consumers may not be inspected" is therefore not blocked here — re-verify
+before treating it as such.** Standing approvals are `docs/StandingApprovals.md`, **SA-1 … SA-13**
+(rule 14). Maximum compiler parallelism **2 jobs**, in `build/` only.*
+
+***`cna` builds against the sibling checkout `../sharp-runtime`, which is on `develop`*** *and
+does not see `next`, so a repair landed here reaches `cna` at the merge; a spelling that must work
+there has to compile against **both** versions. **`cna` currently holds ten uncommitted files that
+are this programme's work** — eight from #2377 (each derived exception naming its own type) and
+two from #2366 (`{}` rather than `""` for environment-variable removal) — left uncommitted because
+no commit was ever authorised. Its `CnaTests` binary has a 30-second timeout in
+`TwoProcessLoopbackTest.HostMigration…` and segfaults with stdout redirected; **causation was not
+proven**, because proving it means stashing in the user's tree.*
+
+***What remains is not implementation work.*** *#1940 is `needs_user` and is the **root of a
+five-ticket chain** (#1942/#1943/#1945 depend on it directly, #1944 through #1943), so one decision
+unblocks five; its three questions are costed by measurement, and the cheapest shape — moving
+`DateTimeFormatInfo` into `Core.Base`, two header files with **not one include line changed** —
+was measured against the ticket's own estimate and found far cheaper. #1980 is down to G-3 alone
+and #1997 to A-2/A-4, all of which SA-3 excludes or the module boundary rejects. #1962 cannot be
+exercised without `CAP_NET_RAW`. #1773 waits on a downstream upgrade and #2381 on the merge to
+`develop`. Full itemisation, including the four environment corrections and the resume procedure,
+is the 2026-08-19 handoff at the top of `NEXT.md`.*
+
+*Prior snapshot, retained historically — **its environment claims are stale**:*
+
 *Last verified: 2026-08-10 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
 harness-designated branch, at `a53efe1`, **pushed and verified on the remote**. This batch closed
 the **Core `ArgumentOutOfRangeException` guard-domain slice** (#2253 review, #2254), completed the
