@@ -9,6 +9,10 @@
 // ManualResetEventSlim, ReaderWriterLockSlim, SpinWait, ThreadLocal, ThreadPool, Timer,
 // and Threading exceptions.
 #include <gtest/gtest.h>
+#include "System/Threading/Thread.hpp"
+#include <vector>
+#include <memory>
+#include <set>
 #include <atomic>
 #include <chrono>
 #include <future>
@@ -1032,4 +1036,120 @@ THREADING_EXCEPT_SIMPLE(WaitHandleCannotBeOpenedException)
 
 TEST(WaitHandleCannotBeOpenedExceptionTests, IsA_ApplicationException) {
     EXPECT_THROW(throw WaitHandleCannotBeOpenedException(), System::ApplicationException);
+}
+
+// ===========================================================================
+// #1958 / SR-AUD-193 -- CurrentThread().ManagedThreadId is unique per thread.
+//
+// #1958 lists eight members; this is the one whose repair needs no approval
+// boundary -- no signature, no layout, no vtable, and the id lives in a
+// thread_local rather than in any public type. The other seven keep theirs, and
+// two of the eight (SR-AUD-214, SR-AUD-189) were already landed by #1971, which
+// the ticket's own description still describes as live.
+// ===========================================================================
+
+TEST(ThreadManagedIdTests, Fix1958_193_ExternalThreadsGetDistinctIds) {
+    // The defect: every thread not started through Thread reported 1 -- the main thread's id --
+    // so they collided with it and with each other.
+    const SharpRuntime::intcs mainId = System::Threading::Thread::CurrentThread().getManagedThreadIdProperty();
+    EXPECT_EQ(mainId, 1) << "the main thread keeps .NET's conventional id";
+
+    constexpr int kThreads = 8;
+    std::vector<SharpRuntime::intcs> ids(kThreads, 0);
+    std::vector<std::thread> workers;
+    for (int i = 0; i < kThreads; ++i) {
+        workers.emplace_back([&ids, i] {
+            // std::thread, NOT System::Threading::Thread -- these are exactly the "externally
+            // created" threads the finding is about.
+            ids[static_cast<size_t>(i)] =
+                System::Threading::Thread::CurrentThread().getManagedThreadIdProperty();
+        });
+    }
+    for (auto& w : workers) w.join();
+
+    std::set<SharpRuntime::intcs> distinct(ids.begin(), ids.end());
+    EXPECT_EQ(distinct.size(), static_cast<size_t>(kThreads)) << "ids collided";
+    EXPECT_EQ(distinct.count(mainId), 0u) << "an external thread took the main thread's id";
+    for (auto id : ids) EXPECT_GT(id, 1) << "an external thread reported the main-thread id";
+}
+
+TEST(ThreadManagedIdTests, Fix1958_193_TheIdIsStableWithinAThread) {
+    // Assigned on FIRST USE and then kept: two reads on one thread must agree, or the id is not
+    // an identity at all. The row that fails if the counter is bumped on every call.
+    SharpRuntime::intcs a = 0, b = 0;
+    std::thread worker([&a, &b] {
+        a = System::Threading::Thread::CurrentThread().getManagedThreadIdProperty();
+        b = System::Threading::Thread::CurrentThread().getManagedThreadIdProperty();
+    });
+    worker.join();
+    EXPECT_NE(a, 0);
+    EXPECT_EQ(a, b);
+
+    // And the main thread's is stable too.
+    EXPECT_EQ(System::Threading::Thread::CurrentThread().getManagedThreadIdProperty(),
+              System::Threading::Thread::CurrentThread().getManagedThreadIdProperty());
+}
+
+TEST(ThreadManagedIdTests, Fix1958_193_ExternalAndWrapperIdsShareOneCounter) {
+    // UNIQUENESS IS ACROSS ALL THREADS, not within each kind. A separate counter for external
+    // threads would give each kind distinct ids and still let the two kinds collide -- which is
+    // exactly the mutation this case was added for, after it went uncaught with only the
+    // per-kind tests above.
+    // Thread is non-copyable (one owned OS handle per object), so the objects are held by
+    // pointer rather than by value.
+    std::vector<SharpRuntime::intcs> wrapperIds;
+    std::vector<std::unique_ptr<System::Threading::Thread>> wrappers;
+    for (int i = 0; i < 4; ++i) {
+        wrappers.push_back(std::make_unique<System::Threading::Thread>([] {}));
+        wrapperIds.push_back(wrappers.back()->getManagedThreadIdProperty());
+    }
+
+    std::vector<SharpRuntime::intcs> externalIds(4, 0);
+    std::vector<std::thread> workers;
+    for (int i = 0; i < 4; ++i)
+        workers.emplace_back([&externalIds, i] {
+            externalIds[static_cast<size_t>(i)] =
+                System::Threading::Thread::CurrentThread().getManagedThreadIdProperty();
+        });
+    for (auto& w : workers) w.join();
+
+    std::set<SharpRuntime::intcs> all(wrapperIds.begin(), wrapperIds.end());
+    for (auto id : externalIds) {
+        EXPECT_EQ(all.count(id), 0u)
+            << "external id " << id << " collided with a Thread object's id";
+        all.insert(id);
+    }
+    EXPECT_EQ(all.size(), 8u);
+
+    // THE ASSERTION THAT ACTUALLY DISCRIMINATES A SECOND COUNTER, and it was added after the
+    // set-distinctness above failed to: two counters only collide where their ranges overlap, and
+    // in a binary that has already created many threads a fresh second counter sits far below
+    // the shared one, so the ids come out distinct for the wrong reason.
+    //
+    // Ordering is the invariant a single counter really provides: an id handed out LATER is
+    // larger. Take a wrapper id, then an external one after it, and the external must exceed it.
+    System::Threading::Thread marker([] {});
+    const SharpRuntime::intcs wrapperId = marker.getManagedThreadIdProperty();
+    SharpRuntime::intcs afterId = 0;
+    std::thread later([&afterId] {
+        afterId = System::Threading::Thread::CurrentThread().getManagedThreadIdProperty();
+    });
+    later.join();
+    EXPECT_GT(afterId, wrapperId)
+        << "an external id assigned after a Thread object's id was smaller, so the two kinds are "
+           "not sharing one counter";
+}
+
+TEST(ThreadManagedIdTests, Fix1958_193_AWrapperThreadStillReportsItsOwnObjectsId) {
+    // Unchanged behaviour, and the control: a thread started through Thread reports the id its
+    // Thread object was given at construction, not a freshly assigned external one.
+    SharpRuntime::intcs seenInside = 0;
+    System::Threading::Thread t([&seenInside] {
+        seenInside = System::Threading::Thread::CurrentThread().getManagedThreadIdProperty();
+    });
+    const SharpRuntime::intcs objectId = t.getManagedThreadIdProperty();
+    t.Start();
+    t.Join();
+    EXPECT_EQ(seenInside, objectId);
+    EXPECT_GT(objectId, 1);
 }

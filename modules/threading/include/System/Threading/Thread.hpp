@@ -66,6 +66,28 @@ namespace System::Threading {
         // Thread object itself.
         inline static thread_local std::shared_ptr<RunState> currentThreadState_;
 
+        // #1958 / SR-AUD-193. A thread NOT started through this class used to report managed id
+        // 1 -- the main thread's -- so every external thread collided with it and with each
+        // other, erasing the uniqueness .NET guarantees. Each OS thread now takes an id from the
+        // same counter the wrapper uses, so no two threads can report the same one.
+        //
+        // The main thread keeps 1 by IDENTITY rather than by arriving first: its OS id is
+        // captured during static initialisation, which runs on it. Assigning "1 to whoever asks
+        // first" would hand it to a worker whenever a worker happens to ask before main does.
+        inline static const std::thread::id mainThreadOsId_ = std::this_thread::get_id();
+        inline static thread_local intcs    currentExternalId_ = 0;
+
+        /** @brief The managed id of the calling thread, assigned on first use. */
+        static intcs currentManagedThreadId() {
+            if (currentThreadState_) return currentThreadState_->managedThreadId;
+            if (currentExternalId_ == 0) {
+                currentExternalId_ = (std::this_thread::get_id() == mainThreadOsId_)
+                                         ? 1
+                                         : nextManagedId_.fetch_add(1);
+            }
+            return currentExternalId_;
+        }
+
         std::shared_ptr<RunState> state_ = std::make_shared<RunState>();
         std::function<void()>  fn_;
         std::thread            thread_;
@@ -315,13 +337,20 @@ namespace System::Threading {
             /**
              * @brief Returns the managed thread ID of the calling thread.
              *
-             * Resolves to the same ManagedThreadId the owning Thread object reports, when the
-             * calling thread was started via Thread::Start(); otherwise (the main thread, or
-             * any thread not created through this class) returns 1, matching .NET's
-             * main-thread convention.
+             * Resolves to the same ManagedThreadId the owning Thread object reports when the
+             * calling thread was started via Thread::Start(). Ticket #1958 / SR-AUD-193: a
+             * thread NOT created through this class used to return 1 unconditionally -- the main
+             * thread's id -- so every external thread collided with it and with every other
+             * external thread. Each now takes a distinct id from the same counter, which is the
+             * uniqueness .NET's ManagedThreadId guarantees.
+             *
+             * The main thread still reports 1, and now does so by identity rather than by
+             * arriving first: its OS thread id is captured during static initialisation.
+             *
+             * The id is assigned on FIRST USE, so a thread that never asks costs nothing.
              */
             [[nodiscard]] intcs getManagedThreadIdProperty() const {
-                return currentThreadState_ ? currentThreadState_->managedThreadId : 1;
+                return currentManagedThreadId();
             }
             /** @brief Returns whether the calling thread's owning Thread object is marked background. */
             [[nodiscard]] bool getIsBackgroundProperty() const {
