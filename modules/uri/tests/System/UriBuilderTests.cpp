@@ -460,32 +460,96 @@ TEST(UriBuilderTest, Fix1996G2_TheSchemeIsLowerCasedInTheSetter) {
     mixed.setSchemeProperty("HtTpS");
     EXPECT_EQ(mixed.getSchemeProperty(), "https");
 
-    // INVARIANT, not locale-aware: an ASCII fold only. A non-ASCII byte is left alone, so a
-    // process that installed a Turkish locale cannot change what a scheme means -- the hazard
-    // #2316 removed from CharUnicodeInfo. Also the row that fails if std::tolower is used.
+    // THIS ROW'S SUBJECT MOVED WITH G-3, and the new guarantee is stronger. It used to assert
+    // that a NON-ASCII scheme is folded invariantly -- an ASCII-only fold, so a process with a
+    // Turkish locale could not change what a scheme means. G-3 makes such a scheme unstorable at
+    // all: CheckSchemeName accepts only ASCII letters, digits and "+-.", and "HÜTTP" has no ':'
+    // to truncate at, so it is refused before folding is ever reached. The locale hazard is now
+    // closed by construction rather than by the fold's implementation.
     UriBuilder nonAscii;
-    nonAscii.setSchemeProperty("H\xC3\x9CTTP");
-    EXPECT_EQ(nonAscii.getSchemeProperty(), "h\xC3\x9Cttp");
+    EXPECT_THROW(nonAscii.setSchemeProperty("H\xC3\x9CTTP"), System::ArgumentException);
+    EXPECT_EQ(nonAscii.getSchemeProperty(), "http") << "and the rejected value was not stored";
 }
 
-TEST(UriBuilderTest, Decl1996_G3AndG4AreNotTakenAndStayPinned) {
-    // G-3, "the only narrowing": .NET validates the scheme, truncates at a ':' and re-checks,
-    // and throws ArgumentException if it still fails (UriBuilder.cs:169-179). Lower-casing is
-    // the LAST statement of that block and is separable; the rest is not taken, so a setter that
-    // never threw still does not.
+TEST(UriBuilderTest, Fix1996G3_AnInvalidSchemeIsRejected) {
+    // INVERTED: this pin used to assert that G-3 was NOT taken. .NET validates the scheme,
+    // truncates at a ':' and re-checks, and throws ArgumentException(net_uri_BadScheme,
+    // nameof(value)) if it still fails (UriBuilder.cs:108-134).
     UriBuilder bad;
-    EXPECT_NO_THROW(bad.setSchemeProperty("bad scheme"));
-    EXPECT_EQ(bad.getSchemeProperty(), "bad scheme")
-        << "lower-cased but not validated -- G-3 owns the rejection";
+    EXPECT_THROW(bad.setSchemeProperty("bad scheme"), System::ArgumentException);
+    EXPECT_EQ(bad.getSchemeProperty(), "http") << "the rejected value was not stored";
 
-    // The host rejection in G-1's own block is likewise not taken: .NET throws
-    // ArgumentException(net_uri_BadHostName) for "contoso.com/path", and this port stores it.
+    try {
+        UriBuilder b;
+        b.setSchemeProperty("bad scheme");
+        FAIL() << "expected a throw";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(std::string(e.getMessageProperty()).find(
+                      "Invalid URI: The URI scheme is not valid."), 0u);
+        EXPECT_EQ(e.getParamNameProperty(), "value") << ".NET passes nameof(value)";
+    }
+}
+
+TEST(UriBuilderTest, Fix1996G3_TheTruncateAtColonRetryIsTranscribed) {
+    // THE HALF THE TICKET'S SUMMARY OMITTED. §14.2 says only "throw for an invalid one", which
+    // would reject "http:" -- .NET ACCEPTS it, because a scheme failing the first check is
+    // retried after cutting at the first ':'.
+    UriBuilder withColon;
+    EXPECT_NO_THROW(withColon.setSchemeProperty("http:"));
+    EXPECT_EQ(withColon.getSchemeProperty(), "http");
+
+    UriBuilder withDelimiter;
+    EXPECT_NO_THROW(withDelimiter.setSchemeProperty("HTTPS://"));
+    EXPECT_EQ(withDelimiter.getSchemeProperty(), "https") << "truncated, then folded";
+
+    // ...but truncation only rescues text whose PREFIX is a scheme.
+    UriBuilder stillBad;
+    EXPECT_THROW(stillBad.setSchemeProperty("bad scheme:x"), System::ArgumentException);
+}
+
+TEST(UriBuilderTest, Decl1996G3_AnEmptySchemeIsAccepted) {
+    // The whole validation block is guarded on `value.Length != 0`, so empty is stored as empty
+    // rather than rejected -- easy to lose when transcribing a guard that throws.
+    UriBuilder empty;
+    EXPECT_NO_THROW(empty.setSchemeProperty(""));
+    EXPECT_EQ(empty.getSchemeProperty(), "");
+}
+
+TEST(UriBuilderTest, Fix1996G4_ARelativeConstructorStringIsPromoted) {
+    // INVERTED: this used to assert the measured ":///www.example.com/path". .NET prefixes
+    // "http://" and REPARSES (UriBuilder.cs:29-40), and its own comment says why: "setting
+    // allowRelative=true for a string like www.acme.org".
+    UriBuilder relative("www.example.com/path");
+    EXPECT_EQ(relative.getSchemeProperty(), "http");
+    EXPECT_EQ(relative.getHostProperty(), "www.example.com")
+        << "the host comes from the REPARSE -- §14.2's 'localhost host' is wrong";
+    EXPECT_EQ(relative.getPathProperty(), "/path");
+
+    // THE STRONGEST FORM OF THE ASSERTION: the promoted string is indistinguishable from writing
+    // the scheme out. Anything else would mean the promotion took a different route.
+    UriBuilder explicitScheme("http://www.example.com/path");
+    EXPECT_EQ(relative.ToString(), explicitScheme.ToString());
+
+    // And the rendered port is ":80", which is CORRECT rather than a wart -- my first expectation
+    // here was "http://www.example.com/path" and it was wrong, not the code. .NET's
+    // SetFieldsFromUri does `_port = _uri.Port` (UriBuilder.cs:307), Uri("http://…").Port is 80,
+    // and ToString appends the port whenever `_port != -1` (:381), so .NET renders the default
+    // port too. Pre-existing behaviour on BOTH routes, and out of G-4's scope either way.
+    EXPECT_EQ(relative.ToString(), "http://www.example.com:80/path");
+}
+
+TEST(UriBuilderTest, Decl1996G4_AnAbsoluteConstructorStringIsUntouched) {
+    // The promotion runs only when the parse is NOT absolute, so nothing that worked moves.
+    UriBuilder absolute("https://example.com:8443/p?q=1#f");
+    EXPECT_EQ(absolute.getSchemeProperty(), "https");
+    EXPECT_EQ(absolute.getHostProperty(), "example.com");
+    EXPECT_EQ(absolute.getPortProperty(), 8443);
+}
+
+TEST(UriBuilderTest, Decl1996_TheHostRejectionIsStillNotTaken) {
+    // What G-1's block still does NOT take, kept so the boundary stays visible: .NET throws
+    // ArgumentException(net_uri_BadHostName) for "contoso.com/path"; this port stores it.
     UriBuilder path;
     EXPECT_NO_THROW(path.setHostProperty("contoso.com/path"));
     EXPECT_EQ(path.getHostProperty(), "contoso.com/path");
-
-    // G-4, relative promotion: UriBuilder("www.example.com/path") still renders the measured
-    // ":///www.example.com/path" rather than promoting the text to a host.
-    UriBuilder relative("www.example.com/path");
-    EXPECT_NE(relative.ToString().find("://"), std::string::npos) << relative.ToString();
 }

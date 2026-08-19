@@ -91,7 +91,29 @@ namespace System {
          * @param uri URI string to parse into components.
          */
         explicit UriBuilder(const std::string& uri) {
-            setFieldsFromUri(Uri(uri));
+            // Ticket #1996 group G-4, landed 2026-08-19. `UriBuilder.cs:29-40`:
+            //     _uri = new Uri(uri, UriKind.RelativeOrAbsolute);
+            //     if (!_uri.IsAbsoluteUri)
+            //         _uri = new Uri(Uri.UriSchemeHttp + Uri.SchemeDelimiter + uri);
+            //     SetFieldsFromUri();
+            // and .NET's own comment above it says why: "setting allowRelative=true for a string
+            // like www.acme.org".
+            //
+            // Before this, `UriBuilder("www.example.com/path")` rendered `:///www.example.com/path`
+            // -- an unparseable string with an empty scheme and empty host.
+            //
+            // THE TICKET'S SUMMARY IS WRONG ABOUT THE HOST. §14.2 says the string is promoted "to
+            // the default `http` scheme and `localhost` host"; the reference prefixes `http://`
+            // and REPARSES, so the host comes out of the string itself --
+            // `www.example.com/path` yields host `www.example.com`, not `localhost`. A localhost
+            // host appears only where the string supplies none, which is the pre-existing
+            // default-field behaviour and not this promotion.
+            Uri parsed(uri, UriKind::RelativeOrAbsolute);
+            if (!parsed.getIsAbsoluteUriProperty()) {
+                setFieldsFromUri(Uri("http://" + uri));
+                return;
+            }
+            setFieldsFromUri(parsed);
         }
 
         /**
@@ -177,19 +199,50 @@ namespace System {
          * to render `HTTP://…`. Invariant, not locale-aware: an ASCII fold, so a Turkish locale
          * cannot turn `I` into a dotless one.
          *
-         * @note <b>The validation that surrounds this line in the reference is deliberately NOT
-         *       taken here.</b> .NET runs `Uri.CheckSchemeName` first, truncates at a `:` and
-         *       re-checks, and throws `ArgumentException` if it still fails. That block is this
-         *       ticket's group <b>G-3</b>, which #1996 identifies as "the only narrowing" -- it
-         *       makes a setter that never threw start throwing. Lower-casing is the last
-         *       statement of the block and is separable from it; the rest is not taken.
+         * @note <b>The validation is group G-3, landed 2026-08-19</b>, and it is transcribed
+         *       whole rather than summarised. `UriBuilder.cs:108-134` is:
+         * @code
+         * if (value.Length != 0)
+         * {
+         *     if (!Uri.CheckSchemeName(value))
+         *     {
+         *         int index = value.IndexOf(':');
+         *         if (index != -1) value = value.Substring(0, index);
+         *         if (!Uri.CheckSchemeName(value))
+         *             throw new ArgumentException(SR.net_uri_BadScheme, nameof(value));
+         *     }
+         *     value = value.ToLowerInvariant();
+         * }
+         * @endcode
          *
-         *       Measured consequence, and it is deliberate: `setSchemeProperty("bad scheme")`
-         *       still stores `"bad scheme"` and still renders `"bad scheme://localhost/"`. That
-         *       is G-3's to repair.
+         * @note <b>The truncate-at-colon retry is the half the ticket's summary omitted.</b>
+         *       §14.2 says only "throw for an invalid one", which would reject `"http:"` --
+         *       .NET <i>accepts</i> it and stores `http`, because a scheme that fails the check
+         *       is retried after cutting at the first `:`. `"http://"` is accepted the same way.
+         *       Only text that is still not a scheme after truncation is refused.
+         *
+         * @note An <b>empty</b> scheme is accepted and stored empty; the whole block is guarded
+         *       on `value.Length != 0`.
+         *
+         * @param v The scheme, optionally with a trailing `:` or `://`.
+         * @throws System::ArgumentException if @p v is non-empty and is not a valid scheme even
+         *         after truncation at the first `:` (parameter name `value`, as .NET's
+         *         `nameof(value)`).
          */
         void setSchemeProperty(const std::string& v) {
-            scheme_ = toLowerAsciiInvariant(v);
+            std::string value = v;
+            if (!value.empty()) {
+                if (!Uri::CheckSchemeName(value)) {
+                    const std::size_t index = value.find(':');
+                    if (index != std::string::npos) value = value.substr(0, index);
+                    if (!Uri::CheckSchemeName(value)) {
+                        throw System::ArgumentException(
+                            "Invalid URI: The URI scheme is not valid.", "value");
+                    }
+                }
+                value = toLowerAsciiInvariant(value);
+            }
+            scheme_ = value;
         }
 
         /** @brief Returns the host component. */
