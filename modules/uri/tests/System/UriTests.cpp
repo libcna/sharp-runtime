@@ -7,11 +7,14 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Uri.hpp"
+#include "System/UriPartial.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/UriParser.hpp"
 #include "System/UriFormatException.hpp"
 
 using System::Uri;
 using System::UriKind;
+using System::UriPartial;
 
 // ---------------------------------------------------------------------------
 // Basic absolute HTTP URI
@@ -1633,4 +1636,69 @@ TEST(UriParserSchemeValidationTests, Fix1998_CheckSchemeNameIsDotNetsGrammar) {
     EXPECT_FALSE(System::Uri::CheckSchemeName("a_b")) << "'_' is not in s_schemeChars";
     EXPECT_FALSE(System::Uri::CheckSchemeName(std::string("ab\0c", 4)))
         << "a NUL is not a scheme character either";
+}
+
+// ===========================================================================
+// #1997 group A-1 (SR-AUD-150) -- Uri::GetLeftPart(UriPartial).
+//
+// The ticket's own acceptance criterion calls A-1 "strictly additive and
+// touches no existing declaration", which makes it ordinary SA-5 work. A-2
+// (CheckHostName) is NOT, and #1997 keeps it -- see Uri.hpp's note.
+// ===========================================================================
+
+TEST(UriTests, Fix1997A1_GetLeftPartReturnsEachPrefix) {
+    Uri uri("http://user:pw@example.com:8080/a/b?q=1#frag");
+    EXPECT_EQ(uri.GetLeftPart(UriPartial::Scheme), "http://");
+    EXPECT_EQ(uri.GetLeftPart(UriPartial::Authority), "http://user:pw@example.com:8080");
+    EXPECT_EQ(uri.GetLeftPart(UriPartial::Path), "http://user:pw@example.com:8080/a/b");
+    EXPECT_EQ(uri.GetLeftPart(UriPartial::Query), "http://user:pw@example.com:8080/a/b?q=1");
+
+    // The fragment is never included -- Query is the rightmost part UriPartial names.
+    EXPECT_EQ(uri.GetLeftPart(UriPartial::Query).find('#'), std::string::npos);
+}
+
+TEST(UriTests, Fix1997A1_ADefaultPortIsOmittedAndTheDelimiterComesFromTheSource) {
+    // A default port is absent from the authority, which is getAuthorityProperty()'s existing
+    // rule and .NET's.
+    Uri plain("https://example.com/p");
+    EXPECT_EQ(plain.GetLeftPart(UriPartial::Authority), "https://example.com");
+    EXPECT_EQ(plain.GetLeftPart(UriPartial::Path), "https://example.com/p");
+
+    // THE DELIMITER IS TAKEN FROM THE ORIGINAL TEXT, not synthesised. .NET's Scheme component
+    // with KeepDelimiter is a substring of the source up to the userinfo offset, so a scheme
+    // written without "//" keeps its bare colon. Synthesising "://" everywhere is the mutation
+    // this row catches.
+    Uri opaque("mailto:someone@example.com");
+    EXPECT_EQ(opaque.GetLeftPart(UriPartial::Scheme), "mailto:");
+}
+
+TEST(UriTests, Fix1997A1_NoAuthorityIsTheEmptyStringNotTheScheme) {
+    // .NET returns `string.Empty` here -- and the comment three lines above that statement says
+    // the opposite ("It not return an empty string but instead \"scheme:\""). The CODE is what
+    // runs, so the code is what is transcribed, and this row is why that choice is visible.
+    Uri opaque("mailto:someone@example.com");
+    EXPECT_EQ(opaque.GetLeftPart(UriPartial::Authority), "");
+
+    // Path and Query still work on an authority-less URI: they simply have no authority to
+    // prepend.
+    EXPECT_EQ(opaque.GetLeftPart(UriPartial::Path), "mailto:someone@example.com");
+}
+
+TEST(UriTests, Fix1997A1_ARelativeUriAndAnUndefinedPartAreBothRejected) {
+    Uri relative("some/relative/path", UriKind::Relative);
+    EXPECT_THROW((void)relative.GetLeftPart(UriPartial::Scheme), System::InvalidOperationException);
+    EXPECT_THROW((void)relative.GetLeftPart(UriPartial::Path), System::InvalidOperationException);
+
+    // A value outside the enum is an ArgumentException naming the parameter, as .NET's
+    // `throw new ArgumentException(SR.Format(SR.Argument_InvalidUriSubcomponent, part),
+    // nameof(part))` does. The relative check comes FIRST, which is .NET's order.
+    Uri absolute("http://example.com/p");
+    try {
+        (void)absolute.GetLeftPart(static_cast<UriPartial>(99));
+        ADD_FAILURE() << "an undefined UriPartial was accepted";
+    } catch (const System::ArgumentException& e) {
+        const std::string what = e.what();
+        EXPECT_NE(what.find("is not valid"), std::string::npos) << what;
+        EXPECT_NE(what.find("Parameter 'part'"), std::string::npos) << what;
+    }
 }

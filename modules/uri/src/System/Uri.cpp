@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Uri.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/UriFormatException.hpp"
@@ -563,6 +564,46 @@ const std::string& Uri::getUserInfoProperty()       const { return userInfo_; }
 bool               Uri::getIsAbsoluteUriProperty() const { return isAbsoluteUri_; }
 
 std::string Uri::getPathAndQueryProperty() const { return path_ + query_; }
+
+std::string Uri::GetLeftPart(UriPartial part) const {
+    // Uri.cs:1343-1383.
+    if (!isAbsoluteUri_)
+        throw System::InvalidOperationException("This operation is not supported for a relative URI.");
+
+    // The scheme delimiter is taken from the ORIGINAL TEXT rather than synthesised, because that
+    // is what .NET returns: `case UriComponents.Scheme` with KeepDelimiter is
+    // `_string.Substring(Offset.Scheme, Offset.User - Offset.Scheme)` (Uri.cs:2940-2944), i.e.
+    // the raw run up to the userinfo -- "http://" for a URI with an authority and "mailto:" for
+    // one without. Synthesising "://" would be wrong for the second and for `file:` forms.
+    std::string schemeWithDelimiter = scheme_ + ":";
+    if (absoluteUri_.size() > scheme_.size() + 3 &&
+        absoluteUri_.compare(scheme_.size(), 3, "://") == 0)
+        schemeWithDelimiter = scheme_ + "://";
+
+    const bool hasAuthority = !host_.empty();
+    std::string authority = schemeWithDelimiter;
+    if (hasAuthority) {
+        if (!userInfo_.empty()) authority += userInfo_ + "@";
+        authority += getAuthorityProperty();
+    }
+
+    switch (part) {
+        case UriPartial::Scheme:
+            return schemeWithDelimiter;
+        case UriPartial::Authority:
+            // .NET returns the EMPTY STRING when there is no authority -- `return
+            // string.Empty;` -- even though the comment three lines above it says it returns
+            // "scheme:" instead. The code is what runs.
+            return hasAuthority ? authority : std::string();
+        case UriPartial::Path:
+            return authority + path_;
+        case UriPartial::Query:
+            return authority + path_ + query_;
+    }
+    throw System::ArgumentException(
+        "The subcomponent, " + std::to_string(static_cast<int>(part)) + ", of this uri is not valid.",
+        "part");
+}
 
 std::string Uri::getAuthorityProperty() const {
     if (port_ == -1 || port_ == defaultPortForScheme(scheme_))

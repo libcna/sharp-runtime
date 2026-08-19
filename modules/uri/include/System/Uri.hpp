@@ -6,6 +6,8 @@
 #include <string>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/UriHostNameType.hpp"
+#include "System/UriPartial.hpp"
 
 namespace System {
 
@@ -214,6 +216,40 @@ namespace System {
          *       and `net.pipe`, two of the schemes this port registers, rely on `.` being
          *       allowed.
          */
+        /**
+         * @note <b>`CheckHostName` is deliberately ABSENT, and #1997 corrected its cost estimate
+         *       rather than paying it.</b> The ticket calls its group A-2 "strictly additive"
+         *       and pairs it with `GetLeftPart` as "the recommended minimum". Measured, it is
+         *       not: `Uri.CheckHostName` (`Uri.cs:1286-1325`) classifies through
+         *       `IPv6AddressHelper.IsValid` and `IPv4AddressHelper.IsValid`, and this module has
+         *       neither. `modules/uri` depends on `Core.Base` alone, and validating an IPv6
+         *       literal's CONTENT is an explicitly declared out-of-scope boundary here
+         *       (`docs/SystemUriNamespaceReviewPlan.md` §15.4) -- `parse()` checks only the
+         *       bracket structure.
+         *
+         *       So it costs either a new public module edge to reach `System::Net::IPAddress`,
+         *       or a second address-literal parser inside this module -- the duplication #2354
+         *       spent a ticket removing. Neither is "touches no existing declaration". It stays
+         *       with #1997 as group A-2.
+         */
+
+        /**
+         * @brief Returns the leftmost portion of the URI up to and including @p part.
+         *
+         * Ticket #1997 group A-1 (SR-AUD-150). The member was absent although
+         * `System::UriPartial`'s own doc-comment says it exists for it. Transcribed from
+         * `Uri.cs:1343-1383`.
+         *
+         * @param part Which part to stop after.
+         * @return The requested prefix. `Authority` is the **empty string** when the URI has no
+         *         authority — `mailto:a@b` gives `""`, not `"mailto:"`. .NET's comment at that
+         *         line says the opposite of its own `return string.Empty;`, and the code is what
+         *         runs, so the code is what is transcribed.
+         * @throws System::InvalidOperationException if this URI is relative.
+         * @throws System::ArgumentException if @p part is not one of the four defined values.
+         */
+        [[nodiscard]] std::string GetLeftPart(UriPartial part) const;
+
         [[nodiscard]] static bool CheckSchemeName(const std::string& schemeName) noexcept {
             if (schemeName.empty()) return false;
             const unsigned char first = static_cast<unsigned char>(schemeName[0]);
