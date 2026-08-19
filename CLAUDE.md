@@ -18,7 +18,16 @@
    parameterized-property case, applied across every indexer in the codebase.
 6. **Namespace syntax:** `namespace System::Collections::Generic {` (C++17 nested form).
 7. **Use `SharpRuntime::intcs`, not `int`** in public APIs that mirror .NET `int` parameters.
-8. **No LINQ.** Use `std::ranges` in ported code instead.
+8. **No LINQ** in the code this project writes — use `std::ranges` in ported bodies instead.
+   **This does not mean the tree contains no LINQ surface, and the distinction is worth stating
+   here because the two look like a contradiction otherwise**: `modules/core/include/System/Linq.hpp`
+   is a 508-line `System::Linq` providing `Where`, `Select`, `FirstOrDefault` and ~17 more over
+   `std::vector<T>`. It exists as a **compatibility surface for ported C#/XNA call sites**, not as
+   a licence to use those operators in new code. Measured 2026-08-19: a strict search for
+   `System::Linq::` finds **zero** uses in this repository's production code, **zero** in `cna` and
+   **zero** in `mobile-eggbert` — its only users are its own two test files. So it is a capability
+   offered *in advance* of a caller; removing it would be a public-surface decision rather than a
+   cleanup.
 9. **No merge to master or tags** without explicit per-action user approval.
 10. **No broad header refactor** — naming conventions touch 449+ files and would break CNA.
 11. **Copy doc-comments from .NET source** — when porting a type, if the `.NET` source (`/rv/tmp/runtime/src/libraries/`) has XML doc comments and the sharp-runtime header has none, copy them as Doxygen `/** */` comments where the meaning translates cleanly to C++.

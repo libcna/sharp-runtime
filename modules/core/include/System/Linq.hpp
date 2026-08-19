@@ -31,9 +31,24 @@ namespace System::Linq {
      * Concat, Contains. Not implemented (real .NET's Enumerable surface is 100+ methods):
      * GroupBy, Join, Zip, SelectMany, ToDictionary, ToHashSet, Average, Aggregate, ElementAt,
      * SkipWhile, TakeWhile, Except, Intersect, Union, SequenceEqual, Single/SingleOrDefault,
-     * DefaultIfEmpty, Chunk, and more -- add on demand as ported code needs them, per
-     * CLAUDE.md's "No LINQ" policy for code THIS project writes (this class exists only to
-     * support already-ported C#/XNA call sites that use these operators).
+     * DefaultIfEmpty, Chunk, and more -- add on demand as ported code needs them.
+     *
+     * @note **How this squares with CLAUDE.md rule 8, "No LINQ".** That rule governs the code
+     * THIS project writes: ported bodies use `std::ranges`, not these operators. This header is
+     * the other side of it -- a compatibility surface for ported C#/XNA call sites that already
+     * spell `Where`/`Select`/`FirstOrDefault`.
+     *
+     * @note **Measured 2026-08-19, because the previous wording claimed more than is true.** It
+     * said this "exists only to support already-ported C#/XNA call sites that use these
+     * operators", which implies such sites exist. They do not, anywhere: a strict search for
+     * `System::Linq::` finds **zero** uses in this repository's production code, **zero** in
+     * `cna` and **zero** in `mobile-eggbert`. Its only users are its own two test files
+     * (`LinqTests.cpp` and `ComparisonContractTests.cpp`).
+     *
+     * So this is a capability offered **in advance** of a caller rather than a response to one.
+     * That is a deliberate position and not a defect -- the surface is what lets a future port
+     * land without first re-litigating rule 8 -- but it should be read as such, and its removal
+     * would be a public-surface decision rather than a cleanup.
      *
      * @note Status: PARTIAL
      */
