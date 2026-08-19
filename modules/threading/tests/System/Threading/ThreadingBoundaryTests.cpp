@@ -1182,13 +1182,125 @@ TEST(ReaderWriterWriterPreferenceTests, Fix1957_AnUpgraderWaitingForWriteAlsoBlo
 // wait-handle sizes are UNCHANGED, the flags landing in padding they already had.
 // =============================================================================================
 
-TEST(DisposalIsARealStateTests, Decl1956_TheClosedFlagsAreLayoutNeutral) {
+TEST(DisposalIsARealStateTests, Decl1956_TheClosedFlagOnMutexIsLayoutNeutral) {
+    // #1956's own figure, unchanged: the flag landed in padding Mutex already had.
     static_assert(sizeof(System::Threading::Mutex) == 64, "#1956 must not grow Mutex");
-    static_assert(sizeof(System::Threading::AutoResetEvent) == 96, "#1956 must not grow AutoResetEvent");
-    static_assert(sizeof(System::Threading::ManualResetEvent) == 96, "#1956 must not grow ManualResetEvent");
     EXPECT_EQ(sizeof(System::Threading::Mutex), 64u);
-    EXPECT_EQ(sizeof(System::Threading::AutoResetEvent), 96u);
-    EXPECT_EQ(sizeof(System::Threading::ManualResetEvent), 96u);
+}
+
+TEST(HierarchyTests, Fix1958_209_TheTwoEventsAreEventWaitHandlesAndCostExactlyThat) {
+    // INVERTED BY #1958/SR-AUD-209 (2026-08-19). Its predecessor asserted 96 for both events
+    // under the name Decl1956_TheClosedFlagsAreLayoutNeutral, and it FAILED THE BUILD when they
+    // gained a base -- which is the signal it was written to give.
+    //
+    // .NET's AutoResetEvent and ManualResetEvent are `sealed class ... : EventWaitHandle` whose
+    // entire body is one constructor (AutoResetEvent.cs:6-9, ManualResetEvent.cs:6-9), so the
+    // derived types add NOTHING and must be exactly the size of their base. Asserting that
+    // relationship rather than three bare numbers is what makes the pin say "these declare no
+    // members of their own" instead of merely "these are 104 bytes today".
+    static_assert(sizeof(System::Threading::AutoResetEvent)
+                      == sizeof(System::Threading::EventWaitHandle),
+                  "#1958/SR-AUD-209: AutoResetEvent must add nothing to EventWaitHandle");
+    static_assert(sizeof(System::Threading::ManualResetEvent)
+                      == sizeof(System::Threading::EventWaitHandle),
+                  "#1958/SR-AUD-209: ManualResetEvent must add nothing to EventWaitHandle");
+
+    // The absolute figures, so a change to the BASE is caught too. Both events go 96 -> 112,
+    // and EventWaitHandle 104 -> 112: the closed_ flag did NOT fit in padding it already had.
+    // That was asserted at 104 first and the build rejected it -- #1956's flags fitted on three
+    // other types and the expectation was carried over rather than measured. Every consumer of
+    // any of the three must rebuild, and `cna` holds EventWaitHandle BY VALUE in six places.
+    static_assert(sizeof(System::Threading::EventWaitHandle) == 112,
+                  "#1958/SR-AUD-209: EventWaitHandle grew by its closed_ flag");
+    EXPECT_EQ(sizeof(System::Threading::AutoResetEvent), 112u);
+    EXPECT_EQ(sizeof(System::Threading::ManualResetEvent), 112u);
+
+    // The point of the whole finding: both are now WaitHandles, so WaitAll/WaitAny can accept
+    // them. Before this they could not, which is what made SR-AUD-209 the one divergence in the
+    // namespace that left a documented API unusable.
+    static_assert(std::is_base_of_v<System::Threading::WaitHandle,
+                                    System::Threading::AutoResetEvent>);
+    static_assert(std::is_base_of_v<System::Threading::WaitHandle,
+                                    System::Threading::ManualResetEvent>);
+
+    // sealed
+    static_assert(std::is_final_v<System::Threading::AutoResetEvent>);
+    static_assert(std::is_final_v<System::Threading::ManualResetEvent>);
+}
+
+TEST(HierarchyTests, Fix1958_209_WaitAllAndWaitAnyNowAcceptBothEventTypes) {
+    // THE FINDING'S WHOLE POINT. Before this, neither event type was a WaitHandle, so these two
+    // entry points -- repaired by #1952 and documented ever since -- could not accept them at
+    // all. Not "returned the wrong answer": the code did not compile.
+    System::Threading::AutoResetEvent are(true);
+    System::Threading::ManualResetEvent mre(true);
+
+    std::vector<System::Threading::WaitHandle*> handles{&are, &mre};
+    EXPECT_TRUE(System::Threading::WaitHandle::WaitAll(handles, 1000));
+
+    System::Threading::ManualResetEvent onlyOne(true);
+    System::Threading::AutoResetEvent notSignalled(false);
+    std::vector<System::Threading::WaitHandle*> mixed{&notSignalled, &onlyOne};
+    EXPECT_EQ(System::Threading::WaitHandle::WaitAny(mixed, 1000), 1);
+}
+
+TEST(HierarchyTests, Fix1958_209_WaitOneReturnsBoolAndTheModesStillDiffer) {
+    // WaitOne() returned void on AutoResetEvent; WaitHandle's is `virtual bool`. The behaviour
+    // that must survive the move onto a shared base is the ONE thing that distinguishes the two
+    // types -- whether a wait consumes the signal.
+    System::Threading::AutoResetEvent are(true);
+    static_assert(std::is_same_v<decltype(are.WaitOne()), bool>,
+                  "#1958/SR-AUD-209: WaitOne() is WaitHandle's bool-returning virtual");
+    EXPECT_TRUE(are.WaitOne());
+    EXPECT_FALSE(are.WaitOne(0)) << "AutoReset consumes the signal";
+
+    System::Threading::ManualResetEvent mre(true);
+    EXPECT_TRUE(mre.WaitOne());
+    EXPECT_TRUE(mre.WaitOne(0)) << "ManualReset does not";
+    mre.Reset();
+    EXPECT_FALSE(mre.WaitOne(0));
+}
+
+// #1958/SR-AUD-209: THE LOST-WAKEUP REPAIR HAS NO DETERMINISTIC TEST, and this comment is the
+// record rather than a missing case.
+//
+// EventWaitHandle::Set() used to store and notify WITHOUT holding mtx_, so a waiter that had
+// evaluated the predicate as false but had not yet atomically released the lock and slept missed
+// the notification and blocked until some later Set(). AutoResetEvent::Set() took the lock, so
+// deriving it from EventWaitHandle would have INTRODUCED the race into a type that did not have
+// it -- which is why the lock is part of this repair rather than a separate ticket.
+//
+// Measured with build-probe/2209_probe1_lost_wakeup.cpp over 900 single-waiter rounds:
+// EventWaitHandle lost 2, AutoResetEvent lost 0. That is roughly 0.2% per round, so a bounded
+// test would detect a reverting mutation only about a third of the time -- and a test that is
+// intermittently green is not evidence (#2352). A first cut of this file DID carry such a case,
+// at 200 rounds; it is removed rather than kept, on the same reasoning #1957/SR-AUD-201 and
+// #2031 recorded for their own window-closing mutations.
+//
+// A multi-waiter amplification was tried and is invalid: with several waiters, repeated Set()
+// calls on an AutoReset event coalesce into one signal, so the harness reported 100% "loss" for
+// the LOCKED form too. It measures AutoReset semantics, not the race.
+
+TEST(DisposalIsARealStateTests, Fix1958_209_EventWaitHandleWasNineteenFiftySixsFourthCase) {
+    // #1956 gave Mutex, AutoResetEvent and ManualResetEvent a closed state and MISSED
+    // EventWaitHandle, whose Close() reached WaitHandle's empty Dispose() and did nothing. That
+    // had to be closed before the two events could derive from it, or deriving would have
+    // silently reverted #1956 for both of them -- which is the trap in this repair.
+    System::Threading::EventWaitHandle ewh(true, System::Threading::EventResetMode::ManualReset);
+    ewh.Close();
+    EXPECT_THROW(ewh.Set(), System::ObjectDisposedException);
+    EXPECT_THROW(ewh.Reset(), System::ObjectDisposedException);
+    EXPECT_THROW((void)ewh.WaitOne(0), System::ObjectDisposedException);
+    EXPECT_NO_THROW(ewh.Close()) << "idempotent, as .NET's Dispose is";
+
+    // ...and the inherited guard is what keeps #1956's guarantee alive on the derived types.
+    System::Threading::AutoResetEvent are(true);
+    are.Close();
+    EXPECT_THROW(are.Set(), System::ObjectDisposedException);
+    System::Threading::ManualResetEvent mre(true);
+    mre.Dispose();
+    EXPECT_THROW(mre.Set(), System::ObjectDisposedException)
+        << "Close() is Dispose(); both doors must reach the guard";
 }
 
 TEST(DisposalIsARealStateTests, Fix1956_AClosedAutoResetEventRefusesEveryOperation) {
