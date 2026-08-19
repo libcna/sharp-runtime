@@ -1551,13 +1551,53 @@ sanitizer was given a deliberate defect built with the same flags:
 | shift exponent ≥ width under UBSan | **1 report — instrumentation live** |
 | no defect (control) | **0 reports — correctly silent** |
 
-### 22.4 A correction to this document's running total
+### 22.4 A correction to this document's running total — and a correction to that correction
 
 §21.5 records **11 fixtures / 94 sites**, and that has been stale since 2026-08-04: the measured
-total today is **45 fixtures / 231 sites**. The ~34 fixtures added between #2054 and now were each
-recorded in their own ticket's migration note rather than here, so the record exists — it is this
-document's *running total* that fell behind, not the evidence. #1894 adds no fixture of its own, so
-the total is unchanged by this section.
+total today is **45 fixtures / 231 sites**. #1894 adds no fixture of its own, so the total is
+unchanged by this section.
+
+**The first version of this subsection claimed the intervening fixtures "were each recorded in
+their own ticket's migration note rather than here, so the record exists". That was asserted rather
+than measured, and it is false.** Audited on 2026-08-19 by grepping `docs/` for every fixture
+filename: **17 of the 45 had no record in `docs/` at all** — not in this document, not in any
+migration note.
+
+Two things the audit got right only on the second pass, recorded because the first pass was
+misleading in the *alarming* direction:
+
+* A first attempt searched for each **filename** inside ticket text and reported eight fixtures as
+  having "no ticket record either". That was an artefact of the search: tickets describe their
+  fixture without naming its file. Reading each fixture's own header instead shows **every one of
+  the 45 names a real ticket** — there are **no orphans**.
+* So the gap was never traceability. It was this document's coverage, and it is closed below rather
+  than merely reported.
+
+#### The 17 fixtures that had no `docs/` record
+
+| fixture | ticket(s) | subject |
+|---|---|---|
+| `core_appdomain_switch_nullable_negative.cpp` | #2250 | ticket #2250 (SR-AUD-103, switch half) |
+| `core_applicationid_dotnet_shape_negative.cpp` | #2291 | ticket #2291 (SR-AUD-117) |
+| `core_argument_out_of_range_guard_domain_negative.cpp` | #2213, #2254 | ticket #2254 (finding SR-AUD-091) |
+| `core_attribute_protected_ctor_negative.cpp` | #2339 | ticket #2339 (SR-AUD-114) |
+| `core_deprecated_members_negative.cpp` | #2289 | ticket #2289 (SR-AUD-117) |
+| `core_func_nonvoid_result_negative.cpp` | #2299 | ticket #2299 (SR-AUD-126) |
+| `core_integer_style_validation_negative.cpp` | #2269 | ticket #2269 (SR-AUD-178) |
+| `core_localdatastoreslot_no_public_ctor_negative.cpp` | #2298 | ticket #2298 (SR-AUD-129), route B |
+| `core_marshalbyrefobject_protected_ctor_negative.cpp` | #2297, #2374 | ticket #2297 (SR-AUD-128) |
+| `core_obsoleteattribute_nullable_negative.cpp` | #2295 | ticket #2295 (SR-AUD-116) |
+| `core_resolveeventhandler_optional_negative.cpp` | #2325 | ticket #2325 (SR-AUD-123) |
+| `core_runtimetype_removed_negative.cpp` | #2333, #2334 | ticket #2334 (SR-AUD-110, approval-gated clause |
+| `core_tuple_getter_only_negative.cpp` | #2330 | ticket #2330 (SR-AUD-063) |
+| `core_unityserializationholder_removed_negative.cpp` | #2281 | ticket #2281 (SR-AUD-137) |
+| `core_valuetype_protected_ctor_negative.cpp` | #2322 | ticket #2322 (SR-AUD-068) |
+| `numerics_complex_abs_return_negative.cpp` | #2172 | ticket #2172 (SR-AUD-277 remainder) |
+| `numerics_generic_math_negative.cpp` | #2168 | ticket #2168 (SR-AUD-278): proves that every static member of the |
+
+Each is validated by `scripts/check_negative_consumer_fixtures.py` exactly like the others — the
+checker is the enforcing mechanism and it never fell behind; only the prose did. With this table
+the audit re-runs clean: **0 fixtures without a `docs/` record.**
 
 Build directories used: `build-asan` (reused) and `build-ubsan` (created), both `--parallel 2`,
 both with `ccache`.

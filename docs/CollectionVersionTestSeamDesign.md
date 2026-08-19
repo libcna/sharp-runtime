@@ -870,3 +870,41 @@ production, ABI, layout, or semantic impact, and without a new SR-AUD identifier
 (audit numbering stays frozen at 364). It does **not** broaden the checker into a
 general repository ODR analyser — its remit remains the two named seams'
 definition ownership, now including their primary templates.
+
+---
+
+## Current state, re-measured 2026-08-19
+
+**The figures throughout this document are 2 seams / 17–18 definitions. The checker now reports
+3 seams / 20 definitions.** The earlier figures are *not* corrected in place: each describes a run
+that was accurate when it was made, and this repository does not retro-edit historical
+measurements.
+
+```
+OK: test-only access seams have one definition each (3 seam(s), 20 specialisation definition(s))
+```
+
+### What the third seam is
+
+`SharpRuntime::Testing::KeyMaterialAccess<T>`, declared by
+`modules/security-cryptography/include/System/Security/Cryptography/detail/SecureMemory.hpp` and
+befriended by `KeyedHashAlgorithm`, `HMAC` and `Rfc2898DeriveBytes`. It was added after this
+document's last revision, which is why the running figures fell behind.
+
+### The invariant it had to satisfy, and does
+
+CLAUDE.md requires **both** guards for every seam — the ODR checker *and* a
+`test/consumer/*_negative.cpp` site — because they catch different mutations: the checker cannot
+see a collection's private counter being made public, and the consumer fixture cannot see a second
+definition added in another test translation unit.
+
+Audited on 2026-08-19: the third seam has both. `test/consumer/security_cryptography_key_material_negative.cpp`
+covers it and cites this requirement in its own header. **So it is only the arithmetic in this
+document that fell behind, not the enforcement.**
+
+| seam | declared by | consumer fixture |
+|---|---|---|
+| `CollectionVersionAccess` | `System/Collections/detail/MutationCounter.hpp` | `collections_mutation_version_negative.cpp` |
+| `SortedSetVersionAccess` | `System/Collections/Generic/SortedSet.hpp` | `collections_sorted_set_version_negative.cpp` |
+| `KeyMaterialAccess` | `System/Security/Cryptography/detail/SecureMemory.hpp` | `security_cryptography_key_material_negative.cpp` |
+
