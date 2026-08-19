@@ -139,6 +139,31 @@ namespace System::Xml {
          * @throws System::Xml::XmlException if @p target is not a valid XML name.
          * @throws System::ArgumentException if @p target is empty.
          * @throws System::InvalidOperationException if @c Close() has already been called.
+         *
+         * @note **This runtime cannot read back a processing instruction it writes anywhere
+         * except before every other node.** The instruction is emitted correctly in any
+         * position and is well-formed XML, but this runtime's own parser accepts one only at
+         * the very start of the document — an XML declaration may precede it, and nothing
+         * else may, not even a comment. `<root><?p d?></root>`, `<root/><?p d?>` and
+         * `<!--c--><?p d?><root/>` all fail to load. So SR-AUD-349's closure property —
+         * whatever this writer emits, this module's reader must consume — does **not** hold
+         * for this one node kind.
+         *
+         * This is a limitation of the vendored substrate's node-type model, not a check in
+         * the wrong place: `vendor/tinyxml2` has no processing-instruction type at all, so
+         * every `<?` becomes an XML *declaration* and inherits the rule that a declaration is
+         * allowed only at document level and before anything else. `vendor/` is third-party
+         * source and is never edited, and pre-rewriting non-leading `<?...?>` around the
+         * substrate would fork its semantics for every document.
+         *
+         * **.NET has no such limitation**, because its model separates the two: its loader
+         * switches on `XmlNodeType.XmlDeclaration` and `XmlNodeType.ProcessingInstruction` as
+         * distinct cases in the same general node loop (`XmlLoader.cs:203-209`), which runs
+         * for element content and not only for the prolog.
+         *
+         * Ticket **#2202**; pinned by `XmlWriterValidationTests.Decl2202_*` and, at the
+         * Xml.Linq layer, by
+         * `XLinqLexicalSerializationTests.ProcessingInstruction_ParserPositionLimitIsSubstrateNotSerialization`.
          */
         void WriteProcessingInstruction(const std::string& target, const std::string& data);
 

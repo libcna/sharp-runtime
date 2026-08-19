@@ -26,6 +26,25 @@ namespace System::Xml::Linq {
      * matching real .NET's `XmlEncodedRawTextWriter.WriteCommentOrPi`. Before #2196 the direct
      * door emitted the raw `?>`, which closed the instruction early and made the resulting text
      * unparseable — this node kind is the one whose corruption was not silent.
+     *
+     * @note **This runtime cannot parse back a processing instruction placed anywhere except
+     * before every other node.** Serialization is correct in every position and the text is
+     * well-formed XML, but `XDocument::Parse` accepts a PI only at the very start of the
+     * document — an XML declaration may precede it, and nothing else may, not even a comment.
+     * `<root><?p d?></root>`, `<root/><?p d?>` and `<!--c--><?p d?><root/>` all throw.
+     *
+     * The cause is the vendored substrate's node-type model rather than anything in this port:
+     * `vendor/tinyxml2` has no processing-instruction type, so every `<?` becomes an XML
+     * *declaration* and inherits the rule that a declaration may appear only at document level
+     * and before anything else. `vendor/` is third-party source and is never edited.
+     *
+     * **.NET has no such limitation** — its loader handles `XmlNodeType.XmlDeclaration` and
+     * `XmlNodeType.ProcessingInstruction` as separate cases in the same general node loop
+     * (`XmlLoader.cs:203-209`), which runs for element content too.
+     *
+     * Ticket **#2202**; pinned by
+     * `XLinqLexicalSerializationTests.ProcessingInstruction_ParserPositionLimitIsSubstrateNotSerialization`
+     * and, at the `System::Xml` layer, by `XmlWriterValidationTests.Decl2202_*`.
      */
     class XProcessingInstruction : public XNode {
         std::string target_;

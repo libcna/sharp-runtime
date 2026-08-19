@@ -784,3 +784,64 @@ TEST(XmlWriterValidationTests, Fix2348_TheCheckIsQuoteAware) {
                      System::Xml::XmlException);
     }
 }
+
+// ===========================================================================================
+// #2202 — the parser accepts a processing instruction ONLY before every other node.
+//
+// This is a DOCUMENTED LIMITATION, not a repair, and it is pinned at this layer because the
+// ticket's acceptance criteria ask for it "at both layers" and only the Xml.Linq layer had it
+// (XLinqLexicalSerializationTests.ProcessingInstruction_ParserPositionLimitIsSubstrateNotSerialization).
+//
+// THE ASYMMETRY: both of this runtime's writer families emit a PI in any position, and this
+// runtime's own parser can then read back only the leading one. SR-AUD-349's closure property
+// -- whatever the writer emits, the reader must consume -- does not hold for this node kind.
+//
+// THE CAUSE IS THE SUBSTRATE'S NODE-TYPE MODEL, not a misplaced check and not a defect in the
+// port. vendor/tinyxml2 has NO processing-instruction node type at all: every "<?" becomes an
+// XMLDeclaration, so tinyxml2's rule that a declaration is allowed only at document level and
+// before anything else catches ordinary PIs too. Called directly, with no port code involved,
+// tinyxml2 produces exactly the four verdicts below. vendor/ is third-party source and is never
+// edited (CLAUDE.md), and the alternative -- rewriting non-leading "<?...?>" before handing text
+// to the substrate and mapping it back -- forks the substrate's semantics for every document.
+//
+// .NET HAS NO SUCH LIMITATION, and the reason is precisely the model difference: its loader
+// switches on XmlNodeType.XmlDeclaration and XmlNodeType.ProcessingInstruction as SEPARATE
+// cases in the same general node loop (XmlLoader.cs:203-209), which runs for element content,
+// not only the prolog.
+// ===========================================================================================
+
+TEST(XmlWriterValidationTests, Decl2202_TheParserAcceptsAPiOnlyBeforeEveryOtherNode) {
+    const auto parses = [](const std::string& xml) {
+        System::Xml::XmlDocument doc;
+        doc.LoadXml(xml);
+    };
+    EXPECT_NO_THROW(parses("<?p d?><root/>"));
+    EXPECT_THROW(parses("<root><?p d?></root>"), XmlException);
+    EXPECT_THROW(parses("<root/><?p d?>"), XmlException);
+    // Not even a comment may precede it -- which is what shows the rule is "before every other
+    // node" rather than "outside the root element".
+    EXPECT_THROW(parses("<!--c--><?p d?><root/>"), XmlException);
+}
+
+TEST(XmlWriterValidationTests, Decl2202_AnXmlDeclarationMayStillPrecedeThePi) {
+    // The one node that may come first, because the substrate's single "<?" node type is the
+    // declaration. Recorded so the rule above is not read as stricter than it is.
+    System::Xml::XmlDocument doc;
+    EXPECT_NO_THROW(doc.LoadXml("<?xml version=\"1.0\"?><?p d?><root/>"));
+}
+
+TEST(XmlWriterValidationTests, Decl2202_TheWriterEmitsWhatTheParserCannotReadBack) {
+    // The asymmetry itself, asserted end to end rather than inferred from the two halves.
+    auto w = NewWriter();
+    w->WriteStartElement("root");
+    ASSERT_NO_THROW(w->WriteProcessingInstruction("p", "d"));
+    w->WriteEndElement();
+    const std::string emitted = w->ToString();
+    EXPECT_NE(emitted.find("<?p d?>"), std::string::npos)
+        << "the writer must still emit the instruction: " << emitted;
+
+    System::Xml::XmlDocument doc;
+    EXPECT_THROW(doc.LoadXml(emitted), XmlException)
+        << "if this stops throwing, #2202's limitation is gone and the note on "
+           "WriteProcessingInstruction and XProcessingInstruction must be removed";
+}
