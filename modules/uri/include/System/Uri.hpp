@@ -8,8 +8,10 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/UriHostNameType.hpp"
 #include "System/UriPartial.hpp"
+#include "System/UriCreationOptions.hpp"
 
 namespace System {
+
 
     using SharpRuntime::intcs;
 
@@ -88,6 +90,25 @@ namespace System {
          * @throws System::UriFormatException if the URI does not match the requested kind.
          */
         Uri(const std::string& uriString, UriKind uriKind);
+
+        /**
+         * @brief Constructs a Uri from a string with the given creation options.
+         *
+         * C++ counterpart of .NET's `Uri(string uriString, in UriCreationOptions creationOptions)`
+         * (`Uri.cs:476-480`). Ticket #1997 group A-3 / SR-AUD-149.
+         *
+         * @param uriString      The URI string.
+         * @param creationOptions Options controlling creation. **Inert in this port** — see
+         *                        `UriCreationOptions`.
+         * @throws System::UriFormatException if @p uriString is not a valid **absolute** URI.
+         *
+         * @note **The kind is `Absolute`, not `RelativeOrAbsolute`**, and that is the reference's
+         * choice rather than this port's: .NET's body is
+         * `CreateThis(uriString, false, UriKind.Absolute, in creationOptions)`. A relative string
+         * therefore throws here, exactly as it does through .NET's overload — which is easy to
+         * get wrong, because the sibling one-argument constructor accepts one.
+         */
+        Uri(const std::string& uriString, const UriCreationOptions& creationOptions);
 
         /**
          * @brief Constructs an absolute URI by combining a base URI with a relative reference.
@@ -191,6 +212,26 @@ namespace System {
          *   rather than changed on recollection (ticket #1992, deferred verification).
          */
         static bool TryCreate(const std::string& uriString, UriKind uriKind,
+                               std::shared_ptr<Uri>& result);
+
+        /**
+         * @brief Tries to construct a Uri from a string with the given creation options.
+         *
+         * C++ counterpart of .NET's
+         * `TryCreate(string?, in UriCreationOptions, out Uri?)` (`UriExt.cs:236-240`). Ticket
+         * #1997 group A-3 / SR-AUD-149.
+         *
+         * @param uriString      The URI string.
+         * @param creationOptions Options controlling creation. **Inert in this port** — see
+         *                        `UriCreationOptions`.
+         * @param result         Receives the constructed Uri on success, or null on failure.
+         * @return @c true on success.
+         *
+         * @note Like the constructor, this resolves against `UriKind::Absolute` --
+         * .NET's body is `CreateHelper(uriString, false, UriKind.Absolute, in creationOptions)`.
+         */
+        static bool TryCreate(const std::string& uriString,
+                               const UriCreationOptions& creationOptions,
                                std::shared_ptr<Uri>& result);
 
         /**

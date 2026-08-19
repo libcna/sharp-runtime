@@ -431,6 +431,16 @@ Uri::Uri(const std::string& uriString, UriKind uriKind) {
         throw System::UriFormatException("URI must be relative");
 }
 
+// Ticket #1997 group A-3 / SR-AUD-149. Delegates to the UriKind overload with Absolute, which is
+// what .NET's body does: CreateThis(uriString, false, UriKind.Absolute, in creationOptions)
+// (Uri.cs:476-480). The options are accepted and preserved by the caller's own object; they carry
+// no effect here because this Uri performs no path/query canonicalisation to disable -- disclosed
+// on UriCreationOptions itself.
+Uri::Uri(const std::string& uriString, const UriCreationOptions& creationOptions)
+    : Uri(uriString, UriKind::Absolute) {
+    (void)creationOptions;
+}
+
 Uri::Uri(const Uri& baseUri, const std::string& relativeUri) {
     if (!baseUri.isAbsoluteUri_)
         throw System::ArgumentOutOfRangeException("baseUri");
@@ -656,6 +666,16 @@ bool Uri::TryCreate(const std::string& uriString, UriKind uriKind,
         result = nullptr;
         return false;
     }
+}
+
+// Ticket #1997 group A-3 / SR-AUD-149. .NET's body is
+// CreateHelper(uriString, false, UriKind.Absolute, in creationOptions) (UriExt.cs:236-240), so
+// this resolves against Absolute like the constructor -- NOT RelativeOrAbsolute, which is the
+// easy mistake because the sibling one-argument constructor accepts a relative string.
+bool Uri::TryCreate(const std::string& uriString, const UriCreationOptions& creationOptions,
+                    std::shared_ptr<Uri>& result) {
+    (void)creationOptions;
+    return TryCreate(uriString, UriKind::Absolute, result);
 }
 
 } // namespace System
