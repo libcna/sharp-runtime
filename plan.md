@@ -1,11 +1,12 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-19 — branch **`next`**, working tree clean. Gate **17,612 across 38
-executables: 17,612 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs
+*Last verified: 2026-08-19 — branch **`next`**, working tree clean. Gate **17,625 across 38
+executables: 17,625 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs
 with every executable run separately and continuing past failures, zero build warnings at
 `--parallel 2`. Graph **41 / 93**, seams **3 / 20**, negative fixtures **48 / 245** (unchanged —
-#2397 outlawed no spelling). **BOTH WORK QUEUES ARE EMPTY**: `ticket` has 0 `todo` (2,380 done, 9
-blocked, 1 needs_user, 5 wontfix) and `task` has 0 unclassified.*
+#2397 and #2398 outlawed no spelling). `ticket` has **1 `todo`** — **#2399**, split out of #2398
+because every part of it is a public source break — plus 2,381 done, 9 blocked, 1 needs_user, 5
+wontfix; `task` has 0 unclassified.*
 
 ***The latest change is #2397, and what it demonstrates matters more than what it repaired.*** *The
 queues were already empty, so the work was **found by measurement**: the restored reference was
@@ -18,8 +19,14 @@ group's value and dropped a trailing empty segment, both because the body was on
 never produces. Landed under SA-5 with no layout, vtable, signature or `noexcept` change and no
 outlawed spelling. **Zero downstream sites** in both consumers. Nine mutations, eight caught, and
 the ninth a **proven equivalence** measured over 288 (pattern, input) pairs rather than asserted.
-`NEXT.md` §4b lists the three other modules with no test sources and says plainly which are and
-are not worth the same treatment.*
+**#2398 then repeated the method on the next such module and found a worse defect**:
+`RandomNumberGenerator` threw `PlatformNotSupportedException` on Emscripten, on a premise
+`Guid.cpp:377-388` had already measured false — `Guid::NewGuid()` has been getting real entropy
+there through the very `getentropy()` call the cryptographic RNG refused to make, and .NET does not
+refuse either. **Its shipped tests could not have caught it**: two cases asserting `buffer.size()`
+after filling a buffer sized before the call. Four platform arms became two, so the arm Emscripten
+takes is now the arm the Linux gate runs. `NEXT.md` §4b lists what remains and says plainly which
+candidates are and are not worth the same treatment.*
 
 *Prior snapshot, retained historically:*
 

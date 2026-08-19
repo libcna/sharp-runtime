@@ -78,7 +78,13 @@ namespace System::Security::Cryptography {
         /** @return A random intcs in [fromInclusive, toExclusive). */
         [[nodiscard]] static intcs GetInt32(intcs fromInclusive, intcs toExclusive) {
             if (fromInclusive >= toExclusive) {
-                throw System::ArgumentException("fromInclusive must be less than toExclusive.");
+                // RandomNumberGenerator.cs:105-106 -- SR.Argument_InvalidRandomRange, whose text is
+                // System.Security.Cryptography Strings.resx:126-128. The exception TYPE was already
+                // right: .NET throws ArgumentException here rather than ArgumentOutOfRangeException,
+                // and it names no parameter, because the fault is the RELATIONSHIP between the two
+                // rather than either one being out of range.
+                throw System::ArgumentException(
+                    "Range of random number does not contain at least one possibility.");
             }
             uint32_t range = static_cast<uint32_t>(toExclusive) - static_cast<uint32_t>(fromInclusive) - 1;
             if (range == 0) return fromInclusive;
@@ -113,7 +119,12 @@ namespace System::Security::Cryptography {
             System::ArgumentOutOfRangeException::ThrowIfNegative(offset, "offset");
             System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");
             if (count > static_cast<intcs>(data.size()) - offset) {
-                throw System::ArgumentException("Offset and length were out of bounds for the array.");
+                // RandomNumberGenerator.cs:438-446 -- SR.Argument_InvalidOffLen. The text was
+                // TRUNCATED here at "for the array.", which also left this file inconsistent with
+                // the rest of the port: Console.hpp already spells .NET's full sentence verbatim.
+                throw System::ArgumentException(
+                    "Offset and length were out of bounds for the array or count is greater than "
+                    "the number of elements from index to the end of the source collection.");
             }
         }
     };
