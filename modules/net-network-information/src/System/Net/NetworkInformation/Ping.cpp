@@ -180,18 +180,87 @@ namespace {
         return OwnedDescriptor(fd);
     }
 
+    /**
+     * @brief Applies a socket option, reporting a kernel refusal instead of discarding it.
+     *
+     * Ticket #2194. Every `setsockopt` here discarded its return value, so an option the kernel
+     * rejected was silently not applied -- a caller who set `Ttl = 1` expecting a
+     * `TtlExpired` reply got a normal one and no indication that the option had been dropped.
+     */
+    void setOptionOrThrow(int fd, int level, int name, const void* value, socklen_t size) {
+        if (::setsockopt(fd, level, name, value, size) != 0) {
+            throw NetworkInformationException(errno);
+        }
+    }
+
+    /**
+     * @brief Whether @p data is a reply that correlates with the request we just sent.
+     *
+     * HONEST NOTE: a mutation that RESTARTS the timeout on every foreign datagram (rather than
+     * keeping the original deadline, as the call site does) is NOT caught. Observing it needs a
+     * SUSTAINED flood of foreign datagrams plus a wall-clock assertion, and under the mutation
+     * the call would not fail but HANG -- so the test would be both flaky and useless, the
+     * shape #2352 and #2105 were repaired for. The original deadline is kept because a busy or
+     * hostile socket must not be able to extend this call without bound, which is the same
+     * class of defect #2032 removed from WaitForExit.
+     *
+     * Ticket #2194. The correlation is the SEQUENCE NUMBER -- see the long note at the call site
+     * for why the identifier cannot be used on a ping socket and why the source address must not
+     * be. An ICMP ERROR reply quotes the original request after its own header, so the sequence
+     * is read from the quoted request rather than from the error's own header, which carries
+     * none: that is the same "original IP+ICMP request is in the payload" rule .NET follows
+     * (`Ping.RawSocket.cs:166-190`).
+     */
+    bool replyMatchesRequest(const uint8_t* data, size_t size, bool isIPv6, uint16_t sequence) {
+        if (isIPv6) {
+            if (size < sizeof(icmp6_hdr)) return false;
+            icmp6_hdr hdr{};
+            std::memcpy(&hdr, data, sizeof(hdr));
+            if (hdr.icmp6_type == ICMP6_ECHO_REPLY) return ntohs(hdr.icmp6_seq) == sequence;
+            // An error quotes the IPv6 header (40 bytes) then the original ICMPv6 header.
+            const size_t quoted = sizeof(icmp6_hdr) + 40;
+            if (size < quoted + sizeof(icmp6_hdr)) return false;
+            icmp6_hdr original{};
+            std::memcpy(&original, data + quoted, sizeof(original));
+            return ntohs(original.icmp6_seq) == sequence;
+        }
+        if (size < sizeof(IcmpV4Header)) return false;
+        IcmpV4Header hdr{};
+        std::memcpy(&hdr, data, sizeof(hdr));
+#if defined(SHARP_RUNTIME_PING_LINUX_ICMP)
+        const uint8_t type = hdr.type;
+        if (type == ICMP_ECHOREPLY) return ntohs(hdr.un.echo.sequence) == sequence;
+#else
+        const uint8_t type = hdr.icmp_type;
+        if (type == ICMP_ECHOREPLY) return ntohs(hdr.icmp_seq) == sequence;
+#endif
+        // An error quotes the original IP header, whose length is in its low nibble, then the
+        // original ICMP header.
+        if (size < sizeof(IcmpV4Header) + 1) return false;
+        const size_t quotedIpLength = 4u * static_cast<size_t>(data[sizeof(IcmpV4Header)] & 0x0F);
+        const size_t quoted = sizeof(IcmpV4Header) + quotedIpLength;
+        if (quotedIpLength < 20 || size < quoted + sizeof(IcmpV4Header)) return false;
+        IcmpV4Header original{};
+        std::memcpy(&original, data + quoted, sizeof(original));
+#if defined(SHARP_RUNTIME_PING_LINUX_ICMP)
+        return ntohs(original.un.echo.sequence) == sequence;
+#else
+        return ntohs(original.icmp_seq) == sequence;
+#endif
+    }
+
     void applyOptions(int fd, bool isIPv6, const PingOptions* options) {
         if (options == nullptr) {
             return;
         }
         int ttl = static_cast<int>(options->getTtlProperty());
         if (isIPv6) {
-            ::setsockopt(fd, IPPROTO_IPV6, IPV6_UNICAST_HOPS, &ttl, sizeof(ttl));
+            setOptionOrThrow(fd, IPPROTO_IPV6, IPV6_UNICAST_HOPS, &ttl, sizeof(ttl));
         } else {
-            ::setsockopt(fd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl));
+            setOptionOrThrow(fd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl));
 #if defined(IP_MTU_DISCOVER)
             int mode = options->getDontFragmentProperty() ? IP_PMTUDISC_DO : IP_PMTUDISC_WANT;
-            ::setsockopt(fd, IPPROTO_IP, IP_MTU_DISCOVER, &mode, sizeof(mode));
+            setOptionOrThrow(fd, IPPROTO_IP, IP_MTU_DISCOVER, &mode, sizeof(mode));
 #endif
         }
     }
@@ -210,7 +279,7 @@ PingReply Ping::sendPingCore(const System::Net::IPAddress& address, const std::v
     timeval tv{};
     tv.tv_sec = timeout / 1000;
     tv.tv_usec = (timeout % 1000) * 1000;
-    ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setOptionOrThrow(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     static std::atomic<uint16_t> sequenceCounter{0};
     uint16_t identifier = static_cast<uint16_t>(::getpid() & 0xFFFF);
@@ -289,8 +358,50 @@ PingReply Ping::sendPingCore(const System::Net::IPAddress& address, const std::v
         throw NetworkInformationException(errno);
     }
 
+    // #2194: read until a datagram that CORRELATES WITH THIS REQUEST arrives, or the deadline
+    // passes. The old code took the first datagram on the socket unconditionally, so a reply to
+    // somebody else's outstanding request -- or a stale one of our own -- was reported as the
+    // answer to this one, with its status and its round-trip time.
+    //
+    // THE TICKET'S ACCEPTANCE CRITERION IS WRONG ON TWO OF ITS THREE FIELDS, and both are
+    // measured rather than argued:
+    //
+    //  * IDENTIFIER -- cannot be matched here. This runtime opens a SOCK_DGRAM/IPPROTO_ICMP
+    //    "ping socket", and the Linux kernel REWRITES the ICMP identifier: probed directly, a
+    //    request written with id 0x1234 came back as 0x94d4 (the kernel uses the socket's own
+    //    port). .NET checks the identifier (`Ping.RawSocket.cs:230`) because its raw-socket path
+    //    writes an id the kernel leaves alone; on a ping socket that check would reject every
+    //    reply.
+    //  * SOURCE ADDRESS -- deliberately NOT matched, and .NET does not match it either: it
+    //    reports `socketConfig.EndPoint.Address`, the address it SENT to (`:245`). Requiring the
+    //    source to equal the destination would reject the legitimate error replies that come
+    //    from an intermediate router -- TimeExceeded above all, which is exactly what a caller
+    //    setting a low Ttl is asking for.
+    //  * SEQUENCE -- matched. It survives the ping socket unchanged (probed: 0x5678 out, 0x5678
+    //    back), it is ours, and it is the field that distinguishes this request from another.
     std::vector<uint8_t> recvBuf(65535);
-    ssize_t received = ::recv(fd, recvBuf.data(), recvBuf.size(), 0);
+    const auto deadline = start + std::chrono::milliseconds(timeout);
+    ssize_t received = -1;
+    for (;;) {
+        received = ::recv(fd, recvBuf.data(), recvBuf.size(), 0);
+        if (received < 0) break;
+        if (replyMatchesRequest(recvBuf.data(), static_cast<size_t>(received), isIPv6, sequence))
+            break;
+        // Not ours. Keep the ORIGINAL deadline rather than restarting the timeout, so a stream
+        // of foreign datagrams cannot extend this call without bound.
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+            received = -1;
+            errno = EAGAIN;
+            break;
+        }
+        const auto remaining =
+            std::chrono::duration_cast<std::chrono::microseconds>(deadline - now).count();
+        timeval rest{};
+        rest.tv_sec = static_cast<time_t>(remaining / 1000000);
+        rest.tv_usec = static_cast<suseconds_t>(remaining % 1000000);
+        setOptionOrThrow(fd, SOL_SOCKET, SO_RCVTIMEO, &rest, sizeof(rest));
+    }
     auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
     // The descriptor stays owned until this function returns (ticket #2193). The `::close(fd)`
     // that used to sit here also ran BEFORE the `errno` reads below, and `close()` is allowed to

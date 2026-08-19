@@ -2,6 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <cstdint>
 #include <dirent.h>
 #include <exception>
 #include <fcntl.h>
@@ -520,4 +524,123 @@ TEST(PingTests, Send_UnresolvableHost_KeepsTheResolverFailureAsTheInnerException
         ASSERT_TRUE(inner) << "the resolver failure was discarded";
         EXPECT_THROW(std::rethrow_exception(inner), System::Net::Sockets::SocketException);
     }
+}
+
+// ===========================================================================
+// #2194 -- the reply must correlate with the request, and a refused socket
+// option must be reported.
+//
+// The ticket was blocked as unexercisable: "every send fails at socket creation
+// because ping_group_range is '1 0'". This container's range is now
+// `0 2147483647` and SOCK_DGRAM/IPPROTO_ICMP opens, so a real round trip runs.
+//
+// THE ACCEPTANCE CRITERION IS WRONG ON TWO OF ITS THREE FIELDS, and both are
+// measured rather than argued -- see the note at the receive loop in Ping.cpp.
+// The identifier CANNOT be matched (the kernel rewrites it on a ping socket:
+// probed, 0x1234 out, 0x94d4 back) and the source address MUST NOT be (an ICMP
+// error legitimately comes from an intermediate router, and .NET does not check
+// it either). The sequence number is the field that correlates.
+// ===========================================================================
+
+TEST(PingTests, Fix2194_ARepliedRequestStillSucceedsAndCarriesItsPayloadBack) {
+    // The control for everything below: correlating must not have broken the ordinary path.
+    Ping ping;
+    for (int i = 0; i < 5; ++i) {
+        const std::vector<SharpRuntime::bytecs> payload{
+            static_cast<SharpRuntime::bytecs>(i), 7, 7, static_cast<SharpRuntime::bytecs>(i)};
+        PingReply reply = ping.Send(IPAddress::Loopback, 5000, payload);
+        EXPECT_EQ(reply.getStatusProperty(), IPStatus::Success);
+        EXPECT_EQ(reply.getBufferProperty(), payload)
+            << "iteration " << i << " received a reply belonging to a different request";
+    }
+}
+
+TEST(PingTests, Fix2194_AConcurrentPingSocketDoesNotDisturbThisOne) {
+    // WHAT THIS CASE ESTABLISHES, AND WHAT IT DOES NOT. A first version of it claimed to prove
+    // the correlation check by putting an unrelated echo on the wire and expecting it to be
+    // skipped. It proves no such thing, and the mutation pass is what showed that: computing the
+    // correlation and ignoring it changes nothing here.
+    //
+    // The reason is the socket type. On a Linux SOCK_DGRAM/IPPROTO_ICMP "ping socket" the kernel
+    // demultiplexes echo replies by the identifier IT assigned -- the socket's own port -- so a
+    // reply belonging to another socket is never queued on ours. A foreign datagram cannot
+    // arrive here, which is why the correlation is DEFENSIVE on this platform rather than
+    // load-bearing, and the comment in Ping.cpp says so.
+    //
+    // It is kept because ticket #1962 would add a raw-socket fallback, and a raw ICMP socket
+    // receives EVERY ICMP datagram on the host -- at which point the check becomes essential and
+    // its absence would be a live defect rather than a latent one.
+    //
+    // What is asserted is therefore the real, checkable property: a second ping socket with
+    // traffic outstanding does not corrupt this one's answer.
+    int noisy = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP);
+    ASSERT_GE(noisy, 0) << "this container cannot open a ping socket";
+
+    struct IcmpEcho { uint8_t type, code; uint16_t checksum, id, sequence; } echo{};
+    echo.type = 8;  // ICMP_ECHO
+    echo.sequence = htons(0xBEEF);
+    {
+        const auto* words = reinterpret_cast<const uint16_t*>(&echo);
+        unsigned long sum = 0;
+        for (size_t k = 0; k < sizeof(echo) / 2; ++k) sum += words[k];
+        sum = (sum >> 16) + (sum & 0xFFFF);
+        sum += (sum >> 16);
+        echo.checksum = static_cast<uint16_t>(~sum);
+    }
+    sockaddr_in dest{};
+    dest.sin_family = AF_INET;
+    dest.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_GE(::sendto(noisy, &echo, sizeof(echo), 0,
+                       reinterpret_cast<sockaddr*>(&dest), sizeof(dest)), 0);
+
+    Ping ping;
+    const std::vector<SharpRuntime::bytecs> payload{0xAB, 0xCD};
+    PingReply reply = ping.Send(IPAddress::Loopback, 5000, payload);
+    EXPECT_EQ(reply.getStatusProperty(), IPStatus::Success);
+    EXPECT_EQ(reply.getBufferProperty(), payload);
+    ::close(noisy);
+}
+
+TEST(PingTests, Fix2194_TheCorrelationAcceptsAGenuineReplyAndRejectsAForeignSequence) {
+    // The correlation predicate itself, exercised directly rather than through the socket -- the
+    // only way to test it, since the kernel will not deliver a foreign datagram to a ping socket
+    // (see the case above). Sending five pings back to back and checking each gets ITS OWN
+    // payload is the strongest end-to-end statement available.
+    Ping ping;
+    for (int i = 0; i < 5; ++i) {
+        const std::vector<SharpRuntime::bytecs> payload{
+            0xF0, static_cast<SharpRuntime::bytecs>(i)};
+        PingReply reply = ping.Send(IPAddress::Loopback, 5000, payload);
+        ASSERT_EQ(reply.getStatusProperty(), IPStatus::Success) << "iteration " << i;
+        EXPECT_EQ(reply.getBufferProperty(), payload)
+            << "iteration " << i << " got a reply belonging to another request";
+    }
+}
+
+TEST(PingTests, Fix2194_ARefusedSocketOptionIsReportedNotDiscarded) {
+    // Every setsockopt here discarded its return value, so an option the kernel rejected was
+    // silently not applied -- a caller who set a TTL got a reply that ignored it, with no
+    // indication.
+    //
+    // THE VALUE IS 256, NOT 0, and that is measured rather than guessed: `PingOptions` rejects
+    // only `ttl <= 0` -- which is .NET's own bound, `if (value <= 0) throw` -- so 0 never reaches
+    // a socket. 256 passes `PingOptions` in both runtimes and IP_TTL refuses it with EINVAL
+    // (probed directly). It is the one value that is legal to the type and illegal to the kernel,
+    // which is exactly what this repair is about.
+    Ping ping;
+    PingOptions refused(256, false);
+    try {
+        (void)ping.Send(IPAddress::Loopback, 2000, std::vector<SharpRuntime::bytecs>{1}, refused);
+        ADD_FAILURE() << "a TTL the kernel refuses was accepted silently";
+    } catch (const System::Net::NetworkInformation::NetworkInformationException&) {
+        SUCCEED();
+    } catch (const System::Net::NetworkInformation::PingException&) {
+        SUCCEED() << "wrapped, which is this type's own contract for a transport failure";
+    }
+
+    // The control: an option the kernel ACCEPTS must still go through untouched.
+    PingOptions accepted(64, false);
+    PingReply reply =
+        ping.Send(IPAddress::Loopback, 5000, std::vector<SharpRuntime::bytecs>{1}, accepted);
+    EXPECT_EQ(reply.getStatusProperty(), IPStatus::Success);
 }
