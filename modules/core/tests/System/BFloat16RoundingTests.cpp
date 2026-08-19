@@ -13,6 +13,7 @@
 #include <cstring>
 #include <bit>
 #include <gtest/gtest.h>
+#include "System/ArithmeticException.hpp"
 #include "System/Half.hpp"
 #include <array>
 #include <string>
@@ -384,6 +385,7 @@ template <typename T> concept HasCopySign     = requires(T v) { T::CopySign(v, v
 template <typename T> concept HasSqrt         = requires(T v) { T::Sqrt(v); };
 template <typename T> concept HasIsFinite     = requires(T v) { T::IsFinite(v); };
 template <typename T> concept HasGetHashCode  = requires(const T& v) { v.GetHashCode(); };
+template <typename T> concept HasMaxNative    = requires(T v) { T::MaxNative(v, v); };
 
 TEST(BFloat16SurfaceTests, Fix2384_TheInStepRequirementHeldWhenUnit1Landed) {
     // PARTIALLY INVERTED BY #2384 UNIT 1. Its predecessor asserted that NONE of this surface
@@ -557,4 +559,128 @@ TEST(Fix2384Unit1, ClampMaxMinAndMagnitudeGoThroughFloatAsDotNetDoes) {
               -3.0f);
     EXPECT_EQ(static_cast<float>(BFloat16::MinMagnitude(BFloat16(-3.0f), BFloat16(2.0f))),
               2.0f);
+}
+
+// =================================================================================================
+// #2384 unit 2a -- rounding, Sign, and the IEEE 754:2019 *Number family, on BOTH types.
+// =================================================================================================
+
+TEST(Fix2384Unit2a, TheNumberFamilyDoesNotPropagateNaNWhereMaxAndMinDo) {
+    // THE ROW THAT SEPARATES THEM, and the one a forward to Max/Min passes every other assertion
+    // while failing. .NET's own comment: `maximumNumber` "does not propagate NaN inputs back to
+    // the caller and otherwise returns the larger of the inputs".
+    using System::Half;
+    using System::Numerics::BFloat16;
+
+    const Half hNaN = Half::NaN;
+    const Half hTwo = Half::FromSingle(2.0f);
+    EXPECT_TRUE(Half::IsNaN(Half::Max(hNaN, hTwo))) << "Max PROPAGATES NaN";
+    EXPECT_TRUE(Half::IsNaN(Half::Min(hNaN, hTwo)));
+    EXPECT_EQ(Half::MaxNumber(hNaN, hTwo).ToSingle(), 2.0f) << "MaxNumber IGNORES it";
+    EXPECT_EQ(Half::MaxNumber(hTwo, hNaN).ToSingle(), 2.0f) << "from either side";
+    EXPECT_EQ(Half::MinNumber(hNaN, hTwo).ToSingle(), 2.0f);
+    EXPECT_EQ(Half::MinNumber(hTwo, hNaN).ToSingle(), 2.0f);
+
+    const BFloat16 bNaN = BFloat16::NaN();
+    const BFloat16 bTwo(2.0f);
+    EXPECT_TRUE(BFloat16::IsNaN(BFloat16::Max(bNaN, bTwo)));
+    EXPECT_EQ(static_cast<float>(BFloat16::MaxNumber(bNaN, bTwo)), 2.0f);
+    EXPECT_EQ(static_cast<float>(BFloat16::MinNumber(bTwo, bNaN)), 2.0f);
+
+    // Ordinary ordering is unchanged, so the NaN rows above are not passing because the family
+    // is broken generally.
+    EXPECT_EQ(Half::MaxNumber(Half::FromSingle(1.0f), hTwo).ToSingle(), 2.0f);
+    EXPECT_EQ(Half::MinNumber(Half::FromSingle(1.0f), hTwo).ToSingle(), 1.0f);
+}
+
+TEST(Fix2384Unit2a, TheNumberFamilyTreatsPositiveZeroAsLargerThanNegativeZero) {
+    // The second IEEE rule, and NO COMPARISON CAN SEE IT -- +0.0 == -0.0 is true -- so the BITS
+    // are asserted. A naive `(x > y) ? x : y` returns the wrong zero here and passes everything
+    // else in this file.
+    using System::Half;
+    using System::Numerics::BFloat16;
+    const Half posZero(static_cast<uint16_t>(0x0000u));
+    const Half negZero(static_cast<uint16_t>(0x8000u));
+    ASSERT_EQ(posZero.ToSingle(), negZero.ToSingle()) << "they compare equal, which is the point";
+
+    EXPECT_EQ(Half::MaxNumber(posZero, negZero).bits, 0x0000u);
+    EXPECT_EQ(Half::MaxNumber(negZero, posZero).bits, 0x0000u);
+    EXPECT_EQ(Half::MinNumber(posZero, negZero).bits, 0x8000u);
+    EXPECT_EQ(Half::MinNumber(negZero, posZero).bits, 0x8000u);
+
+    const BFloat16 bPos(static_cast<uint16_t>(0x0000u));
+    const BFloat16 bNeg(static_cast<uint16_t>(0x8000u));
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::MaxNumber(bPos, bNeg)), 0x0000u);
+    EXPECT_EQ(std::bit_cast<uint16_t>(BFloat16::MinNumber(bNeg, bPos)), 0x8000u);
+
+    // The magnitude variants have the same tie rule, in the opposite direction for Min.
+    EXPECT_EQ(Half::MaxMagnitudeNumber(negZero, posZero).bits, 0x0000u);
+    EXPECT_EQ(Half::MinMagnitudeNumber(negZero, posZero).bits, 0x8000u);
+    // ...and they select by MAGNITUDE, which is what separates them from MaxNumber/MinNumber.
+    EXPECT_EQ(Half::MaxMagnitudeNumber(Half::FromSingle(-3.0f),
+                                       Half::FromSingle(2.0f)).ToSingle(), -3.0f);
+    EXPECT_EQ(Half::MinMagnitudeNumber(Half::FromSingle(-3.0f),
+                                       Half::FromSingle(2.0f)).ToSingle(), 2.0f);
+    EXPECT_EQ(static_cast<float>(BFloat16::MaxMagnitudeNumber(BFloat16(-3.0f), BFloat16(2.0f))),
+              -3.0f);
+}
+
+TEST(Fix2384Unit2a, SignThrowsOnNaNAndReturnsZeroForBothSignedZeros) {
+    // .NET throws ArithmeticException(SR.Arithmetic_NaN) rather than returning a sentinel, and it
+    // tests IsZero BEFORE IsNegative -- so Sign(-0.0) is 0, not -1. Both are transcribed.
+    using System::Half;
+    using System::Numerics::BFloat16;
+
+    EXPECT_THROW((void)Half::Sign(Half::NaN), System::ArithmeticException);
+    EXPECT_THROW((void)BFloat16::Sign(BFloat16::NaN()), System::ArithmeticException);
+
+    EXPECT_EQ(Half::Sign(Half(static_cast<uint16_t>(0x0000u))), 0);
+    EXPECT_EQ(Half::Sign(Half(static_cast<uint16_t>(0x8000u))), 0) << "-0.0 is ZERO, not negative";
+    EXPECT_EQ(BFloat16::Sign(BFloat16(static_cast<uint16_t>(0x8000u))), 0);
+
+    EXPECT_EQ(Half::Sign(Half::FromSingle(2.5f)), 1);
+    EXPECT_EQ(Half::Sign(Half::FromSingle(-2.5f)), -1);
+    EXPECT_EQ(Half::Sign(Half::PositiveInfinity), 1);
+    EXPECT_EQ(Half::Sign(Half::NegativeInfinity), -1);
+    EXPECT_EQ(BFloat16::Sign(BFloat16(2.5f)), 1);
+    EXPECT_EQ(BFloat16::Sign(BFloat16(-2.5f)), -1);
+}
+
+TEST(Fix2384Unit2a, TheRoundingFamilyGoesThroughFloatAndRoundsTiesToEven) {
+    using System::Half;
+    using System::Numerics::BFloat16;
+    EXPECT_EQ(Half::Ceiling(Half::FromSingle(1.25f)).ToSingle(), 2.0f);
+    EXPECT_EQ(Half::Floor(Half::FromSingle(1.75f)).ToSingle(), 1.0f);
+    EXPECT_EQ(Half::Truncate(Half::FromSingle(-1.75f)).ToSingle(), -1.0f);
+    EXPECT_EQ(Half::Ceiling(Half::FromSingle(-1.25f)).ToSingle(), -1.0f);
+
+    // TIES TO EVEN, not away from zero -- the row that separates .NET's MathF.Round from a naive
+    // std::round, and the reason this forwards to MathF rather than to <cmath> directly.
+    EXPECT_EQ(Half::Round(Half::FromSingle(0.5f)).ToSingle(), 0.0f);
+    EXPECT_EQ(Half::Round(Half::FromSingle(1.5f)).ToSingle(), 2.0f);
+    EXPECT_EQ(Half::Round(Half::FromSingle(2.5f)).ToSingle(), 2.0f);
+    EXPECT_EQ(static_cast<float>(BFloat16::Round(BFloat16(2.5f))), 2.0f);
+    EXPECT_EQ(static_cast<float>(BFloat16::Ceiling(BFloat16(1.25f))), 2.0f);
+    EXPECT_EQ(static_cast<float>(BFloat16::Truncate(BFloat16(-1.75f))), -1.0f);
+
+    // The digits overload exists on both.
+    EXPECT_EQ(Half::Round(Half::FromSingle(1.0f), 2).ToSingle(), 1.0f);
+    EXPECT_EQ(static_cast<float>(BFloat16::Round(BFloat16(1.0f), 2)), 1.0f);
+}
+
+TEST(Fix2384Unit2a, Decl2384_TheFourHalfOnlyMembersAreAbsentFromBFloat16Deliberately) {
+    // #2340's in-step rule means EACH TYPE GETS WHAT .NET GIVES IT, not that the two surfaces are
+    // identical. Measured by diffing the two ref surfaces: MaxNative, MinNative, ClampNative and
+    // MultiplyAddEstimate are declared on Half ONLY.
+    //
+    // Pinned so their absence on BFloat16 is a transcription rather than an oversight, and so a
+    // future unit that "completes" the symmetry has to justify inventing them.
+    static_assert(HasMaxNative<System::Half>, "#2384: .NET declares MaxNative on Half");
+    static_assert(!HasMaxNative<System::Numerics::BFloat16>,
+                  "#2384: .NET does NOT declare MaxNative on BFloat16 -- adding it would be "
+                  "invention, not parity");
+
+    using System::Half;
+    EXPECT_EQ(Half::MaxNative(Half::FromSingle(1.0f), Half::FromSingle(2.0f)).ToSingle(), 2.0f);
+    EXPECT_EQ(Half::MinNative(Half::FromSingle(1.0f), Half::FromSingle(2.0f)).ToSingle(), 1.0f);
 }

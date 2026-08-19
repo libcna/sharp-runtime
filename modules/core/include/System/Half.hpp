@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cstdint>
+#include "System/ArithmeticException.hpp"
 #include "System/MathF.hpp"
 #include <cstring>
 #include <string>
@@ -282,6 +283,66 @@ namespace System {
          *  (`Half.cs:1879`). */
         [[nodiscard]] static Half MinMagnitude(Half x, Half y) noexcept;
 
+        // -----------------------------------------------------------------------------------
+        // #2384 unit 2a: rounding, Sign, and the IEEE 754:2019 *Number family.
+        //
+        // The *Number members are NOT the same as Max/Min: they are `maximumNumber` /
+        // `minimumNumber`, which DO NOT PROPAGATE NaN and treat +0 as larger than -0. Both
+        // differences are real and both are pinned -- a forward to MathF::Max would satisfy every
+        // ordinary row and fail exactly those two.
+        // -----------------------------------------------------------------------------------
+
+        /** @brief The smallest integral value >= @p x. .NET: `(Half)MathF.Ceiling((float)x)`
+         *  (`Half.cs:1312`). */
+        [[nodiscard]] static Half Ceiling(Half x) noexcept;
+        /** @brief The largest integral value <= @p x. .NET: `Half.cs:1323`. */
+        [[nodiscard]] static Half Floor(Half x) noexcept;
+        /** @brief Rounds to the nearest integral value, ties to even. .NET: `Half.cs:1326`. */
+        [[nodiscard]] static Half Round(Half x) noexcept;
+        /** @brief Rounds to @p digits fractional digits. .NET: `Half.cs:1329`. */
+        [[nodiscard]] static Half Round(Half x, SharpRuntime::intcs digits);
+        /** @brief The integral part of @p x. .NET: `Half.cs:1338`. */
+        [[nodiscard]] static Half Truncate(Half x) noexcept;
+
+        /**
+         * @brief The sign of @p value: -1, 0 or +1.
+         *
+         * C++ counterpart of .NET `Half.Sign(Half)` (`Half.cs:1723-1740`).
+         * @throws System::ArithmeticException if @p value is NaN -- .NET throws
+         *         `ArithmeticException(SR.Arithmetic_NaN)` rather than returning a sentinel, and
+         *         that is transcribed rather than softened.
+         * @note `Sign(-0.0)` is **0**, not -1: .NET tests `IsZero` BEFORE `IsNegative`, so the
+         *       sign of a signed zero is zero.
+         */
+        [[nodiscard]] static SharpRuntime::intcs Sign(Half value);
+
+        /**
+         * @brief IEEE 754:2019 `maximumNumber`. .NET: `Half.cs:1673-1692`.
+         * @note **Does not propagate NaN** -- unlike @c Max, a NaN operand is ignored and the
+         *       other is returned. And **+0 is treated as larger than -0**, which no comparison
+         *       can see, so both are pinned.
+         */
+        [[nodiscard]] static Half MaxNumber(Half x, Half y) noexcept;
+        /** @brief IEEE 754:2019 `minimumNumber`. .NET: `Half.cs:1701-1720`. See @c MaxNumber. */
+        [[nodiscard]] static Half MinNumber(Half x, Half y) noexcept;
+        /** @brief IEEE 754:2019 `maximumMagnitudeNumber`. .NET: `Half.cs:1854-1876`. */
+        [[nodiscard]] static Half MaxMagnitudeNumber(Half x, Half y) noexcept;
+        /** @brief IEEE 754:2019 `minimumMagnitudeNumber`. .NET: `Half.cs:1882-1904`. */
+        [[nodiscard]] static Half MinMagnitudeNumber(Half x, Half y) noexcept;
+
+        /**
+         * @brief The larger of two values by the `>` operator alone.
+         *
+         * .NET: `(x > y) ? x : y` (`Half.cs:1670`). **`System::Numerics::BFloat16` has NO
+         * counterpart**, and that is not an omission here: .NET declares `MaxNative`, `MinNative`,
+         * `ClampNative` and `MultiplyAddEstimate` on `Half` ONLY. So #2340's in-step rule means
+         * *each type gets what .NET gives it*, not *the two surfaces are identical* -- measured,
+         * not assumed.
+         */
+        [[nodiscard]] static Half MaxNative(Half x, Half y) noexcept { return (x > y) ? x : y; }
+        /** @brief The smaller of two values by `<` alone. .NET: `Half.cs:1698`. Half-only. */
+        [[nodiscard]] static Half MinNative(Half x, Half y) noexcept { return (x < y) ? x : y; }
+
         /** @brief Represents the largest finite half-precision value (65504). C++ counterpart of .NET Half.MaxValue. */
         static const Half MaxValue;
         /** @brief Represents the most negative finite half-precision value (-65504). C++ counterpart of .NET Half.MinValue. */
@@ -525,6 +586,52 @@ namespace System {
     inline const Half Half::NaN              = Half(0xFE00);
     inline const Half Half::PositiveInfinity = Half(0x7C00);
     inline const Half Half::NegativeInfinity = Half(0xFC00);
+    // #2384 unit 2a definitions.
+    inline Half Half::Ceiling(Half x) noexcept  { return FromSingle(System::MathF::Ceiling(x.ToSingle())); }
+    inline Half Half::Floor(Half x) noexcept    { return FromSingle(System::MathF::Floor(x.ToSingle())); }
+    inline Half Half::Round(Half x) noexcept    { return FromSingle(System::MathF::Round(x.ToSingle())); }
+    inline Half Half::Round(Half x, SharpRuntime::intcs digits) {
+        return FromSingle(System::MathF::Round(x.ToSingle(), digits));
+    }
+    inline Half Half::Truncate(Half x) noexcept { return FromSingle(System::MathF::Truncate(x.ToSingle())); }
+
+    inline SharpRuntime::intcs Half::Sign(Half value) {
+        // .NET throws rather than returning a sentinel, and tests IsZero BEFORE IsNegative, so
+        // Sign(-0.0) is 0 rather than -1.
+        if (IsNaN(value)) throw System::ArithmeticException("Function does not accept floating point Not-a-Number values.");
+        if ((value.bits & 0x7FFFu) == 0u) return 0;
+        return IsNegative(value) ? -1 : 1;
+    }
+
+    inline Half Half::MaxNumber(Half x, Half y) noexcept {
+        if (!(x.ToSingle() == y.ToSingle())) {          // x != y, with NaN making this true
+            if (!IsNaN(y)) return (y.ToSingle() < x.ToSingle()) ? x : y;
+            return x;
+        }
+        return IsNegative(y) ? x : y;                   // equal: +0 is larger than -0
+    }
+    inline Half Half::MinNumber(Half x, Half y) noexcept {
+        if (!(x.ToSingle() == y.ToSingle())) {
+            if (!IsNaN(y)) return (x.ToSingle() < y.ToSingle()) ? x : y;
+            return x;
+        }
+        return IsNegative(x) ? x : y;
+    }
+    inline Half Half::MaxMagnitudeNumber(Half x, Half y) noexcept {
+        const float ax = Abs(x).ToSingle();
+        const float ay = Abs(y).ToSingle();
+        if ((ax > ay) || IsNaN(y)) return x;
+        if (ax == ay) return IsNegative(x) ? y : x;
+        return y;
+    }
+    inline Half Half::MinMagnitudeNumber(Half x, Half y) noexcept {
+        const float ax = Abs(x).ToSingle();
+        const float ay = Abs(y).ToSingle();
+        if ((ax < ay) || IsNaN(y)) return x;
+        if (ax == ay) return IsNegative(x) ? x : y;
+        return y;
+    }
+
     // #2384 unit 1: the four float round-trip members, defined after the constants they need.
     // Each is .NET's own expression, not a re-derivation -- Clamp is float.Clamp, Max/Min are
     // float.Max/float.Min, and MaxMagnitude/MinMagnitude are MathF.MaxMagnitude/MinMagnitude.

@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <algorithm>
+#include "System/ArithmeticException.hpp"
 #include "System/MathF.hpp"
 #include <array>
 #include <charconv>
@@ -265,6 +266,82 @@ public:
      *  (`BFloat16.cs:1519`). */
     [[nodiscard]] static BFloat16 MinMagnitude(BFloat16 x, BFloat16 y) noexcept {
         return BFloat16(System::MathF::MinMagnitude(toFloat(x.bits_), toFloat(y.bits_)));
+    }
+
+    // -----------------------------------------------------------------------------------
+    // #2384 unit 2a: rounding, Sign, and the IEEE 754:2019 *Number family.
+    //
+    // NOTE WHAT IS ABSENT AND WHY. .NET declares MaxNative, MinNative, ClampNative and
+    // MultiplyAddEstimate on Half ONLY -- measured by diffing the two ref surfaces. So #2340's
+    // in-step rule means EACH TYPE GETS WHAT .NET GIVES IT, not that the two surfaces are
+    // identical, and the four members missing here are missing deliberately.
+    // -----------------------------------------------------------------------------------
+
+    /** @brief The smallest integral value >= @p x. .NET: `BFloat16.cs`, `MathF.Ceiling` round-trip. */
+    [[nodiscard]] static BFloat16 Ceiling(BFloat16 x) noexcept {
+        return BFloat16(System::MathF::Ceiling(toFloat(x.bits_)));
+    }
+    /** @brief The largest integral value <= @p x. */
+    [[nodiscard]] static BFloat16 Floor(BFloat16 x) noexcept {
+        return BFloat16(System::MathF::Floor(toFloat(x.bits_)));
+    }
+    /** @brief Rounds to the nearest integral value, ties to even. */
+    [[nodiscard]] static BFloat16 Round(BFloat16 x) noexcept {
+        return BFloat16(System::MathF::Round(toFloat(x.bits_)));
+    }
+    /** @brief Rounds to @p digits fractional digits. */
+    [[nodiscard]] static BFloat16 Round(BFloat16 x, SharpRuntime::intcs digits) {
+        return BFloat16(System::MathF::Round(toFloat(x.bits_), digits));
+    }
+    /** @brief The integral part of @p x. */
+    [[nodiscard]] static BFloat16 Truncate(BFloat16 x) noexcept {
+        return BFloat16(System::MathF::Truncate(toFloat(x.bits_)));
+    }
+
+    /**
+     * @brief The sign of @p value: -1, 0 or +1.
+     * @throws System::ArithmeticException if @p value is NaN, as .NET does.
+     * @note `Sign(-0.0)` is **0** -- .NET tests IsZero BEFORE IsNegative.
+     */
+    [[nodiscard]] static SharpRuntime::intcs Sign(BFloat16 value) {
+        if (IsNaN(value)) throw System::ArithmeticException(
+            "Function does not accept floating point Not-a-Number values.");
+        if ((value.bits_ & 0x7FFFu) == 0u) return 0;
+        return IsNegative(value) ? -1 : 1;
+    }
+
+    /** @brief IEEE 754:2019 `maximumNumber` -- does NOT propagate NaN, and treats +0 as larger
+     *  than -0. Both differ from @c Max and both are pinned. */
+    [[nodiscard]] static BFloat16 MaxNumber(BFloat16 x, BFloat16 y) noexcept {
+        if (!(toFloat(x.bits_) == toFloat(y.bits_))) {
+            if (!IsNaN(y)) return (toFloat(y.bits_) < toFloat(x.bits_)) ? x : y;
+            return x;
+        }
+        return IsNegative(y) ? x : y;
+    }
+    /** @brief IEEE 754:2019 `minimumNumber`. See @c MaxNumber. */
+    [[nodiscard]] static BFloat16 MinNumber(BFloat16 x, BFloat16 y) noexcept {
+        if (!(toFloat(x.bits_) == toFloat(y.bits_))) {
+            if (!IsNaN(y)) return (toFloat(x.bits_) < toFloat(y.bits_)) ? x : y;
+            return x;
+        }
+        return IsNegative(x) ? x : y;
+    }
+    /** @brief IEEE 754:2019 `maximumMagnitudeNumber`. */
+    [[nodiscard]] static BFloat16 MaxMagnitudeNumber(BFloat16 x, BFloat16 y) noexcept {
+        const float ax = toFloat(Abs(x).bits_);
+        const float ay = toFloat(Abs(y).bits_);
+        if ((ax > ay) || IsNaN(y)) return x;
+        if (ax == ay) return IsNegative(x) ? y : x;
+        return y;
+    }
+    /** @brief IEEE 754:2019 `minimumMagnitudeNumber`. */
+    [[nodiscard]] static BFloat16 MinMagnitudeNumber(BFloat16 x, BFloat16 y) noexcept {
+        const float ax = toFloat(Abs(x).bits_);
+        const float ay = toFloat(Abs(y).bits_);
+        if ((ax < ay) || IsNaN(y)) return x;
+        if (ax == ay) return IsNegative(x) ? x : y;
+        return y;
     }
 
     [[nodiscard]] static bool IsFinite(BFloat16 v) noexcept {

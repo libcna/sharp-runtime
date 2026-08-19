@@ -69,12 +69,57 @@ unchanged. Probed exhaustively over all 65,536 patterns, the two forms differ on
 every one a **signalling** NaN, which `fromFloat` quiets by OR-ing in `0x0040`. The case now uses
 `0x7F81` and asserts the exact bits.
 
+---
+
+# Unit 2a — rounding, `Sign`, and the IEEE 754:2019 `*Number` family
+
+Landed 2026-08-19, same day. Purely additive again.
+
+## The `*Number` family is not `Max`/`Min`, and two rules separate them
+
+`MaxNumber`/`MinNumber`/`MaxMagnitudeNumber`/`MinMagnitudeNumber` are IEEE 754:2019
+`maximumNumber` and friends (`Half.cs:1673-1720, 1854-1904`). Two differences from `Max`/`Min`,
+both real and both pinned, because a forward to `Max` satisfies every ordinary row and fails
+exactly these:
+
+1. **They do not propagate NaN.** `Max(NaN, 2)` is NaN; `MaxNumber(NaN, 2)` is `2`, from either
+   side. .NET says so in its own comment.
+2. **`+0` is treated as larger than `-0`** — and **no comparison can see that**, since `+0.0 ==
+   -0.0`, so the pin asserts the **bits**. A naive `(x > y) ? x : y` returns the wrong zero and
+   passes everything else in the file.
+
+## `Sign` has two transcribed edges
+
+It **throws** `ArithmeticException` on NaN rather than returning a sentinel, and it tests `IsZero`
+**before** `IsNegative` — so **`Sign(-0.0)` is `0`, not `-1`**.
+
+## `Round` is ties-to-even
+
+Forwarded to `MathF::Round`, not `std::round`: `Round(2.5)` is `2`, not `3`. The mutation that
+swaps them is caught.
+
+## Four members exist on `Half` only, and that is transcription rather than asymmetry
+
+Measured by diffing the two reference surfaces: **`MaxNative`, `MinNative`, `ClampNative` and
+`MultiplyAddEstimate` are declared on `Half` only.** So **#2340's in-step rule means *each type
+gets what .NET gives it*, not that the two surfaces are identical** — a distinction that only
+becomes visible once the surface is large enough to differ. Their absence on `BFloat16` is pinned,
+so a later unit that "completes the symmetry" has to justify inventing them.
+
+## Mutation testing
+
+Six mutations, all caught: `MaxNumber` forwarding to `Max`; dropping its signed-zero tie; `Sign`
+returning `-1` for `-0.0`; `Sign` returning `0` instead of throwing; `Round` ties away from zero;
+and `BFloat16::MinNumber` propagating NaN.
+
 ## What is still to come
 
-Unit 1 is the sign/magnitude family. **Unit 2** is the transcendental families (`Sqrt`, `Exp`,
-`Log`, the trigonometric and hyperbolic sets, `Pow`, `FusedMultiplyAdd`, `ReciprocalEstimate`) and
-**unit 3** is the conversion operators. Both remain, both must move the two types in step, and
-unit 2's absence is pinned on both types today.
+**Unit 2b** is the transcendental families proper (`Sqrt`, `Cbrt`, `RootN`, `Exp`, `Log`, `Pow`,
+`Compound`, the trigonometric and `*Pi` sets, the hyperbolic set, `Hypot`, `ScaleB`, `Lerp`,
+`FusedMultiplyAdd`, `DegreesToRadians`/`RadiansToDegrees`, the two estimates) — measured at **~45
+members per type**, mostly one-line forwards. **Unit 3** is the conversion operators, measured at
+**43 on `Half` and 47 on `BFloat16`**. Both must move the two types in step, and unit 2b's absence
+is pinned on both types today via `Sqrt`.
 
 Out of scope permanently, and unchanged by this ticket: **generic-math conformance**
 (`INumber<T>`, `IFloatingPointIeee754<T>`, `IMinMaxValue<T>`). .NET's `BFloat16` implements 36
