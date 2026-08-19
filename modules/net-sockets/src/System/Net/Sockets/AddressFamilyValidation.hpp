@@ -6,84 +6,64 @@
 #include <string>
 
 #include "System/ArgumentException.hpp"
-#include "System/Net/Sockets/AddressFamily.hpp"
 #include "System/Net/IPAddress.hpp"
 #include "System/Net/IPEndPoint.hpp"
+#include "System/Net/Sockets/AddressFamily.hpp"
 
 namespace System::Net::Sockets::detail {
 
-    /**
-     * @brief Rejects an endpoint whose address family this module's `AF_INET` sockets cannot
-     *        carry, at the door the caller used.
-     *
-     * @par Why this exists when the limitation was already loud
-     * `TcpClient`, `TcpListener` and `UdpClient` create `AF_INET` sockets and fill `sockaddr_in`
-     * throughout. Measured (`build-probe/2138_probe1_ipv6doors.cpp`,
-     * `build-probe/2138_probe2_listener.cpp`), **nothing was ever silently narrowed** — the audit
-     * finding's "silently misrepresented" wording does not reproduce, and SR-AUD-266's family
-     * half is a *diagnostic* defect rather than a correctness one. Every path already threw.
-     *
-     * What it threw was the problem. **Three different refusals, none of them the operation's
-     * own:**
-     *
-     *  1. the endpoint doors reached `IPAddress::getAddressProperty()`, which raised
-     *     `SocketException(OperationNotSupported)` — *"The requested property is not supported
-     *     for the 'InterNetworkV6' AddressFamily."* A caller who asked to *connect* was told
-     *     about an **unsupported property**, and the sentence names no operation, no argument
-     *     and no remedy;
-     *  2. `TcpListener` deferred that same accident to `Start()`, because its constructors only
-     *     store the endpoint — so the two listener doors reported at a different time from the
-     *     four others;
-     *  3. the two **hostname** doors refuse for a third, unrelated reason: `hints.ai_family` is
-     *     `AF_INET`, so `getaddrinfo` never resolves an IPv6 literal and the caller is told
-     *     *"DNS failed"* about a literal address that needs no DNS.
-     *
-     * Refusals 1 and 2 are replaced by this deliberate one. Refusal 3 is deliberately left alone
-     * — see the note below.
-     *
-     * @par The exception shape is .NET's, transcribed
-     * `Socket.cs:1759` and its five siblings raise
-     * `ArgumentException(SR.Format(SR.net_InvalidEndPointAddressFamily, given, mine))` with the
-     * offending parameter's name, and `Strings.resx:156-158` gives the text verbatim:
-     * *"The supplied EndPoint of AddressFamily {0} is not valid for this Socket, use {1}
-     * instead."* Nothing here is invented: this port simply states truthfully which family its
-     * sockets are.
-     *
-     * @par What is NOT rejected here, and why
-     * The two `Connect(hostname, port)` doors keep their `getaddrinfo` refusal. Deciding whether
-     * `"::1"` arriving at a *hostname* parameter is a literal or a name is the question ticket
-     * **#2359** holds for `System::Uri`, and answering it incidentally inside a socket door would
-     * settle it in the wrong place. Their behaviour is pinned unchanged.
-     *
-     * Full dual-stack — `AF_UNSPEC` with a `getaddrinfo` result walk, as .NET does — is ticket
-     * **#2363**. This function is what makes the gap honest until then, not a substitute for it.
-     *
-     * @param address    The address the caller supplied.
-     * @param parameterName The name of the parameter it arrived in.
-     * @throws System::ArgumentException if @p address is not `InterNetwork`.
-     */
-    inline void ValidateIPv4Address(const System::Net::IPAddress& address,
-                                    const char* parameterName) {
-        if (address.getAddressFamilyProperty() == System::Net::Sockets::AddressFamily::InterNetwork)
-            return;
-        // The family name is a LITERAL, not a lookup, and that is a measured decision rather
-        // than a shortcut. `IPAddress::getAddressFamilyProperty()` is
-        // `isIPv6_ ? InterNetworkV6 : InterNetwork` over a single `bool`
-        // (`IPAddress.cpp:326-328`), so an `IPAddress` in this port CANNOT carry a third family.
-        // A general name table here would be unreachable code, and a first cut that wrote one
-        // was deleted rather than defended -- the same reason mutation M4 of this ticket
-        // (`== InterNetwork` rewritten as `!= InterNetworkV6`) is not a mutation at all but
-        // equivalent code, which the ticket record states plainly instead of claiming a catch.
-        throw System::ArgumentException(
-            "The supplied EndPoint of AddressFamily InterNetworkV6 is not valid for this Socket, "
-            "use InterNetwork instead.",
-            parameterName);
+    /** @brief `"InterNetwork"` / `"InterNetworkV6"`, for .NET's exception text. */
+    inline const char* AddressFamilyName(System::Net::Sockets::AddressFamily family) noexcept {
+        switch (family) {
+            case System::Net::Sockets::AddressFamily::InterNetwork:   return "InterNetwork";
+            case System::Net::Sockets::AddressFamily::InterNetworkV6: return "InterNetworkV6";
+            case System::Net::Sockets::AddressFamily::Unspecified:    return "Unspecified";
+            case System::Net::Sockets::AddressFamily::Unix:           return "Unix";
+            default:                                                  return "Unknown";
+        }
     }
 
-    /** @brief `ValidateIPv4Address` for an endpoint. See its doc-comment for the whole rationale. */
-    inline void ValidateIPv4EndPoint(const System::Net::IPEndPoint& endPoint,
-                                     const char* parameterName) {
-        ValidateIPv4Address(endPoint.getAddressProperty(), parameterName);
+    /**
+     * @brief Refuses an endpoint whose family the socket that would carry it does not accept.
+     *
+     * @par What this replaced, and why the replacement is narrower rather than merely different
+     * Ticket **#2138** put an unconditional *"this module is IPv4"* refusal on all six endpoint
+     * doors, because every socket in `TcpClient`, `TcpListener` and `UdpClient` was `AF_INET`.
+     * #2363 removed that limitation, so an unconditional refusal would now be a lie -- an IPv6
+     * endpoint is carried, not refused.
+     *
+     * What survives is the check .NET actually has, in the place .NET has it: a socket **that
+     * already exists** has a family, and an endpoint of a different family cannot be used with
+     * it. `Socket.cs:1757-1759` raises
+     * `ArgumentException(SR.Format(SR.net_InvalidEndPointAddressFamily, given, mine), paramName)`,
+     * and `Strings.resx:156-158` gives the text verbatim: *"The supplied EndPoint of AddressFamily
+     * {0} is not valid for this Socket, use {1} instead."* The sentence is unchanged from #2138;
+     * only the **condition** narrowed, and both families are now filled in rather than one being
+     * a literal.
+     *
+     * A door that *creates* the socket from the endpoint it was given -- both `TcpListener`
+     * constructors, `TcpClient(localEP)`, `UdpClient(localEP)`, and an unbound
+     * `TcpClient::Connect(remoteEP)` -- has nothing to disagree with and calls this not at all.
+     * That is the whole of the difference between this and #2138.
+     *
+     * @param family        The endpoint's family.
+     * @param socketFamily  The family of the socket that would carry it.
+     * @param socketIsDualMode Whether that socket has `IPV6_V6ONLY` clear, i.e. .NET's `DualMode`.
+     * @param parameterName The parameter the endpoint arrived in.
+     * @throws System::ArgumentException when the two are incompatible.
+     */
+    inline void ValidateEndPointFamilyForSocket(System::Net::Sockets::AddressFamily family,
+                                                System::Net::Sockets::AddressFamily socketFamily,
+                                                bool                                socketIsDualMode,
+                                                const char*                         parameterName) {
+        if (family == socketFamily
+            || (family == System::Net::Sockets::AddressFamily::InterNetwork && socketIsDualMode))
+            return;
+        throw System::ArgumentException(
+            std::string("The supplied EndPoint of AddressFamily ") + AddressFamilyName(family)
+                + " is not valid for this Socket, use " + AddressFamilyName(socketFamily)
+                + " instead.",
+            parameterName);
     }
 
 }  // namespace System::Net::Sockets::detail

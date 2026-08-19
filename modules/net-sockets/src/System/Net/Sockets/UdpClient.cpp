@@ -4,10 +4,12 @@
 #include "System/Net/Sockets/UdpClient.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "AddressFamilyValidation.hpp"
+#include "IPEndPointNative.hpp"
 #include "PortValidation.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
 #include "System/Net/Sockets/detail/ErrnoTranslation.hpp"
+#include <algorithm>
 #include <cstdio>
 
 #if defined(_WIN32)
@@ -85,20 +87,27 @@ namespace {
 namespace System::Net::Sockets {
 
 #if !defined(__EMSCRIPTEN__)
-static int makeUdpSocket() {
+static int makeUdpSocket(AddressFamily family) {
     wsaInit();
-    SockFd fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+    SockFd fd = ::socket(detail::NativeFamilyOf(family), SOCK_DGRAM, 0);
     if (fd == kBad)
         throw SocketException(toSocketError(lastErrorCode()), "UdpClient: socket() failed: " + netErr());
     return toFd(fd);
 }
 #endif
 
+// #2363 and a PREMISE CORRECTION. The ticket said the module's AF_INET constants must all become
+// "the endpoint's or the resolved result's family". For this constructor and the port-taking one
+// below, the constant is what .NET has: `public UdpClient() : this(AddressFamily.InterNetwork)`
+// (UDPClient.cs:24) and `public UdpClient(int port) : this(port, AddressFamily.InterNetwork)`
+// (:47). Unlike `TcpClient()`, which defaults to a dual-mode IPv6 socket, .NET's parameterless
+// `UdpClient` is IPv4 and always has been. Making it dual-stack here would be a deviation dressed
+// as a repair, so these two are deliberately unchanged and a test pins that they are.
 UdpClient::UdpClient() {
 #if defined(__EMSCRIPTEN__)
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");
 #else
-    fd_ = makeUdpSocket();
+    fd_ = makeUdpSocket(getAddressFamilyProperty());
 #endif
 }
 
@@ -112,12 +121,11 @@ UdpClient::UdpClient(int port) {
 #if defined(__EMSCRIPTEN__)
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");
 #else
-    fd_ = makeUdpSocket();
-    struct sockaddr_in addr{};
-    addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port        = htons(static_cast<uint16_t>(port));
-    if (::bind(toSk(fd_), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
+    fd_ = makeUdpSocket(getAddressFamilyProperty());
+    sockaddr_storage addr{};
+    const socklen_t  addrLen = detail::BuildIPSockAddr(
+        Net::IPEndPoint(Net::IPAddress::Any, static_cast<SharpRuntime::intcs>(port)), addr);
+    if (::bind(toSk(fd_), reinterpret_cast<struct sockaddr*>(&addr), addrLen) < 0) {
         auto code = lastErrorCode();
         auto err = netErr();
         closeSk(fd_); fd_ = -1;
@@ -126,18 +134,18 @@ UdpClient::UdpClient(int port) {
 #endif
 }
 
+// #2363: `_family = localEP.AddressFamily;` then `CreateClientSocket()` (UDPClient.cs:89-91) --
+// the endpoint decides, so #2138's refusal has nothing left to refuse and is gone from here.
 UdpClient::UdpClient(const Net::IPEndPoint& localEP) {
-    detail::ValidateIPv4EndPoint(localEP, "localEP");
 #if defined(__EMSCRIPTEN__)
     (void)localEP;
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");
 #else
-    fd_ = makeUdpSocket();
-    struct sockaddr_in addr{};
-    addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = htonl(localEP.getAddressProperty().getAddressProperty());
-    addr.sin_port        = htons(static_cast<uint16_t>(localEP.getPortProperty()));
-    if (::bind(toSk(fd_), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
+    isIPv6_ = localEP.getAddressProperty().getIsIPv6Property();
+    fd_     = makeUdpSocket(getAddressFamilyProperty());
+    sockaddr_storage addr{};
+    const socklen_t  addrLen = detail::BuildIPSockAddr(localEP, addr);
+    if (::bind(toSk(fd_), reinterpret_cast<struct sockaddr*>(&addr), addrLen) < 0) {
         auto code = lastErrorCode();
         auto err = netErr();
         closeSk(fd_); fd_ = -1;
@@ -158,41 +166,79 @@ void UdpClient::Connect(const std::string& hostname, int port) {
     (void)hostname;
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");
 #else
+    // #2363: AF_UNSPEC so an IPv6 host resolves at all, then .NET's filter -- and the filter is
+    // the point. `UdpClient` ALWAYS owns a socket by the time this runs (every constructor makes
+    // one), so unlike `TcpClient` it cannot adopt whatever family the resolver returns. .NET
+    // walks the addresses and uses only those `IsAddressFamilyCompatible` accepts
+    // (UDPClient.cs:698-706, 743-745), which is `family == _family || (family == InterNetwork &&
+    // DualMode)`. A default (IPv4) `UdpClient` connecting to an IPv6-only host therefore still
+    // fails -- that is .NET's behaviour, not a residue of the old limitation, and the way to
+    // reach such a host is to construct the client from an IPv6 local endpoint.
     struct addrinfo hints{}, *res = nullptr;
-    hints.ai_family   = AF_INET;
+    hints.ai_family   = AF_UNSPEC;
     hints.ai_socktype = SOCK_DGRAM;
     auto portStr = std::to_string(port);
     int rc = ::getaddrinfo(hostname.c_str(), portStr.c_str(), &hints, &res);
     if (rc != 0)
         throw SocketException(SocketError::HostNotFound, "UdpClient::Connect: DNS failed: " + gaErr(rc));
 
-    auto* sa = reinterpret_cast<struct sockaddr_in*>(res->ai_addr);
-    remote_.setAddressProperty(Net::IPAddress(ntohl(sa->sin_addr.s_addr)));
-    remote_.setPortProperty(static_cast<SharpRuntime::intcs>(ntohs(sa->sin_port)));
-    ::freeaddrinfo(res);
+    const int  myFamily = detail::NativeFamilyOf(getAddressFamilyProperty());
+    const bool dual     = detail::SocketIsDualMode(fd_, getAddressFamilyProperty());
 
-    struct sockaddr_in addr{};
-    addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = htonl(remote_.getAddressProperty().getAddressProperty());
-    addr.sin_port        = htons(static_cast<uint16_t>(remote_.getPortProperty()));
-    if (::connect(toSk(fd_), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
-        throw SocketException(toSocketError(lastErrorCode()), "UdpClient::Connect: connect() failed: " + netErr());
-    hasRemote_ = true;
+    int         lastCode = 0;
+    std::string lastErr;
+    bool        anyTried = false;
+    for (struct addrinfo* it = res; it != nullptr; it = it->ai_next) {
+        if (it->ai_family != myFamily && !(it->ai_family == AF_INET && dual)) continue;
+        anyTried = true;
+        sockaddr_storage native{};
+        std::memcpy(&native, it->ai_addr, std::min<size_t>(it->ai_addrlen, sizeof(native)));
+        Net::IPEndPoint resolved = detail::IPEndPointFromNative(native);
+        // On a dual-mode socket an IPv4 result must be handed over as ::ffff:a.b.c.d, exactly as
+        // .NET does before connecting (Socket.cs:1828).
+        sockaddr_storage addr{};
+        const socklen_t  addrLen =
+            detail::BuildIPSockAddr(detail::AdaptEndPointForSocket(resolved, getAddressFamilyProperty()), addr);
+        if (::connect(toSk(fd_), reinterpret_cast<struct sockaddr*>(&addr), addrLen) < 0) {
+            lastCode = lastErrorCode();
+            lastErr  = netErr();
+            continue;
+        }
+        // `remote_` keeps the address as RESOLVED, not as mapped -- a caller who asked for an
+        // IPv4 host should be told the IPv4 address they will actually exchange datagrams with.
+        remote_    = resolved;
+        hasRemote_ = true;
+        ::freeaddrinfo(res);
+        return;
+    }
+    ::freeaddrinfo(res);
+    if (!anyTried)
+        throw SocketException(SocketError::AddressFamilyNotSupported,
+                              "UdpClient::Connect: the host resolved only to addresses of an "
+                              "address family this client's socket cannot carry.");
+    throw SocketException(toSocketError(lastCode), "UdpClient::Connect: connect() failed: " + lastErr);
 #endif
 }
 
+// #2363: this is the ONE `UdpClient` door where a family disagreement is possible, because the
+// socket already exists and the caller named a family. .NET raises `ArgumentException` here too --
+// `UdpClient.Connect(IPEndPoint)` reaches `Socket.Connect`, whose first act is
+// `if (!CanTryAddressFamily(remoteEP.AddressFamily)) throw new ArgumentException(...)`
+// (Socket.cs:1757-1759). The exception #2138 introduced therefore SURVIVES here, with the same
+// sentence, under a condition that is now true rather than unconditional.
 void UdpClient::Connect(const Net::IPEndPoint& remoteEP) {
-    detail::ValidateIPv4EndPoint(remoteEP, "remoteEP");
 #if defined(__EMSCRIPTEN__)
     (void)remoteEP;
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");
 #else
+    detail::ValidateEndPointFamilyForSocket(
+        remoteEP.getAddressProperty().getAddressFamilyProperty(), getAddressFamilyProperty(),
+        detail::SocketIsDualMode(fd_, getAddressFamilyProperty()), "remoteEP");
     remote_ = remoteEP;
-    struct sockaddr_in addr{};
-    addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = htonl(remoteEP.getAddressProperty().getAddressProperty());
-    addr.sin_port        = htons(static_cast<uint16_t>(remoteEP.getPortProperty()));
-    if (::connect(toSk(fd_), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
+    sockaddr_storage addr{};
+    const socklen_t  addrLen =
+        detail::BuildIPSockAddr(detail::AdaptEndPointForSocket(remoteEP, getAddressFamilyProperty()), addr);
+    if (::connect(toSk(fd_), reinterpret_cast<struct sockaddr*>(&addr), addrLen) < 0)
         throw SocketException(toSocketError(lastErrorCode()), "UdpClient::Connect: connect() failed: " + netErr());
     hasRemote_ = true;
 #endif
@@ -226,14 +272,17 @@ std::vector<SharpRuntime::bytecs> UdpClient::Receive(Net::IPEndPoint& remoteEP) 
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");
 #else
     std::vector<SharpRuntime::bytecs> buf(65536);
-    struct sockaddr_in sender{};
+    // #2363: a sockaddr_storage. With a sockaddr_in an IPv6 sender's 16-byte address was
+    // truncated to the four bytes that fit, so the caller was handed a plausible but FABRICATED
+    // IPv4 address for a datagram that came from somewhere else entirely -- the one genuinely
+    // silent misreport in the family (the send and bind paths all failed loudly instead).
+    sockaddr_storage sender{};
     socklen_t len = sizeof(sender);
     auto n = ::recvfrom(toSk(fd_), reinterpret_cast<char*>(buf.data()), static_cast<SockLen>(buf.size()), 0,
                         reinterpret_cast<struct sockaddr*>(&sender), &len);
     if (n < 0)
         throw SocketException(toSocketError(lastErrorCode()), "UdpClient::Receive: recvfrom() failed: " + netErr());
-    remoteEP.setAddressProperty(Net::IPAddress(ntohl(sender.sin_addr.s_addr)));
-    remoteEP.setPortProperty(static_cast<SharpRuntime::intcs>(ntohs(sender.sin_port)));
+    remoteEP = detail::IPEndPointFromNative(sender);
     buf.resize(static_cast<size_t>(n));
     return buf;
 #endif

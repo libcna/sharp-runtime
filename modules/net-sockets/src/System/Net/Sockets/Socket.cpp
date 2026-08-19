@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Sockets/Socket.hpp"
+#include "IPEndPointNative.hpp"
 #include <array>
 #include <condition_variable>
 #include <cstring>
@@ -156,22 +157,12 @@ namespace {
     socklen_t buildNativeAddress(const System::Net::EndPoint& ep, sockaddr_storage& storage) {
         std::memset(&storage, 0, sizeof(storage));
 
+        // #2363: the IP half of this conversion moved to IPEndPointNative.hpp so that TcpClient,
+        // TcpListener and UdpClient could stop hand-building a sockaddr_in each. It is CALLED
+        // here rather than copied -- one definition, four users. The Unix-domain half stays,
+        // because only `Socket` has a UDS door.
         if (const auto* ip = dynamic_cast<const System::Net::IPEndPoint*>(&ep)) {
-            const System::Net::IPAddress& addr = ip->getAddressProperty();
-            if (addr.getIsIPv6Property()) {
-                auto* a6 = reinterpret_cast<sockaddr_in6*>(&storage);
-                a6->sin6_family = AF_INET6;
-                a6->sin6_port = htons(static_cast<uint16_t>(ip->getPortProperty()));
-                auto bytes = addr.GetAddressBytes();
-                std::memcpy(&a6->sin6_addr, bytes.data(), bytes.size());
-                a6->sin6_scope_id = static_cast<uint32_t>(addr.getScopeIdProperty());
-                return sizeof(sockaddr_in6);
-            }
-            auto* a4 = reinterpret_cast<sockaddr_in*>(&storage);
-            a4->sin_family = AF_INET;
-            a4->sin_port = htons(static_cast<uint16_t>(ip->getPortProperty()));
-            a4->sin_addr.s_addr = htonl(addr.getAddressProperty());
-            return sizeof(sockaddr_in);
+            return detail::BuildIPSockAddr(*ip, storage);
         }
 
         if (const auto* uds = dynamic_cast<const UnixDomainSocketEndPoint*>(&ep)) {
@@ -187,17 +178,8 @@ namespace {
     }
 
     std::shared_ptr<System::Net::EndPoint> endpointFromNative(const sockaddr_storage& storage) {
-        if (storage.ss_family == AF_INET) {
-            const auto* a4 = reinterpret_cast<const sockaddr_in*>(&storage);
-            System::Net::IPAddress addr(static_cast<uint32_t>(ntohl(a4->sin_addr.s_addr)));
-            return std::make_shared<System::Net::IPEndPoint>(addr, static_cast<intcs>(ntohs(a4->sin_port)));
-        }
-        if (storage.ss_family == AF_INET6) {
-            const auto* a6 = reinterpret_cast<const sockaddr_in6*>(&storage);
-            std::array<bytecs, 16> bytes{};
-            std::memcpy(bytes.data(), &a6->sin6_addr, 16);
-            System::Net::IPAddress addr(bytes, static_cast<longcs>(a6->sin6_scope_id));
-            return std::make_shared<System::Net::IPEndPoint>(addr, static_cast<intcs>(ntohs(a6->sin6_port)));
+        if (storage.ss_family == AF_INET || storage.ss_family == AF_INET6) {
+            return std::make_shared<System::Net::IPEndPoint>(detail::IPEndPointFromNative(storage));
         }
         if (storage.ss_family == AF_UNIX) {
             const auto* au = reinterpret_cast<const sockaddr_un*>(&storage);

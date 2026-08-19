@@ -41,7 +41,9 @@
 
 using System::Net::IPAddress;
 using System::Net::IPEndPoint;
+using System::Net::Sockets::AddressFamily;
 using System::Net::Sockets::NetworkStream;
+using System::Net::Sockets::SocketError;
 using System::Net::Sockets::SendPacketsElement;
 using System::Net::Sockets::Socket;
 using System::Net::Sockets::TcpClient;
@@ -83,96 +85,291 @@ TEST(SocketsGatedBehaviourPins, THEGATEDPINTheAsyncMembersStillReturnTheirCurren
 }
 
 // ===========================================================================================
-// #2138 RESOLVED — SR-AUD-266 family half / NS-F: every path is AF_INET only, and says so
+// #2363 RESOLVED — IPv6 and dual-stack, and #2138's limitation is GONE rather than unreachable
+//
+// #2138's three pins that stood here are INVERTED, not deleted. Each asserted something true of
+// an AF_INET-only module; this ticket removed that property, so the honest record is the new
+// statement in the old place.
+//
+// THREE PREMISE CORRECTIONS, all measured against /rv/tmp/runtime:
+//
+//   1. The ticket said .NET "resolves with AF_UNSPEC, walking the getaddrinfo result list". Half
+//      right. `Socket.Connect(string host, int port)` calls `IPAddress.TryParse(host)` FIRST
+//      (Socket.cs:919-923) and only then falls back to `Dns.GetHostAddresses` plus the array
+//      overload. A LITERAL at a hostname parameter is deliberately a literal in .NET.
+//
+//   2. That settles the question #2138 deferred, and settles it AWAY from #2359. #2138 left the
+//      hostname door alone because "is `::1` at a hostname parameter a literal or a name" looked
+//      like `System::Uri`'s host-grammar question. It is not: a URI authority has bracket syntax
+//      and a socket hostname parameter does not, and .NET answers the socket question inside the
+//      socket code. #2359 is untouched by this ticket.
+//
+//   3. The ticket said every AF_INET constant in the module must become the endpoint's or the
+//      resolved family. Two must NOT: `UdpClient()` and `UdpClient(int port)` are
+//      `AddressFamily.InterNetwork` in .NET (UDPClient.cs:24,47), unlike `TcpClient()`, which is
+//      dual-mode IPv6 (TCPClient.cs:368-383). Making UDP's default dual-stack would be a
+//      deviation dressed as a repair; a case below pins that it was not made.
 // ===========================================================================================
 
-// THE FINDING'S WORDING DID NOT REPRODUCE, AND THE PREVIOUS PIN ALREADY SAID SO. SR-AUD-266
-// described an IPv6 endpoint as "silently misrepresented"; measured twice, before this ticket
-// (build-probe/2139_probe1_v6.log) and again at its tip (build-probe/2138_probe1_ipv6doors.cpp,
-// build-probe/2138_probe2_listener.cpp), NOTHING WAS EVER SILENTLY NARROWED. No socket ever
-// connected over IPv4 while pretending to be IPv6. This was a DIAGNOSTIC defect, not a
-// correctness one, and the repair is scoped to that.
-//
-// What was wrong was that the refusals were an ACCIDENT OF A DIFFERENT MODULE, three of them,
-// none naming the operation the caller attempted:
-//
-//   1. the four endpoint doors reached IPAddress::getAddressProperty(), which raised
-//      SocketException(OperationNotSupported) -- "The requested property is not supported for
-//      the 'InterNetworkV6' AddressFamily." A caller who asked to CONNECT was told about an
-//      unsupported PROPERTY, and the sentence named no operation, no argument and no remedy;
-//   2. TcpListener deferred that same accident to Start(), because its constructors only stored
-//      the endpoint -- so two doors reported at a different TIME from the other four;
-//   3. the two hostname doors refuse for a third, unrelated reason (hints.ai_family = AF_INET),
-//      telling the caller "DNS failed" about a literal address that needs no DNS.
-//
-// 1 and 2 are now one deliberate ArgumentException at the door, in .NET's own words
-// (Socket.cs:1759, Strings.resx:156-158). 3 is deliberately UNCHANGED and still pinned below.
+namespace {
+    /// True when this machine can actually bind an IPv6 loopback socket.
+    ///
+    /// SA-6 says a test that passes only because of a property of the machine is a defect in the
+    /// test. For a LIVE socket case that cannot be made to disappear -- an IPv6 connection needs
+    /// IPv6 -- so it is made explicit instead: assertions that need no network run
+    /// unconditionally, and only the live rows consult this.
+    bool IPv6LoopbackAvailable() {
+        try {
+            TcpListener probe(IPAddress::IPv6Loopback, 0);
+            probe.Start();
+            probe.Stop();
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+}  // namespace
 
-TEST(SocketsGatedBehaviourPins, Fix2138_EveryEndpointDoorRefusesIPv6InDotNetsOwnWords) {
+TEST(SocketsGatedBehaviourPins, Fix2363_EveryEndpointDoorNowCarriesIPv6) {
     const IPAddress v6 = IPAddress::Parse("::1");
     ASSERT_TRUE(v6.getIsIPv6Property());
-
-    // The endpoint itself is perfectly representable -- it is only unusable here.
     EXPECT_EQ(IPEndPoint(v6, 80).ToString(), "[::1]:80");
+    ASSERT_TRUE(IPv6LoopbackAvailable())
+        << "this machine has no IPv6 loopback, so these rows cannot be evidence here";
 
-    const std::vector<std::pair<const char*, std::function<void()>>> doors = {
-        {"localEP",  [&] { TcpClient c(IPEndPoint(v6, 0)); }},
-        {"remoteEP", [&] { TcpClient c; c.Connect(IPEndPoint(v6, 80)); }},
-        {"localEP",  [&] { TcpListener l(IPEndPoint(v6, 0)); }},
-        {"addr",     [&] { TcpListener l(v6, 0); }},
-        {"localEP",  [&] { UdpClient c(IPEndPoint(v6, 0)); }},
-        {"remoteEP", [&] { UdpClient c; c.Connect(IPEndPoint(v6, 80)); }},
-    };
+    // These four doors CREATE the socket from the endpoint they were handed, so there is nothing
+    // for them to disagree with and #2138's refusal is gone outright. Construction alone is the
+    // assertion -- before this ticket every one of them threw ArgumentException.
+    EXPECT_NO_THROW((void)TcpClient(IPEndPoint(v6, 0)));
+    EXPECT_NO_THROW((void)TcpListener(IPEndPoint(v6, 0)));
+    EXPECT_NO_THROW((void)TcpListener(v6, 0));
+    EXPECT_NO_THROW((void)UdpClient(IPEndPoint(v6, 0)));
 
-    for (const auto& [paramName, call] : doors) {
-        SCOPED_TRACE(paramName);
+    // ...and the family really is IPv6, not an IPv4 socket that merely accepted the argument.
+    TcpClient bound(IPEndPoint(v6, 0));
+    EXPECT_EQ(bound.getAddressFamilyProperty(), AddressFamily::InterNetworkV6);
+    UdpClient udp(IPEndPoint(v6, 0));
+    EXPECT_EQ(udp.getAddressFamilyProperty(), AddressFamily::InterNetworkV6);
+}
+
+TEST(SocketsGatedBehaviourPins, Fix2363_AnIPv6EndpointConnectsBindsAndAccepts) {
+    ASSERT_TRUE(IPv6LoopbackAvailable());
+    // The acceptance criterion, end to end. No part of this case was reachable before the ticket.
+    TcpListener listener(IPAddress::IPv6Loopback, 0);
+    listener.Start();
+    const auto port = listener.getLocalEndpointProperty().getPortProperty();
+    ASSERT_GT(port, 0) << "Start() must report the ephemeral port from an AF_INET6 getsockname";
+
+    // Connect FIRST and accept afterwards -- the listen backlog holds the connection, so no
+    // second thread is needed. That is deliberate: a thread that blocks in AcceptTcpClient turns
+    // a failed connect into a HANG, and a mutation caught only as a hang is a mutation whose
+    // evidence is a timeout rather than a named failing test.
+    TcpClient c;
+    ASSERT_NO_THROW(c.Connect(IPEndPoint(IPAddress::IPv6Loopback, port)));
+    EXPECT_EQ(c.getAddressFamilyProperty(), AddressFamily::InterNetworkV6);
+
+    TcpClient accepted = listener.AcceptTcpClient();
+    // THE accept-path criterion: the peer's REAL family, not a constant. With the old
+    // sockaddr_in accept an IPv6 peer was reported as InterNetwork.
+    EXPECT_EQ(accepted.getAddressFamilyProperty(), AddressFamily::InterNetworkV6);
+    listener.Stop();
+}
+
+TEST(SocketsGatedBehaviourPins, Fix2363_AnIPv6LiteralAtAHostnameParameterResolves) {
+    // The inversion of THEGATEDPINAnIPv6LiteralIsRefusedByDNSBecauseTheHintsAreAF_INET, whose own
+    // text said it would invert "when #2363 was decided". It is decided.
+    ASSERT_TRUE(IPv6LoopbackAvailable());
+    TcpListener listener(IPAddress::IPv6Loopback, 0);
+    listener.Start();
+    const auto port = listener.getLocalEndpointProperty().getPortProperty();
+
+    TcpClient c;
+    // The backlog absorbs the connection, so nothing has to be accepted for this to complete --
+    // see the note in Fix2363_AnIPv6EndpointConnectsBindsAndAccepts for why no thread is used.
+    ASSERT_NO_THROW(c.Connect("::1", static_cast<SharpRuntime::intcs>(port)));
+    EXPECT_TRUE(c.getConnectedProperty());
+    EXPECT_EQ(c.getAddressFamilyProperty(), AddressFamily::InterNetworkV6);
+    listener.Stop();
+}
+
+TEST(SocketsGatedBehaviourPins, Fix2363_TheFamilyRefusalSurvivesOnlyWhereASocketAlreadyExists) {
+    const IPAddress v6 = IPAddress::Parse("::1");
+    ASSERT_TRUE(IPv6LoopbackAvailable());
+
+    // .NET's check, in .NET's place: a socket that ALREADY EXISTS has a family, and an endpoint
+    // of another family cannot be used with it (Socket.cs:1757-1759). Two doors reach it.
+    //
+    // A UdpClient always owns a socket, and the default one is IPv4.
+    {
+        UdpClient c;
+        ASSERT_EQ(c.getAddressFamilyProperty(), AddressFamily::InterNetwork);
         try {
-            call();
-            ADD_FAILURE() << "an IPv6 endpoint was accepted";
+            c.Connect(IPEndPoint(v6, 80));
+            ADD_FAILURE() << "an IPv6 endpoint was used with an IPv4 socket";
         } catch (const System::ArgumentException& e) {
             const std::string what = e.what();
-            // .NET's text, transcribed rather than paraphrased.
+            // The sentence is UNCHANGED from #2138 -- only the condition narrowed -- and both
+            // families are now filled in rather than one of them being a literal.
             EXPECT_NE(what.find("The supplied EndPoint of AddressFamily InterNetworkV6 is not "
                                 "valid for this Socket, use InterNetwork instead."),
                       std::string::npos) << what;
-            // ...and it names THE CALLER'S OWN PARAMETER, which is the whole point: the old
-            // refusal named an IPAddress property nobody had asked about.
-            EXPECT_NE(what.find(std::string("Parameter '") + paramName + "'"), std::string::npos)
-                << what;
+            EXPECT_NE(what.find("Parameter 'remoteEP'"), std::string::npos) << what;
         }
     }
-}
-
-TEST(SocketsGatedBehaviourPins, Fix2138_TheListenerRefusesAtConstructionNotAtStart) {
-    // Defect 2 on its own. Before #2138 both listener constructors merely stored the endpoint,
-    // so this line SUCCEEDED and the diagnosis arrived later, from Start(). A caller could
-    // therefore hold a fully constructed TcpListener that could never listen.
-    EXPECT_THROW((void)TcpListener(IPEndPoint(IPAddress::Parse("::"), 0)), System::ArgumentException);
-    EXPECT_THROW((void)TcpListener(IPAddress::IPv6Any, 0), System::ArgumentException);
-
-    // The IPv4 control: construction and Start() both still work.
-    TcpListener ok(IPAddress::Loopback, 0);
-    EXPECT_NO_THROW(ok.Start());
-    ok.Stop();
-}
-
-TEST(SocketsGatedBehaviourPins, THEGATEDPINAnIPv6LiteralIsRefusedByDNSBecauseTheHintsAreAF_INET) {
-    // STILL GATED, AND DELIBERATELY SO. Refusal 3 is left exactly as it was. Deciding whether
-    // "::1" arriving at a HOSTNAME parameter is a literal or a name is the question ticket #2359
-    // holds for System::Uri; answering it incidentally inside a socket door would settle it in
-    // the wrong place. So this door still says "DNS failed" about a literal, and this pin exists
-    // so that stays a decision rather than an oversight.
-    for (auto call : {std::function<void()>([] { TcpClient c; c.Connect("::1", 80); }),
-                      std::function<void()>([] { UdpClient c; c.Connect("::1", 80); })}) {
+    // A TcpClient BOUND to an IPv4 local endpoint owns one too.
+    {
+        TcpClient bound(IPEndPoint(IPAddress::Loopback, 0));
+        EXPECT_THROW(bound.Connect(IPEndPoint(v6, 80)), System::ArgumentException);
+    }
+    // ...and the mirror image, which is the half proving the check reads the SOCKET rather than
+    // hard-coding IPv4 as the one acceptable family.
+    {
+        TcpClient bound(IPEndPoint(v6, 0));
+        EXPECT_THROW(bound.Connect(IPEndPoint(IPAddress::Loopback, 80)), System::ArgumentException);
+    }
+    // An UNBOUND TcpClient creates the socket from the endpoint, so it has nothing to disagree
+    // with and must NOT refuse. This is the row that fails if an unconditional check comes back.
+    {
+        TcpClient fresh;
         try {
-            call();
-            ADD_FAILURE() << "an IPv6 literal now resolves -- #2363 was decided";
-        } catch (const System::Net::Sockets::SocketException& e) {
-            EXPECT_EQ(e.getSocketErrorCodeProperty(), System::Net::Sockets::SocketError::HostNotFound)
-                << "the refusal is supposed to come from getaddrinfo, not from connect()";
-            EXPECT_NE(std::string(e.what()).find("DNS failed"), std::string::npos) << e.what();
+            fresh.Connect(IPEndPoint(v6, 1));   // nothing listens on port 1
+            ADD_FAILURE() << "connect to a closed IPv6 port unexpectedly succeeded";
+        } catch (const System::ArgumentException& e) {
+            ADD_FAILURE() << "an unbound client still refuses IPv6 at the door: " << e.what();
+        } catch (const System::Net::Sockets::SocketException&) {
+            SUCCEED() << "refused by connect(), which is the transport -- not by an argument check";
         }
     }
+}
+
+TEST(SocketsGatedBehaviourPins, Fix2363_TheResolverResultListIsWALKEDNotJustItsHead) {
+    // Taking only `res` -- the first getaddrinfo result -- meant a host with several addresses
+    // failed outright whenever the first was unreachable. This machine's `localhost` resolves to
+    // `::1` FIRST and `127.0.0.1` second (verified: `getent hosts localhost`), so an IPv4-only
+    // listener plus `Connect("localhost", port)` is exactly that shape: the head of the list is
+    // refused and the second entry is the one that works.
+    //
+    // SA-6 applies and is answered rather than ignored: the case asserts only what it establishes
+    // on a machine that has BOTH families, and says so if it does not.
+    ASSERT_TRUE(IPv6LoopbackAvailable())
+        << "a one-family machine cannot exercise a result-list walk";
+    TcpListener listener(IPAddress::Loopback, 0);   // IPv4 ONLY, deliberately
+    listener.Start();
+    const auto port = listener.getLocalEndpointProperty().getPortProperty();
+
+    TcpClient c;
+    ASSERT_NO_THROW(c.Connect("localhost", static_cast<SharpRuntime::intcs>(port)));
+    EXPECT_TRUE(c.getConnectedProperty());
+    // ...and it landed on the IPv4 entry, which is the only one anything is listening on.
+    EXPECT_EQ(c.getAddressFamilyProperty(), AddressFamily::InterNetwork);
+    listener.Stop();
+}
+
+TEST(SocketsGatedBehaviourPins, Fix2363_UdpReceiveReportsAnIPv6SenderRatherThanFabricatingOne) {
+    // The one genuinely SILENT misreport in this family. Every send and bind path failed loudly
+    // when handed IPv6, but `Receive` read the sender through a `sockaddr_in` overlaid on a
+    // 28-byte `sockaddr_in6`: the four bytes at the IPv4 address offset land inside the IPv6
+    // address, so the caller was handed a plausible, fabricated IPv4 address for a datagram that
+    // came from somewhere else entirely.
+    ASSERT_TRUE(IPv6LoopbackAvailable());
+    UdpClient receiver(IPEndPoint(IPAddress::IPv6Loopback, 0));
+    ASSERT_EQ(receiver.getAddressFamilyProperty(), AddressFamily::InterNetworkV6);
+
+    // Discover the bound port through a second socket's view is not available here, so bind a
+    // known-free one by asking the OS for an ephemeral TCP port first and reusing the number.
+    SharpRuntime::intcs port = 0;
+    {
+        TcpListener probe(IPAddress::IPv6Loopback, 0);
+        probe.Start();
+        port = probe.getLocalEndpointProperty().getPortProperty();
+        probe.Stop();
+    }
+    UdpClient bound(IPEndPoint(IPAddress::IPv6Loopback, port));
+
+    UdpClient sender(IPEndPoint(IPAddress::IPv6Loopback, 0));
+    sender.Connect(IPEndPoint(IPAddress::IPv6Loopback, port));
+    std::vector<SharpRuntime::bytecs> payload{7, 8, 9};
+    ASSERT_EQ(sender.Send(payload, 3), 3);
+
+    IPEndPoint from(IPAddress::Any, 0);
+    const auto got = bound.Receive(from);
+    EXPECT_EQ(got, payload);
+    // THE assertion: the sender is reported as IPv6, and as the loopback address it really was.
+    EXPECT_TRUE(from.getAddressProperty().getIsIPv6Property())
+        << "the sender was reported as " << from.ToString();
+    EXPECT_EQ(from.getAddressProperty().ToString(), "::1");
+    EXPECT_GT(from.getPortProperty(), 0);
+}
+
+TEST(SocketsGatedBehaviourPins, Fix2363_UdpClientsDefaultStaysIPv4BecauseDotNetsDoes) {
+    // PREMISE CORRECTION 3, pinned. A mutation that "finishes the job" by making these two
+    // dual-stack is caught here rather than shipping as an improvement.
+    EXPECT_EQ(UdpClient().getAddressFamilyProperty(), AddressFamily::InterNetwork);
+    EXPECT_EQ(UdpClient(0).getAddressFamilyProperty(), AddressFamily::InterNetwork);
+
+    // The consequence .NET has and this port now reproduces: a default UdpClient cannot reach an
+    // IPv6-only peer, because `IsAddressFamilyCompatible` (UDPClient.cs:743-745) filters the
+    // resolved addresses down to the socket's own family. The refusal is no longer "DNS failed"
+    // -- the resolver SUCCEEDS now, and the filter is what says no.
+    UdpClient c;
+    try {
+        c.Connect("::1", 80);
+        ADD_FAILURE() << "an IPv4 UDP socket connected to an IPv6 literal";
+    } catch (const System::Net::Sockets::SocketException& e) {
+        EXPECT_EQ(e.getSocketErrorCodeProperty(), SocketError::AddressFamilyNotSupported)
+            << "the resolver succeeded; the FILTER must be what refuses: " << e.what();
+        // ...and the FILTER must be what refuses, not connect() being handed a sockaddr_in6.
+        // Both routes produce EAFNOSUPPORT, so the error code alone cannot tell them apart --
+        // only the sentence can, which is why this line is here.
+        EXPECT_NE(std::string(e.what()).find("this client's socket cannot carry"),
+                  std::string::npos)
+            << "the address was handed to connect() instead of being filtered out: " << e.what();
+    }
+}
+
+TEST(SocketsGatedBehaviourPins, Fix2363_LayoutPin_TheFamilyStateIsFree) {
+    // SA-3: the before/after sizeof is pinned rather than asserted in prose, and here it pins
+    // that the cost was ZERO -- which is a design decision, not luck.
+    //
+    // MEASURED, AND THE FIRST CUT WAS WRONG. Storing the family as an `AddressFamily` grew
+    // sizeof(TcpClient) from 24 to 32: the three bytes of padding after `connected_` cannot hold
+    // a 4-byte, 4-aligned enum, so the whole scalar block rounds up and the shared_ptr moves. The
+    // shadows below are what caught it. A bool fits, and gives up nothing -- this port's
+    // `IPAddress` is `bool isIPv6_` with the family COMPUTED (IPAddress.cpp:326-328), so neither
+    // type can carry a third family regardless of how the state is spelled.
+    struct TcpClientShadow {
+        int                   fd;
+        bool                  connected;
+        bool                  isIPv6;
+        std::shared_ptr<void> stream;
+    };
+    struct TcpClientWithAnEnum {
+        int                                 fd;
+        bool                                connected;
+        System::Net::Sockets::AddressFamily family;
+        std::shared_ptr<void>               stream;
+    };
+    EXPECT_EQ(sizeof(TcpClient), sizeof(TcpClientShadow));
+    EXPECT_EQ(alignof(TcpClient), alignof(TcpClientShadow));
+    EXPECT_LT(sizeof(TcpClientShadow), sizeof(TcpClientWithAnEnum))
+        << "the two spellings must actually differ, or this pin asserts nothing about the cost";
+    EXPECT_EQ(sizeof(TcpClient), 24u) << "TcpClient grew; consumers would need a rebuild";
+
+    // The same statement for UdpClient, whose trailing bool likewise costs nothing.
+    struct UdpShadowWithout {
+        int             fd;
+        IPEndPoint      remote;
+        bool            hasRemote;
+    };
+    struct UdpShadowWith {
+        int             fd;
+        IPEndPoint      remote;
+        bool            hasRemote;
+        bool            isIPv6;
+    };
+    EXPECT_EQ(sizeof(UdpClient), sizeof(UdpShadowWith));
+    EXPECT_EQ(sizeof(UdpShadowWith), sizeof(UdpShadowWithout))
+        << "UdpClient's family bool was supposed to land in existing padding";
 }
 
 TEST(SocketsGatedBehaviourPins, Fix2138_EveryIPv4PathIsUntouched) {

@@ -6,6 +6,7 @@
 #include <vector>
 #include "System/Net/IPAddress.hpp"
 #include "System/Net/IPEndPoint.hpp"
+#include "System/Net/Sockets/AddressFamily.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Net::Sockets {
@@ -19,16 +20,21 @@ namespace System::Net::Sockets {
      * Uses Winsock2 on Windows, POSIX sockets on Linux/macOS,
      * and throws PlatformNotSupportedException on Emscripten.
      *
-     * @par IPv4 only — a measured, gated limitation (#2138, SR-AUD-266 family half)
-     * Every connect, bind and accept path in this type is `AF_INET` with a `sockaddr_in`. The
-     * limitation is **loud, not silent**, though not by design: an `IPEndPoint` carrying an IPv6
-     * address reaches `IPAddress::getAddressProperty()`, which throws
-     * `SocketException(OperationNotSupported)` — *"The requested property is not supported for
-     * the 'InterNetworkV6' AddressFamily."* — and a hostname path refuses an IPv6 literal with
-     * `SocketException(HostNotFound)` because `hints.ai_family` is `AF_INET`, so `getaddrinfo`
-     * never resolves it. Nothing is silently narrowed to IPv4. **How far this port should carry
-     * IPv6 is an open decision (#2138)**, not a bug awaiting a fix; the current behaviour is
-     * pinned by `SocketsGatedBehaviourPins`.
+     * @par IPv6 (#2363), and why the DEFAULT is still IPv4
+     * `UdpClient(const IPEndPoint&)` takes its family from the endpoint, and `Receive` reports an
+     * IPv6 sender correctly. But `UdpClient()` and `UdpClient(port)` remain **IPv4**, and that is
+     * .NET, not a leftover: `public UdpClient() : this(AddressFamily.InterNetwork)`
+     * (`UDPClient.cs:24`) and `public UdpClient(int port) : this(port,
+     * AddressFamily.InterNetwork)` (`:47`). Only `TcpClient`'s parameterless path is dual-mode in
+     * .NET; `UdpClient`'s is not, and this port matches both rather than unifying them.
+     *
+     * Because a `UdpClient` always owns a socket by the time `Connect` runs, it cannot adopt the
+     * resolver's family the way `TcpClient` can. `Connect(hostname, port)` resolves with
+     * `AF_UNSPEC` and then uses only addresses the socket can carry — .NET's
+     * `IsAddressFamilyCompatible` (`UDPClient.cs:743-745`) — and `Connect(remoteEP)` raises
+     * `System::ArgumentException` for a family the socket cannot carry, with .NET's own text
+     * (`Socket.cs:1757-1759`). To reach an IPv6 peer, construct the client from an IPv6 local
+     * endpoint.
      *
      * @note Status: Implemented — Windows (Winsock2) and POSIX (Linux/macOS).
      */
@@ -36,6 +42,12 @@ namespace System::Net::Sockets {
         int              fd_        = -1;
         Net::IPEndPoint  remote_{Net::IPAddress::Any, 0};
         bool             hasRemote_ = false;
+        // #2363. .NET carries the same state with the same default: `private AddressFamily
+        // _family = AddressFamily.InterNetwork;` (UDPClient.cs:21). Stored as a bool for the
+        // reason spelled out in TcpClient.hpp -- an enum member costs eight bytes of layout that
+        // a bool costs nothing for, and this port's own `IPAddress` represents the same fact the
+        // same way. sizeof(UdpClient) is UNCHANGED, pinned below.
+        bool             isIPv6_    = false;
 
     public:
         /** @brief Creates a UDP socket without binding to a specific port. */
@@ -90,6 +102,16 @@ namespace System::Net::Sockets {
 
         /** @brief Returns true when the socket is open. */
         [[nodiscard]] bool getClientProperty() const { return fd_ >= 0; }
+
+        /**
+         * @brief The address family of this client's socket (#2363).
+         *
+         * `InterNetwork` unless the client was constructed from an IPv6 local endpoint, matching
+         * .NET's `_family` default of `AddressFamily.InterNetwork` (`UDPClient.cs:21`).
+         */
+        [[nodiscard]] AddressFamily getAddressFamilyProperty() const {
+            return isIPv6_ ? AddressFamily::InterNetworkV6 : AddressFamily::InterNetwork;
+        }
     };
 
 } // namespace System::Net::Sockets
