@@ -109,6 +109,52 @@ namespace System::Runtime::InteropServices {
         LPUTF8Str  = 48
     };
 
+    /**
+     * @brief COM automation variant types.
+     *
+     * #1980 group G-5 / SR-AUD-167: added because `MarshalAsAttribute::SafeArraySubType` is a
+     * `VarEnum` in .NET (`MarshalAsAttribute.cs:21`) and neither the field nor its type existed
+     * here. Transcribed from `VarEnum.cs`, including the three flag values above 0x1000.
+     */
+    enum class VarEnum : SharpRuntime::intcs {
+        VT_EMPTY = 0,   VT_NULL = 1,    VT_I2 = 2,      VT_I4 = 3,
+        VT_R4 = 4,      VT_R8 = 5,      VT_CY = 6,      VT_DATE = 7,
+        VT_BSTR = 8,    VT_DISPATCH = 9, VT_ERROR = 10, VT_BOOL = 11,
+        VT_VARIANT = 12, VT_UNKNOWN = 13, VT_DECIMAL = 14,
+        // 15 is deliberately absent: .NET's enum has no member with that value.
+        VT_I1 = 16,     VT_UI1 = 17,    VT_UI2 = 18,    VT_UI4 = 19,
+        VT_I8 = 20,     VT_UI8 = 21,    VT_INT = 22,    VT_UINT = 23,
+        VT_VOID = 24,   VT_HRESULT = 25, VT_PTR = 26,   VT_SAFEARRAY = 27,
+        VT_CARRAY = 28, VT_USERDEFINED = 29, VT_LPSTR = 30, VT_LPWSTR = 31,
+        VT_RECORD = 36, VT_FILETIME = 64, VT_BLOB = 65, VT_STREAM = 66,
+        VT_STORAGE = 67, VT_STREAMED_OBJECT = 68, VT_STORED_OBJECT = 69,
+        VT_BLOB_OBJECT = 70, VT_CF = 71, VT_CLSID = 72,
+        VT_VECTOR = 0x1000, VT_ARRAY = 0x2000, VT_BYREF = 0x4000
+    };
+
+    /**
+     * @brief How a COM interface is exposed to COM clients.
+     *
+     * #1980 group G-5 / SR-AUD-167. Transcribed from `ComInterfaceType.cs`.
+     */
+    enum class ComInterfaceType : SharpRuntime::intcs {
+        InterfaceIsDual         = 0,
+        InterfaceIsIUnknown     = 1,
+        InterfaceIsIDispatch    = 2,
+        InterfaceIsIInspectable = 3
+    };
+
+    /**
+     * @brief The kind of class interface generated for a class.
+     *
+     * #1980 group G-5 / SR-AUD-167. Transcribed from `ClassInterfaceType.cs`.
+     */
+    enum class ClassInterfaceType : SharpRuntime::intcs {
+        None         = 0,
+        AutoDispatch = 1,
+        AutoDual     = 2
+    };
+
     /** Specifies the calling convention of an unmanaged entry point. */
     enum class CallingConvention : SharpRuntime::intcs {
         Winapi    = 1, ///< Platform default (stdcall on Windows).
@@ -162,21 +208,74 @@ namespace System::Runtime::InteropServices {
     };
 
     /** Indicates how a managed member should be marshalled to/from unmanaged code. */
-    class MarshalAsAttribute : public System::Attribute {
+    class MarshalAsAttribute final : public System::Attribute {
+        UnmanagedType value_;
     public:
-        UnmanagedType Value;          ///< The unmanaged type to marshal as.
-        SharpRuntime::intcs ArraySubType = 0; ///< Element type for array marshalling.
+        /**
+         * Element type for array marshalling.
+         *
+         * #1980 group G-5 / SR-AUD-167: this was `intcs`. .NET declares
+         * `public UnmanagedType ArraySubType;` (`MarshalAsAttribute.cs:29`) -- an
+         * `UnmanagedType`, not a loose integer. The weaker type let any number be stored where
+         * only a marshalling kind is meaningful, which is the whole reason the enum exists.
+         *
+         * The default is `0`, which is **not a declared enumerator** (`UnmanagedType` starts at
+         * `Bool = 2`) -- deliberately, because .NET's field has no initializer either, the same
+         * reasoning group G-2 recorded for the two `CharSet` defaults.
+         */
+        UnmanagedType ArraySubType = static_cast<UnmanagedType>(0);
+        /**
+         * The COM variant type of a SafeArray's elements.
+         *
+         * #1980 G-5 / SR-AUD-167: absent before. .NET: `public VarEnum SafeArraySubType;`
+         * (`MarshalAsAttribute.cs:21`).
+         */
+        VarEnum SafeArraySubType = static_cast<VarEnum>(0);
+        /**
+         * Parameter index of the IID for an `IUnknown`/`IDispatch` marshal.
+         *
+         * #1980 G-5 / SR-AUD-167: absent before. .NET: `public int IidParameterIndex;`
+         * (`MarshalAsAttribute.cs:25`).
+         */
+        SharpRuntime::intcs IidParameterIndex = 0;
         std::string MarshalType;      ///< Fully qualified name of a custom marshaller.
-        std::string MarshalTypeRef;   ///< Type reference for a custom marshaller.
+        /**
+         * Type reference for a custom marshaller.
+         *
+         * @note **A permanent deviation, stated rather than left implicit.** .NET declares this
+         * as `public Type? MarshalTypeRef;` (`MarshalAsAttribute.cs:35`), and `System::Type` is
+         * reflection -- out of scope for this port by explicit decision. A `std::string` holding
+         * the type's name is the closest available shape. The same applies to
+         * `SafeArrayUserDefinedSubType`, which .NET also types as `Type?` and which is therefore
+         * **absent here** rather than invented as another string: adding a member that cannot
+         * carry what .NET's carries would be worse than not having it.
+         */
+        std::string MarshalTypeRef;
         std::string MarshalCookie;    ///< Extra string passed to the custom marshaller.
         SharpRuntime::intcs SizeConst     = 0; ///< Fixed array/string size for ByValArray/ByValTStr.
-        SharpRuntime::intcs SizeParamIndex = 0; ///< Parameter index supplying the array size.
+        /**
+         * Parameter index supplying the array size.
+         *
+         * #1980 G-5 / SR-AUD-167: this was `intcs`. .NET declares
+         * `public short SizeParamIndex;` (`MarshalAsAttribute.cs:30`) -- a **short**, because the
+         * value is a parameter position and the metadata encoding is 16-bit.
+         */
+        SharpRuntime::shortcs SizeParamIndex = 0;
 
         /** @param t The unmanaged marshalling type. */
-        explicit MarshalAsAttribute(UnmanagedType t) : Value(t) {}
+        explicit MarshalAsAttribute(UnmanagedType t) : value_(t) {}
 
         /** Integer overload — @param t is cast to UnmanagedType. */
-        explicit MarshalAsAttribute(SharpRuntime::shortcs t) : Value(static_cast<UnmanagedType>(t)) {}
+        explicit MarshalAsAttribute(SharpRuntime::shortcs t) : value_(static_cast<UnmanagedType>(t)) {}
+
+        /**
+         * @return The unmanaged type to marshal as.
+         *
+         * #1980 G-5 / SR-AUD-167: `Value` was a public **mutable** data member. .NET's is
+         * `public UnmanagedType Value { get; }` (`MarshalAsAttribute.cs:18`) -- get-only, set
+         * once by the constructor. Landed under SA-8, whose first bullet is exactly this shape.
+         */
+        [[nodiscard]] UnmanagedType getValueProperty() const noexcept { return value_; }
     };
 
     /** Specifies the DLL entry point and calling options for a P/Invoke method. */

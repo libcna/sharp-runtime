@@ -539,8 +539,10 @@ TEST(FieldOffsetAttributeTests, Constructor_StoresOffset) {
 }
 
 TEST(MarshalAsAttributeTests, Constructor_StoresType) {
+    // MIGRATED by #1980 group G-5 / SR-AUD-167: `Value` was a public MUTABLE data member; .NET's
+    // is `public UnmanagedType Value { get; }` -- get-only, set once by the constructor.
     MarshalAsAttribute attr(UnmanagedType::LPStr);
-    EXPECT_EQ(attr.Value, UnmanagedType::LPStr);
+    EXPECT_EQ(attr.getValueProperty(), UnmanagedType::LPStr);
 }
 
 TEST(MarshalAsAttributeTests, DefaultSizeConst_IsZero) {
@@ -1154,4 +1156,132 @@ TEST(InteropMetadataValueTests, Decl1980G2_BothCharSetDefaultsAreUnsetNotNamed) 
     EXPECT_EQ(static_cast<int>(CharSet::None), 1) << "None is 1, so 0 is genuinely unnamed";
     EXPECT_EQ(static_cast<int>(StructLayoutAttribute(LayoutKind::Sequential).CharSet), 0);
     EXPECT_EQ(static_cast<int>(DllImportAttribute("lib").CharSet), 0);
+}
+
+// =============================================================================================
+// Ticket #1980 group G-5 (SR-AUD-167) — MarshalAsAttribute's field TYPES, and the two absent
+// COM enums.
+//
+// Like G-2, this is about metadata fidelity: these types exist to preserve the managed values,
+// so a field typed as a loose integer where .NET types it as an enum is not a stylistic choice --
+// it lets any number be stored where only a marshalling kind is meaningful, which is the whole
+// reason the enum exists.
+// =============================================================================================
+
+namespace {
+    template <typename T>
+    concept HasPublicValueField = requires(T a) { a.Value; };
+}
+
+TEST(MarshalAsFieldTypeTests, Fix1980G5_ArraySubTypeIsAnUnmanagedTypeNotAnInt) {
+    // .NET: `public UnmanagedType ArraySubType;` (MarshalAsAttribute.cs:29).
+    static_assert(std::is_same_v<decltype(MarshalAsAttribute(UnmanagedType::LPArray).ArraySubType),
+                                  UnmanagedType>,
+                  "#1980 G-5: ArraySubType is an UnmanagedType, not an integer");
+    MarshalAsAttribute attr(UnmanagedType::LPArray);
+    attr.ArraySubType = UnmanagedType::I4;
+    EXPECT_EQ(attr.ArraySubType, UnmanagedType::I4);
+}
+
+TEST(MarshalAsFieldTypeTests, Fix1980G5_SizeParamIndexIsAShortNotAnInt) {
+    // .NET: `public short SizeParamIndex;` (MarshalAsAttribute.cs:30) -- a short, because the
+    // value is a parameter position and the metadata encoding is 16-bit.
+    static_assert(std::is_same_v<decltype(MarshalAsAttribute(UnmanagedType::LPArray).SizeParamIndex),
+                                  SharpRuntime::shortcs>,
+                  "#1980 G-5: SizeParamIndex is a short");
+}
+
+TEST(MarshalAsFieldTypeTests, Fix1980G5_ValueIsGetOnly) {
+    // SA-8's first bullet: a public mutable data member where .NET's is get-only.
+    static_assert(!HasPublicValueField<MarshalAsAttribute>,
+                  "#1980 G-5: Value is get-only -- read it with getValueProperty()");
+}
+
+TEST(MarshalAsFieldTypeTests, Fix1980G5_TheTwoAbsentFieldsExist) {
+    // SafeArraySubType and IidParameterIndex were absent entirely.
+    MarshalAsAttribute attr(UnmanagedType::SafeArray);
+    EXPECT_EQ(static_cast<int>(attr.SafeArraySubType), 0) << "unset, as .NET's uninitialised field";
+    EXPECT_EQ(attr.IidParameterIndex, 0);
+    attr.SafeArraySubType = VarEnum::VT_BSTR;
+    attr.IidParameterIndex = 3;
+    EXPECT_EQ(attr.SafeArraySubType, VarEnum::VT_BSTR);
+    EXPECT_EQ(attr.IidParameterIndex, 3);
+}
+
+TEST(MarshalAsFieldTypeTests, Decl1980G5_ArraySubTypeDefaultsToAnUnnamedValue) {
+    // Same reasoning G-2 recorded for the two CharSet defaults: .NET's field has no initializer,
+    // so the default is 0 -- and UnmanagedType has no enumerator with that value (Bool is 2).
+    EXPECT_EQ(static_cast<int>(MarshalAsAttribute(UnmanagedType::LPArray).ArraySubType), 0);
+    EXPECT_EQ(static_cast<int>(UnmanagedType::Bool), 2) << "so 0 is genuinely unnamed";
+}
+
+TEST(MarshalAsFieldTypeTests, Fix1980G5_TheTwoComEnumsExist) {
+    EXPECT_EQ(static_cast<int>(ComInterfaceType::InterfaceIsDual), 0);
+    EXPECT_EQ(static_cast<int>(ComInterfaceType::InterfaceIsIUnknown), 1);
+    EXPECT_EQ(static_cast<int>(ComInterfaceType::InterfaceIsIDispatch), 2);
+    EXPECT_EQ(static_cast<int>(ComInterfaceType::InterfaceIsIInspectable), 3);
+    EXPECT_EQ(static_cast<int>(ClassInterfaceType::None), 0);
+    EXPECT_EQ(static_cast<int>(ClassInterfaceType::AutoDispatch), 1);
+    EXPECT_EQ(static_cast<int>(ClassInterfaceType::AutoDual), 2);
+}
+
+namespace {
+    /// Exhaustive over VarEnum, with NO `default:` label.
+    ///
+    /// This is the only way C++ offers to pin an enum's MEMBERSHIP rather than its values: the
+    /// build runs with -Wall -Wextra -Werror, so gcc's -Wswitch turns any enumerator that is not
+    /// handled here into a compile ERROR. Asserting that VT_DECIMAL is 14 and VT_I1 is 16 catches
+    /// a RENUMBERING but not an INSERTION -- a mutation adding `VT_UNUSED15 = 15` went uncaught
+    /// until this function existed, because C++ has no way to enumerate an enum's members.
+    ///
+    /// Every arm is .NET's; adding one here without adding it to VarEnum.cs would be inventing
+    /// surface, and removing one from VarEnum breaks this function's own reference to it.
+    int VarEnumCensus(VarEnum v) {
+        switch (v) {
+            case VarEnum::VT_EMPTY: case VarEnum::VT_NULL: case VarEnum::VT_I2:
+            case VarEnum::VT_I4: case VarEnum::VT_R4: case VarEnum::VT_R8:
+            case VarEnum::VT_CY: case VarEnum::VT_DATE: case VarEnum::VT_BSTR:
+            case VarEnum::VT_DISPATCH: case VarEnum::VT_ERROR: case VarEnum::VT_BOOL:
+            case VarEnum::VT_VARIANT: case VarEnum::VT_UNKNOWN: case VarEnum::VT_DECIMAL:
+            case VarEnum::VT_I1: case VarEnum::VT_UI1: case VarEnum::VT_UI2:
+            case VarEnum::VT_UI4: case VarEnum::VT_I8: case VarEnum::VT_UI8:
+            case VarEnum::VT_INT: case VarEnum::VT_UINT: case VarEnum::VT_VOID:
+            case VarEnum::VT_HRESULT: case VarEnum::VT_PTR: case VarEnum::VT_SAFEARRAY:
+            case VarEnum::VT_CARRAY: case VarEnum::VT_USERDEFINED: case VarEnum::VT_LPSTR:
+            case VarEnum::VT_LPWSTR: case VarEnum::VT_RECORD: case VarEnum::VT_FILETIME:
+            case VarEnum::VT_BLOB: case VarEnum::VT_STREAM: case VarEnum::VT_STORAGE:
+            case VarEnum::VT_STREAMED_OBJECT: case VarEnum::VT_STORED_OBJECT:
+            case VarEnum::VT_BLOB_OBJECT: case VarEnum::VT_CF: case VarEnum::VT_CLSID:
+            case VarEnum::VT_VECTOR: case VarEnum::VT_ARRAY: case VarEnum::VT_BYREF:
+                return static_cast<int>(v);
+        }
+        return -1;
+    }
+}
+
+TEST(MarshalAsFieldTypeTests, Decl1980G5_VarEnumMembershipIsPinnedByAnExhaustiveSwitch) {
+    // The census above is the pin; this keeps it visible in the test listing and exercises it.
+    EXPECT_EQ(VarEnumCensus(VarEnum::VT_EMPTY), 0);
+    EXPECT_EQ(VarEnumCensus(VarEnum::VT_BYREF), 0x4000);
+}
+
+TEST(MarshalAsFieldTypeTests, Fix1980G5_VarEnumCarriesItsHoleAndItsFlags) {
+    // The two rows a transcription is most likely to get wrong: 15 is a HOLE (.NET's enum jumps
+    // from VT_DECIMAL = 14 to VT_I1 = 16), and the three flag values sit far above the rest.
+    EXPECT_EQ(static_cast<int>(VarEnum::VT_DECIMAL), 14);
+    EXPECT_EQ(static_cast<int>(VarEnum::VT_I1), 16);
+    EXPECT_EQ(static_cast<int>(VarEnum::VT_CLSID), 72);
+    EXPECT_EQ(static_cast<int>(VarEnum::VT_VECTOR), 0x1000);
+    EXPECT_EQ(static_cast<int>(VarEnum::VT_ARRAY), 0x2000);
+    EXPECT_EQ(static_cast<int>(VarEnum::VT_BYREF), 0x4000);
+}
+
+TEST(MarshalAsFieldTypeTests, Decl1980G5_TheTwoTypeValuedMembersStayOutOfScope) {
+    // .NET types MarshalTypeRef and SafeArrayUserDefinedSubType as `Type?`, and System::Type is
+    // reflection -- a declared permanent deviation. MarshalTypeRef survives as a string holding
+    // the name; SafeArrayUserDefinedSubType is ABSENT rather than invented as a second string,
+    // because a member that cannot carry what .NET's carries is worse than no member.
+    static_assert(std::is_same_v<decltype(MarshalAsAttribute(UnmanagedType::LPStr).MarshalTypeRef),
+                                  std::string>);
+    static_assert(std::is_final_v<MarshalAsAttribute>, ".NET's MarshalAsAttribute is sealed");
 }
