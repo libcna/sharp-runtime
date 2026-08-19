@@ -25,6 +25,15 @@ namespace System::Threading::Channels {
         bool SingleReader = false;
         /** @brief true if continuations may be invoked synchronously on the thread completing an operation. */
         bool AllowSynchronousContinuations = false;
+
+        // DELIBERATELY still public data members, and the boundary is pinned by a test rather
+        // than left to look like an oversight. .NET's three are plain auto-properties with no
+        // validation at all (ChannelOptions.cs:17,27,39) -- `{ get; set; }` and nothing else --
+        // so a public field is observationally identical to the reference. SA-8 reaches a
+        // representation .NET keeps private, readonly or absent; it does not reach one .NET
+        // publishes as freely as this. Converting them would be a source break that buys no
+        // behaviour, which is the opposite of #1969's case: there, the shape was the only thing
+        // preventing a check that .NET performs.
     };
 
     /**
@@ -33,11 +42,18 @@ namespace System::Threading::Channels {
      * C++ counterpart of .NET System.Threading.Channels.BoundedChannelOptions.
      */
     class BoundedChannelOptions : public ChannelOptions {
-        SharpRuntime::intcs capacity_;
+        SharpRuntime::intcs    capacity_;
+        // PRIVATE, matching .NET's `private BoundedChannelFullMode _mode`
+        // (ChannelOptions.cs:47). It was a bare public data member, and the obstacle was the
+        // field's SHAPE rather than any missing logic: a data member has nowhere to put a
+        // check, so an undeclared value could be assigned and then defeat the channel's
+        // bounded-memory contract outright -- with capacity 1, `static_cast<
+        // BoundedChannelFullMode>(99)` made the writer take the drop path (the mode is not
+        // Wait) and then match no arm of the drop switch, so nothing was dropped and Count
+        // reached 2. Ticket #1969, under docs/StandingApprovals.md SA-8.
+        BoundedChannelFullMode fullMode_ = BoundedChannelFullMode::Wait;
 
     public:
-        BoundedChannelFullMode FullMode = BoundedChannelFullMode::Wait;
-
         /** @throws System::ArgumentOutOfRangeException if @p capacity is negative. */
         explicit BoundedChannelOptions(SharpRuntime::intcs capacity) : capacity_(capacity) {
             System::ArgumentOutOfRangeException::ThrowIfNegative(capacity, "capacity");
@@ -49,6 +65,32 @@ namespace System::Threading::Channels {
         void setCapacityProperty(SharpRuntime::intcs value) {
             System::ArgumentOutOfRangeException::ThrowIfNegative(value, "value");
             capacity_ = value;
+        }
+
+        /** @return The behavior incurred by write operations when the channel is full. */
+        [[nodiscard]] BoundedChannelFullMode getFullModeProperty() const noexcept { return fullMode_; }
+
+        /**
+         * @brief Sets the behavior incurred by write operations when the channel is full.
+         * @param value One of the four declared BoundedChannelFullMode values.
+         * @throws System::ArgumentOutOfRangeException if @p value is not a declared enumerator.
+         *
+         * Transcribed from .NET's `FullMode` setter (ChannelOptions.cs:80-97): a four-arm
+         * switch with a `default` that throws `ArgumentOutOfRangeException(nameof(value))` --
+         * so the parameter name is **"value"**, not "FullMode", which is what a caller reading
+         * the message will see.
+         */
+        void setFullModeProperty(BoundedChannelFullMode value) {
+            switch (value) {
+                case BoundedChannelFullMode::Wait:
+                case BoundedChannelFullMode::DropNewest:
+                case BoundedChannelFullMode::DropOldest:
+                case BoundedChannelFullMode::DropWrite:
+                    fullMode_ = value;
+                    break;
+                default:
+                    throw System::ArgumentOutOfRangeException("value");
+            }
         }
     };
 

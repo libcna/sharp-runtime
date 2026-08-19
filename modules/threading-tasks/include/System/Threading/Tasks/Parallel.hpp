@@ -43,8 +43,20 @@ namespace System::Threading::Tasks {
          * point of detection moves. Converting this field to a
          * `getMaxDegreeOfParallelismProperty()`/`setMaxDegreeOfParallelismProperty()` pair would
          * be a public source break for every consumer that writes `opts.MaxDegreeOfParallelism =
-         * …`, and is deliberately **not** done here — the identical shape problem is why
-         * `BoundedChannelOptions::FullMode` is approval-gated as ticket #1969.
+         * …`, and is deliberately **not** done here.
+         *
+         * **That deferral is now the only thing left, and it has an approval.** The identical
+         * shape problem in `BoundedChannelOptions::FullMode` was approval-gated as ticket #1969,
+         * and #1969 **landed** on 2026-08-19 under `docs/StandingApprovals.md` SA-8, whose first
+         * bullet authorises exactly this conversion. Moving the guard here to a setter is ticket
+         * **#2388**.
+         *
+         * One detail #2388 must not "harmonise": this port's parameter name
+         * `"MaxDegreeOfParallelism"` is already correct — .NET writes
+         * `ArgumentOutOfRangeException.ThrowIfZero(value, nameof(MaxDegreeOfParallelism))`
+         * (`Parallel.cs:87-88`), where `BoundedChannelOptions` writes `nameof(value)`. The
+         * reference is inconsistent between its two option types, and both are transcribed as
+         * they are.
          *
          * @note -1 keeps its documented "unlimited" meaning; this runtime realises it as
          * `std::thread::hardware_concurrency()`, which is what .NET's own default does. That is a

@@ -11,6 +11,7 @@
 #include <thread>
 #include <vector>
 #include "System/Exception.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Threading/Channels/Channel.hpp"
 #include "System/Threading/Channels/ChannelClosedException.hpp"
@@ -54,7 +55,7 @@ TEST(ChannelTests, BoundedChannel_RespectsCapacity_WaitMode) {
 
 TEST(ChannelTests, BoundedChannel_DropOldest) {
     BoundedChannelOptions options(2);
-    options.FullMode = BoundedChannelFullMode::DropOldest;
+    options.setFullModeProperty(BoundedChannelFullMode::DropOldest);
     auto channel = Channel<int>::CreateBounded(options);
     channel.Writer->TryWrite(1);
     channel.Writer->TryWrite(2);
@@ -72,7 +73,7 @@ TEST(ChannelTests, BoundedChannel_DropOldest) {
 // DropOldest's existing coverage.
 TEST(ChannelTests, BoundedChannel_DropNewest) {
     BoundedChannelOptions options(2);
-    options.FullMode = BoundedChannelFullMode::DropNewest;
+    options.setFullModeProperty(BoundedChannelFullMode::DropNewest);
     auto channel = Channel<int>::CreateBounded(options);
     channel.Writer->TryWrite(1);
     channel.Writer->TryWrite(2);
@@ -86,7 +87,7 @@ TEST(ChannelTests, BoundedChannel_DropNewest) {
 
 TEST(ChannelTests, BoundedChannel_DropWrite) {
     BoundedChannelOptions options(1);
-    options.FullMode = BoundedChannelFullMode::DropWrite;
+    options.setFullModeProperty(BoundedChannelFullMode::DropWrite);
     auto channel = Channel<int>::CreateBounded(options);
     channel.Writer->TryWrite(1);
     EXPECT_TRUE(channel.Writer->TryWrite(2)); // "handled" (dropped), item 1 stays
@@ -859,7 +860,7 @@ TEST(ZeroCapacityRendezvousTests, DropModes_DiscardTheItemAndKeepCountAtZero) {
     for (auto mode : {BoundedChannelFullMode::DropWrite, BoundedChannelFullMode::DropNewest,
                       BoundedChannelFullMode::DropOldest}) {
         BoundedChannelOptions options(0);
-        options.FullMode = mode;
+        options.setFullModeProperty(mode);
         auto channel = Channel<int>::CreateBounded(options);
         EXPECT_TRUE(channel.Writer->TryWrite(1)) << "drop modes report the write as handled";
         EXPECT_EQ(channel.Reader->getCountProperty(), 0);
@@ -921,7 +922,7 @@ TEST(ZeroCapacityRendezvousTests, NonZeroCapacities_AreUnchanged) {
     EXPECT_EQ(accepted, 100);
 
     BoundedChannelOptions dropOldest(1);
-    dropOldest.FullMode = BoundedChannelFullMode::DropOldest;
+    dropOldest.setFullModeProperty(BoundedChannelFullMode::DropOldest);
     auto dropping = Channel<int>::CreateBounded(dropOldest);
     dropping.Writer->TryWrite(1);
     dropping.Writer->TryWrite(2);
@@ -956,4 +957,83 @@ TEST(ZeroCapacityRendezvousTests, PublicLayoutIsUnchanged) {
                       alignof(BoundedChannelOptions) == 8,
                   "channel alignment changed");
     SUCCEED();
+}
+
+// =============================================================================================
+// #1969 — BoundedChannelOptions::FullMode is validated on assignment, as .NET's setter is.
+//
+// It used to be a bare public data member. The obstacle was the field's SHAPE, not any missing
+// logic: a data member has nowhere to put a check, so an undeclared value could be stored and
+// then defeat the bounded-memory contract outright. Landed under SA-8.
+// =============================================================================================
+
+TEST(ChannelFullModeValidationTests, Fix1969_EveryDeclaredModeIsAccepted) {
+    // The four arms .NET's switch lists (ChannelOptions.cs:83-89), asserted individually so a
+    // mutation that drops one arm is caught by name rather than by an aggregate.
+    for (auto mode : {BoundedChannelFullMode::Wait, BoundedChannelFullMode::DropNewest,
+                      BoundedChannelFullMode::DropOldest, BoundedChannelFullMode::DropWrite}) {
+        BoundedChannelOptions options(2);
+        ASSERT_NO_THROW(options.setFullModeProperty(mode));
+        EXPECT_EQ(options.getFullModeProperty(), mode);
+    }
+}
+
+TEST(ChannelFullModeValidationTests, Fix1969_TheDefaultIsWait) {
+    // .NET: `private BoundedChannelFullMode _mode = BoundedChannelFullMode.Wait;`
+    EXPECT_EQ(BoundedChannelOptions(2).getFullModeProperty(), BoundedChannelFullMode::Wait);
+}
+
+TEST(ChannelFullModeValidationTests, Fix1969_AnUndeclaredValueIsRejected) {
+    BoundedChannelOptions options(2);
+    EXPECT_THROW(options.setFullModeProperty(static_cast<BoundedChannelFullMode>(99)),
+                 System::ArgumentOutOfRangeException);
+    // ...and rejection leaves the previous value in place, rather than half-applying.
+    EXPECT_EQ(options.getFullModeProperty(), BoundedChannelFullMode::Wait);
+}
+
+TEST(ChannelFullModeValidationTests, Fix1969_TheParameterNameIsValueNotFullMode) {
+    // .NET throws ArgumentOutOfRangeException(nameof(value)) -- so the name a caller reads in
+    // the message is "value". Naming the property instead would be the plausible wrong answer,
+    // and it is what a from-scratch implementation would most likely write.
+    BoundedChannelOptions options(2);
+    try {
+        options.setFullModeProperty(static_cast<BoundedChannelFullMode>(-7));
+        FAIL() << "an undeclared mode must be rejected";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        // Assert on ParamName, NOT on what(). The first spelling of this test searched what()
+        // for "value" and was VACUOUS: the default message is "Specified argument was out of
+        // the range of valid values.", which contains the substring whatever the parameter is
+        // named, so mutation M3 (naming the property instead) went uncaught.
+        EXPECT_EQ(e.getParamNameProperty(), "value");
+    }
+}
+
+TEST(ChannelFullModeValidationTests, Fix1969_TheBoundedMemoryContractCanNoLongerBeDefeated) {
+    // THE DEFECT ITSELF, which is why this is not a cosmetic shape change. With capacity 1 and
+    // an undeclared mode, the writer used to take the drop path (the mode is not Wait) and then
+    // match no arm of the drop switch, so nothing was dropped and the item was appended anyway
+    // -- Count reached 2 on a channel bounded at 1.
+    BoundedChannelOptions options(1);
+    EXPECT_THROW(options.setFullModeProperty(static_cast<BoundedChannelFullMode>(99)),
+                 System::ArgumentOutOfRangeException);
+
+    // The channel built from the options that survived validation honours its bound.
+    auto channel = Channel<int>::CreateBounded(options);
+    EXPECT_TRUE(channel.Writer->TryWrite(1));
+    EXPECT_FALSE(channel.Writer->TryWrite(2)) << "capacity 1 in Wait mode must refuse the second";
+}
+
+TEST(ChannelFullModeValidationTests, Decl1969_TheThreeBaseFlagsStayPublicDataMembers) {
+    // The boundary is pinned rather than left looking like an oversight. .NET's SingleWriter,
+    // SingleReader and AllowSynchronousContinuations are plain auto-properties with NO
+    // validation (ChannelOptions.cs:17,27,39), so a public field is observationally identical
+    // to the reference and SA-8 does not reach them. #1969's case is the opposite: there, the
+    // shape was the only thing preventing a check .NET actually performs.
+    BoundedChannelOptions options(2);
+    options.SingleWriter = true;
+    options.SingleReader = true;
+    options.AllowSynchronousContinuations = true;
+    EXPECT_TRUE(options.SingleWriter);
+    EXPECT_TRUE(options.SingleReader);
+    EXPECT_TRUE(options.AllowSynchronousContinuations);
 }

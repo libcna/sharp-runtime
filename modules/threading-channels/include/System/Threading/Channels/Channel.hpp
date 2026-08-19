@@ -569,7 +569,7 @@ namespace System::Threading::Channels {
         [[nodiscard]] static Channel<T> CreateBounded(const BoundedChannelOptions& options) {
             auto state = std::make_shared<detail::ChannelState<T>>();
             state->capacity = options.getCapacityProperty();
-            state->fullMode = options.FullMode;
+            state->fullMode = options.getFullModeProperty();
             Channel<T> channel;
             channel.Reader = std::make_shared<detail::ChannelReaderImpl<T>>(state);
             channel.Writer = std::make_shared<detail::ChannelWriterImpl<T>>(state);
