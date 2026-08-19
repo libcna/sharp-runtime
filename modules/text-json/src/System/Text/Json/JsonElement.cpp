@@ -93,7 +93,7 @@ namespace System::Text::Json {
         const auto& arr = require(JsonValueKind::Array, "Array");
         if (index < 0 || static_cast<size_t>(index) >= arr.size())
             throw System::IndexOutOfRangeException("Index was outside the bounds of the array.");
-        return JsonElement(std::shared_ptr<const nlohmann::ordered_json>(node_, &arr[static_cast<size_t>(index)]));
+        return JsonElement(state_, &arr[static_cast<size_t>(index)]);
     }
 
     std::vector<JsonProperty> JsonElement::EnumerateObject() const {
@@ -101,7 +101,7 @@ namespace System::Text::Json {
         std::vector<JsonProperty> result;
         result.reserve(obj.size());
         for (auto it = obj.begin(); it != obj.end(); ++it) {
-            JsonElement value(std::shared_ptr<const nlohmann::ordered_json>(node_, &(*it)));
+            JsonElement value(state_, &(*it));
             result.push_back(JsonProperty(it.key(), std::move(value)));
         }
         return result;

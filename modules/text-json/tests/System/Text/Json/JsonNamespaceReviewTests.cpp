@@ -343,9 +343,8 @@ TEST(JsonReviewPinTests, DisposalGuardsThatALREADYWorkAndTheOneThatDoesNot) {
     doc->Dispose();
     EXPECT_THROW((void)doc->getRootElementProperty(), System::ObjectDisposedException);
     EXPECT_NO_THROW(doc->Dispose());
-    // PIN of the known defect: the captured element still answers. #2117, blocked on layout.
-    EXPECT_EQ(captured.GetInt32(), 10)
-        << "a captured element still reads live storage -- #2117, and it is NOT a dangling read";
+    // INVERTED by #2117: the captured element now reports the disposal instead of answering.
+    EXPECT_THROW((void)captured.GetInt32(), System::ObjectDisposedException);
 }
 
 TEST(JsonReviewPinTests, MalformedTextThatTheParserALREADYRejects) {
@@ -861,23 +860,58 @@ TEST(JsonGatedBehaviourPins, PIN2118GetRawTextReRendersRatherThanReturningSource
     EXPECT_EQ(JsonDocument::Parse("{\"a\":1}")->getRootElementProperty().GetRawText(), "{\"a\":1}");
 }
 
-TEST(JsonGatedBehaviourPins, PIN2117TheDisposalFlagIsNotPropagatedToElementsHandedOutEarlier) {
-    // SR-AUD-324 / cause TJ-H, blocked on an OBJECT LAYOUT change. The review corrected the
-    // finding's framing: this is NOT a use-after-free. JsonElement holds an OWNING aliasing
-    // shared_ptr, so a captured element keeps the tree alive and reads LIVE storage. Both
-    // halves are pinned -- the guard that works and the one that does not.
+TEST(JsonGatedBehaviourPins, Fix2117_DisposalReachesElementsHandedOutEarlier) {
+    // INVERTED by #2117. The review's framing correction stands -- this was never a
+    // use-after-free, the element held an OWNING aliasing shared_ptr and read LIVE storage --
+    // and the defect was that a disposed document went on serving data where .NET throws.
     auto doc = JsonDocument::Parse("{\"a\":10,\"b\":[1,2]}");
     JsonElement scalar = doc->getRootElementProperty().GetProperty("a");
     JsonElement array = doc->getRootElementProperty().GetProperty("b");
+    JsonElement survivor = scalar.Clone();
     doc->Dispose();
 
     EXPECT_THROW((void)doc->getRootElementProperty(), System::ObjectDisposedException)
-        << "the door the finding's own file owns is ALREADY guarded";
-    EXPECT_NO_THROW(doc->Dispose()) << "double Dispose is already safe";
+        << "the door the finding's own file owns was ALREADY guarded";
+    EXPECT_NO_THROW(doc->Dispose()) << "double Dispose is still safe";
 
-    EXPECT_EQ(scalar.GetInt32(), 10) << "#2117: reads live storage, not dangling memory";
-    EXPECT_EQ(array[1].GetInt32(), 2) << "#2117: and so does a child derived after disposal";
-    EXPECT_EQ(array.GetArrayLength(), 2);
+    EXPECT_THROW((void)scalar.GetInt32(), System::ObjectDisposedException);
+    EXPECT_THROW((void)array.GetArrayLength(), System::ObjectDisposedException);
+    EXPECT_THROW((void)array[1], System::ObjectDisposedException);
+
+    // ValueKind throws too, which is easy to leave out: .NET's reads
+    // `_parent.GetJsonTokenType`, and that begins with CheckNotDisposed().
+    EXPECT_THROW((void)scalar.getValueKindProperty(), System::ObjectDisposedException);
+    EXPECT_THROW((void)scalar.GetRawText(), System::ObjectDisposedException);
+    EXPECT_THROW((void)scalar.Clone(), System::ObjectDisposedException);
+
+    // A CLONE taken before disposal owns its own state and survives -- .NET's Clone() returns an
+    // element rooted in a NEW document (JsonElement.cs), so this is parity, not a loophole.
+    EXPECT_EQ(survivor.GetInt32(), 10);
+    EXPECT_EQ(survivor.getValueKindProperty(), JsonValueKind::Number);
+}
+
+TEST(JsonGatedBehaviourPins, Fix2117_ADefaultElementIsUndefinedNotDisposed) {
+    // .NET keeps the two apart: CheckValidInstance() raises InvalidOperationException for a null
+    // parent, CheckNotDisposed() raises ObjectDisposedException. A default element here has no
+    // document at all, so it must keep answering "undefined" rather than claiming a disposal
+    // that never happened -- the row that fails if the guard is written as `if (!node_) throw`.
+    JsonElement undefined;
+    EXPECT_EQ(undefined.getValueKindProperty(), JsonValueKind::Undefined);
+    EXPECT_NO_THROW((void)undefined.GetRawText());
+    EXPECT_NO_THROW((void)undefined.Clone());
+}
+
+TEST(JsonGatedBehaviourPins, Fix2117_LayoutPin) {
+    // SA-3 requires the before/after sizeof to be pinned rather than asserted in prose.
+    // JsonElement traded one aliasing shared_ptr for a shared_ptr to the document state plus a
+    // raw node pointer -- .NET's `_parent` plus `_idx` -- so it grows by exactly one pointer.
+    struct Before { std::shared_ptr<void> node; std::string propertyName; };
+    struct After  { std::shared_ptr<void> state; const void* node; std::string propertyName; };
+    EXPECT_EQ(sizeof(JsonElement), sizeof(After));
+    EXPECT_EQ(alignof(JsonElement), alignof(After));
+    EXPECT_EQ(sizeof(After), sizeof(Before) + sizeof(void*))
+        << "the shadow pair must actually differ, or this pin asserts nothing";
+    EXPECT_EQ(sizeof(JsonElement), 56u) << "consumers must rebuild; see the migration note";
 }
 
 TEST(JsonGatedBehaviourPins, Fix2115_BothOptionsWorkAtBOTHDoorsIdentically) {

@@ -8,6 +8,8 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Text/Json/JsonValueKind.hpp"
 #include "nlohmann/json.hpp"
+#include "System/ObjectDisposedException.hpp"
+#include "System/Text/Json/detail/JsonDocumentState.hpp"
 
 namespace System::Text::Json {
 
@@ -27,7 +29,14 @@ namespace System::Text::Json {
      * — same observable API, simpler implementation.
      */
     class JsonElement {
-        std::shared_ptr<const nlohmann::ordered_json> node_;
+        // #2117: the element points at the document's shared STATE and carries the node as a raw
+        // pointer into it, which is .NET's `_parent` plus `_idx`. It used to hold an aliasing
+        // `shared_ptr` straight to the node, which kept the tree alive -- correct for lifetime,
+        // and with no route back to the document to ask whether it had been disposed.
+        //
+        // sizeof(JsonElement) 48 -> 56 under SA-3; pinned by JsonLayoutPinTests.
+        std::shared_ptr<detail::JsonDocumentState> state_;
+        const nlohmann::ordered_json*              node_ = nullptr;
         std::string propertyName_; // set only for elements obtained via EnumerateObject(); see JsonProperty
 
         friend class JsonProperty;
@@ -35,15 +44,40 @@ namespace System::Text::Json {
 
         [[nodiscard]] const nlohmann::ordered_json& require(JsonValueKind expected, const char* what) const;
 
+        /**
+         * @brief The node, after checking the owning document has not been disposed.
+         *
+         * The single choke point .NET spreads over some twenty `CheckNotDisposed()` calls in
+         * `JsonDocument`. Every accessor goes through it, so an element handed out before
+         * `Dispose()` reports the disposal rather than serving data.
+         *
+         * A **default** element has no state and is NOT disposed -- it is undefined, and .NET
+         * distinguishes the two: `CheckValidInstance()` raises `InvalidOperationException` for a
+         * null parent while `CheckNotDisposed()` raises `ObjectDisposedException`. Callers here
+         * keep their existing "undefined" behaviour, so this returns nullptr for that case and
+         * each accessor answers as it always did.
+         */
+        [[nodiscard]] const nlohmann::ordered_json* checkedNode() const {
+            if (state_ && state_->disposed.load(std::memory_order_relaxed))
+                throw System::ObjectDisposedException("JsonDocument");
+            return node_;
+        }
+
     public:
         /** @brief Constructs an undefined JsonElement. */
         JsonElement() = default;
-        /** @brief Wraps a node from a JsonDocument's parsed tree (internal; use JsonDocument::getRootElementProperty()/GetProperty()/etc. instead). */
-        explicit JsonElement(std::shared_ptr<const nlohmann::ordered_json> node) : node_(std::move(node)) {}
+        /** @brief Wraps a node in a JsonDocument's shared state (internal; use JsonDocument::getRootElementProperty()/GetProperty()/etc. instead). */
+        JsonElement(std::shared_ptr<detail::JsonDocumentState> state, const nlohmann::ordered_json* node)
+            : state_(std::move(state)), node_(node) {}
 
-        /** @return The kind of this JSON value. */
+        /**
+         * @return The kind of this JSON value.
+         * @throws System::ObjectDisposedException if the owning document has been disposed
+         *         (#2117). .NET throws here too: `ValueKind` reads `_parent.GetJsonTokenType`,
+         *         which begins with `CheckNotDisposed()`.
+         */
         [[nodiscard]] JsonValueKind getValueKindProperty() const {
-            if (!node_) return JsonValueKind::Undefined;
+            if (!checkedNode()) return JsonValueKind::Undefined;
             if (node_->is_object()) return JsonValueKind::Object;
             if (node_->is_array()) return JsonValueKind::Array;
             if (node_->is_string()) return JsonValueKind::String;
@@ -63,7 +97,7 @@ namespace System::Text::Json {
          * null/empty-string distinction matters.
          */
         [[nodiscard]] std::string GetString() const {
-            if (node_ && node_->is_null()) return {};
+            if (checkedNode() && node_->is_null()) return {};
             return require(JsonValueKind::String, "String").get<std::string>();
         }
 
@@ -92,7 +126,7 @@ namespace System::Text::Json {
         [[nodiscard]] bool TryGetInt64(longcs& value) const;
         /** @brief Tries to get this element's value as a double without throwing on failure. */
         [[nodiscard]] bool TryGetDouble(double& value) const {
-            if (!node_ || !node_->is_number()) { value = 0; return false; }
+            if (!checkedNode() || !node_->is_number()) { value = 0; return false; }
             value = node_->get<double>();
             return true;
         }
@@ -110,7 +144,7 @@ namespace System::Text::Json {
          * **object-layout change to `JsonDocument` and `JsonElement`** — hence blocked, not
          * deferred.
          */
-        [[nodiscard]] std::string GetRawText() const { return node_ ? node_->dump() : std::string(); }
+        [[nodiscard]] std::string GetRawText() const { return checkedNode() ? node_->dump() : std::string(); }
 
         /**
          * @brief Tries to get a named object property.
@@ -124,7 +158,7 @@ namespace System::Text::Json {
             const auto& n = require(JsonValueKind::Object, "Object");
             auto it = n.find(name);
             if (it == n.end()) return false;
-            out = JsonElement(std::shared_ptr<const nlohmann::ordered_json>(node_, &(*it)));
+            out = JsonElement(state_, &(*it));
             return true;
         }
 
@@ -157,7 +191,7 @@ namespace System::Text::Json {
             const auto& arr = require(JsonValueKind::Array, "Array");
             std::vector<JsonElement> result;
             result.reserve(arr.size());
-            for (const auto& item : arr) result.emplace_back(std::shared_ptr<const nlohmann::ordered_json>(node_, &item));
+            for (const auto& item : arr) result.emplace_back(state_, &item);
             return result;
         }
 
@@ -165,9 +199,18 @@ namespace System::Text::Json {
         [[nodiscard]] std::vector<JsonProperty> EnumerateObject() const;
 
         /** @return A deep copy of this element that owns its own storage. */
+        /**
+         * @return A deep copy of this element that owns its own storage.
+         *
+         * The copy has its own state, so it survives the original document's `Dispose()` — which
+         * is .NET's contract too: `Clone()` delegates to `_parent.CloneElement(_idx)`, producing
+         * an element rooted in a NEW document (`JsonElement.cs`). Cloning an element whose
+         * document is already disposed throws, because the check runs first.
+         */
         [[nodiscard]] JsonElement Clone() const {
-            if (!node_) return JsonElement();
-            return JsonElement(std::make_shared<const nlohmann::ordered_json>(*node_));
+            if (!checkedNode()) return JsonElement();
+            auto fresh = std::make_shared<detail::JsonDocumentState>(*node_);
+            return JsonElement(fresh, &fresh->root);
         }
 
         /** @return The raw JSON text of this element (same as GetRawText()). */

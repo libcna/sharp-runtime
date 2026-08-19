@@ -6,6 +6,7 @@
 #include <string>
 #include "System/IDisposable.hpp"
 #include "System/ObjectDisposedException.hpp"
+#include "System/Text/Json/detail/JsonDocumentState.hpp"
 #include "System/Text/Json/JsonDocumentOptions.hpp"
 #include "System/Text/Json/JsonElement.hpp"
 #include "System/Text/Json/JsonException.hpp"
@@ -32,24 +33,31 @@ namespace System::Text::Json {
      * survives. That is not a leak, and LSan agrees.
      */
     class JsonDocument : public System::IDisposable {
-        std::shared_ptr<const nlohmann::ordered_json> root_;
-        bool disposed_ = false;
+        // #2117: one shared state, so every element handed out can see the disposal. The
+        // separate `disposed_` bool is gone -- two flags for one fact is what let the document
+        // and its elements disagree.
+        std::shared_ptr<detail::JsonDocumentState> state_;
 
-        explicit JsonDocument(std::shared_ptr<const nlohmann::ordered_json> root) : root_(std::move(root)) {}
+        explicit JsonDocument(std::shared_ptr<detail::JsonDocumentState> state) : state_(std::move(state)) {}
 
     public:
         ~JsonDocument() override = default;
 
         /** @brief Releases the root element and marks the document as disposed. */
         void Dispose() override {
-            disposed_ = true;
-            root_.reset();
+            if (state_) state_->disposed.store(true, std::memory_order_relaxed);
+            // The state is NOT released. .NET frees its buffer here, but .NET's elements hold a
+            // reference to the document and are told they are disposed; this port's elements
+            // hold a reference to the STATE and would read freed storage if it went away while
+            // one was alive. Retention is what makes the diagnostic safe -- the cost the class
+            // note has recorded since #2110, now bought for a check rather than for nothing.
+            state_.reset();
         }
 
         /** @return The root JsonElement of this document. @throws System::ObjectDisposedException if disposed. */
         [[nodiscard]] JsonElement getRootElementProperty() const {
-            if (disposed_) throw System::ObjectDisposedException("JsonDocument");
-            return JsonElement(root_);
+            if (!state_) throw System::ObjectDisposedException("JsonDocument");
+            return JsonElement(state_, &state_->root);
         }
 
         /**
@@ -62,7 +70,7 @@ namespace System::Text::Json {
                 // and the depth check all live in ONE place now, because JsonSerializer had a
                 // second, drifted copy of this sequence. See detail::ParseDocumentText.
                 return std::shared_ptr<JsonDocument>(new JsonDocument(
-                    std::make_shared<const nlohmann::ordered_json>(detail::ParseDocumentText(json, options))));
+                    std::make_shared<detail::JsonDocumentState>(detail::ParseDocumentText(json, options))));
             // #2111: this caught only parse_error, so a number literal that overflows a
             // double -- which raises out_of_range, NOT parse_error -- escaped as a std::
             // exception that no caller writing catch(const System::Exception&) could see.
