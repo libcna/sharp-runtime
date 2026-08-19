@@ -52,4 +52,33 @@ namespace System::Globalization::detail {
                                             & 0x1Fu);
     }
 
+    /**
+     * @brief Simple uppercase mapping of @p codePoint, invariant. Ticket #2018.
+     *
+     * `CharUnicodeInfo.ToUpper(uint)` (`CharUnicodeInfo.cs:293-310`). The table holds signed
+     * 16-bit **deltas** indexed by the SAME trie offset as the category -- .NET uses
+     * `GetCategoryCasingTableOffsetNoBoundsChecks` for all three, which is why the tables share
+     * a header here.
+     *
+     * The plane is preserved by masking: .NET's comment says *"the mapped casing for the
+     * codePoint usually exists in the same plane"*, and a 16-bit delta cannot cross one, so the
+     * high half of the code point is carried through untouched rather than added to.
+     *
+     * This is the **simple** mapping only, one code point to one code point. The full mappings
+     * -- U+00DF to "SS", the Turkish dotted I, the final sigma -- are `SpecialCasing.txt` and are
+     * not in this table, nor in .NET's.
+     */
+    [[nodiscard]] inline uint32_t LookupToUpperInvariant(uint32_t codePoint) noexcept {
+        const int32_t delta = kUppercaseValues[CategoryCasingTableOffset(codePoint)];
+        return (codePoint & 0xFFFF0000u)
+             | static_cast<uint16_t>(static_cast<uint32_t>(delta) + codePoint);
+    }
+
+    /** @brief Simple lowercase mapping of @p codePoint, invariant. See `LookupToUpperInvariant`. */
+    [[nodiscard]] inline uint32_t LookupToLowerInvariant(uint32_t codePoint) noexcept {
+        const int32_t delta = kLowercaseValues[CategoryCasingTableOffset(codePoint)];
+        return (codePoint & 0xFFFF0000u)
+             | static_cast<uint16_t>(static_cast<uint32_t>(delta) + codePoint);
+    }
+
 }  // namespace System::Globalization::detail

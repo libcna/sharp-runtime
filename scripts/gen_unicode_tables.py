@@ -37,15 +37,18 @@ OUT_DIR = Path("modules/core/include/System/Globalization/detail")
 
 # One entry per emitted header: (filename, ticket, arrays, extra emitter).
 #
-# The CASING tables (UppercaseValues, LowercaseValues) and GraphemeSegmentationValues are
-# deliberately NOT extracted: they belong to #2018 and to grapheme segmentation respectively, and
-# generating data no caller reads would be committing a table nothing verifies.
+# GraphemeSegmentationValues is deliberately NOT extracted: grapheme segmentation is not ported,
+# and generating data no caller reads would be committing a table nothing verifies. The casing
+# tables joined in #2018 and share the CATEGORY trie -- .NET indexes all three with
+# GetCategoryCasingTableOffsetNoBoundsChecks, which is why they live in the same header.
 TABLES = [
     ("UnicodeCategoryTable.hpp", "#2315", [
         "CategoryCasingLevel1Index",
         "CategoryCasingLevel2Index",
         "CategoryCasingLevel3Index",
         "CategoriesValues",
+        "UppercaseValues",
+        "LowercaseValues",
     ]),
     ("UnicodeNumericTable.hpp", "#2336", [
         "NumericGraphemeLevel1Index",
@@ -104,6 +107,18 @@ def emit(arrays, names, ucd_version, ticket):
         a("")
     for name in names:
         data = arrays[name]
+        if name in ("UppercaseValues", "LowercaseValues"):
+            # 16-bit SIGNED deltas added to the code point (CharUnicodeInfo.cs:280-291), stored
+            # little-endian. Emitted as int16_t so the lookup adds rather than reassembling.
+            assert len(data) % 2 == 0, f"{name} is not a whole number of int16"
+            vals = [struct.unpack("<h", bytes(data[i:i + 2]))[0] for i in range(0, len(data), 2)]
+            a(f"/** @brief .NET's `{name}`, decoded to signed deltas. {len(vals)} entries. */")
+            a(f"inline constexpr int16_t k{name}[{len(vals)}] = {{")
+            for i in range(0, len(vals), 12):
+                a("    " + ", ".join(str(v) for v in vals[i:i + 12]) + ",")
+            a("};")
+            a("")
+            continue
         if name == "NumericValues":
             # A ReadOnlySpan<byte> of little-endian doubles, indexed as offset * sizeof(double)
             # (CharUnicodeInfo.cs:263). Emitted as doubles so the lookup needs no byte assembly

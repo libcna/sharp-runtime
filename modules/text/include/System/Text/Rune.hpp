@@ -8,6 +8,7 @@
 #include <vector>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Text/detail/Utf8Scalar.hpp"
+#include "System/Globalization/detail/UnicodeCategoryLookup.hpp"
 
 namespace System::Text {
 
@@ -94,26 +95,68 @@ namespace System::Text {
             for (uint32_t w : ws) if (r.value_ == w) return true;
             return false;
         }
-        /** Returns true if the Rune is a letter (ASCII range only). */
-        static bool IsLetter(Rune r)        { return (r.value_ >= 'A' && r.value_ <= 'Z') || (r.value_ >= 'a' && r.value_ <= 'z'); }
-        /** Returns true if the Rune is an ASCII decimal digit. */
-        static bool IsDigit(Rune r)         { return r.value_ >= '0' && r.value_ <= '9'; }
-        /** Returns true if the Rune is a letter or digit (ASCII range only). */
-        static bool IsLetterOrDigit(Rune r) { return IsLetter(r) || IsDigit(r); }
-        /** Returns true if the Rune is an ASCII uppercase letter. */
-        static bool IsUpper(Rune r)         { return r.value_ >= 'A' && r.value_ <= 'Z'; }
-        /** Returns true if the Rune is an ASCII lowercase letter. */
-        static bool IsLower(Rune r)         { return r.value_ >= 'a' && r.value_ <= 'z'; }
+        // -------------------------------------------------------------------------------
+        // #2018 (SR-AUD-294, cause T-L). These six were ASCII-only while IsWhiteSpace above
+        // was Unicode-aware, so the type contradicted itself. They now answer from the
+        // generated UCD 16.0 tables, as .NET does.
+        //
+        // Each keeps .NET's OWN ASCII fast path (Rune.cs:1341-1426) rather than going straight
+        // to the table. HONEST NOTE ON THE EVIDENCE: this is a proven EQUIVALENCE and a
+        // mutation removing it is NOT caught -- measured over all 128 ASCII code points, the
+        // fast path and the table agree on all six members, 0 disagreements. It is kept because
+        // .NET's ASCII branch and its category branch are two statements and only the second is
+        // a table lookup; collapsing them would be a simplification of the reference rather than
+        // a port of it, and it is exactly the place a future divergence would be introduced
+        // without anything noticing.
+        // -------------------------------------------------------------------------------
 
-        /** Converts an ASCII lowercase letter to uppercase; other Runes are returned unchanged. */
-        static Rune ToUpper(Rune r) {
-            if (IsLower(r)) return Rune(r.value_ - 32);
-            return r;
+        /** Returns true if the Rune is a Unicode letter. C++ counterpart of .NET Rune.IsLetter. */
+        static bool IsLetter(Rune r) {
+            if (IsAscii(r)) return (r.value_ >= 'A' && r.value_ <= 'Z') || (r.value_ >= 'a' && r.value_ <= 'z');
+            const auto c = System::Globalization::detail::LookupUnicodeCategory(r.value_);
+            return c == System::Globalization::UnicodeCategory::UppercaseLetter
+                || c == System::Globalization::UnicodeCategory::LowercaseLetter
+                || c == System::Globalization::UnicodeCategory::TitlecaseLetter
+                || c == System::Globalization::UnicodeCategory::ModifierLetter
+                || c == System::Globalization::UnicodeCategory::OtherLetter;
         }
-        /** Converts an ASCII uppercase letter to lowercase; other Runes are returned unchanged. */
+        /** Returns true if the Rune is a Unicode decimal digit. C++ counterpart of .NET Rune.IsDigit. */
+        static bool IsDigit(Rune r) {
+            if (IsAscii(r)) return r.value_ >= '0' && r.value_ <= '9';
+            return System::Globalization::detail::LookupUnicodeCategory(r.value_)
+                 == System::Globalization::UnicodeCategory::DecimalDigitNumber;
+        }
+        /** Returns true if the Rune is a Unicode letter or decimal digit. */
+        static bool IsLetterOrDigit(Rune r) { return IsLetter(r) || IsDigit(r); }
+        /** Returns true if the Rune is a Unicode uppercase letter. */
+        static bool IsUpper(Rune r) {
+            if (IsAscii(r)) return r.value_ >= 'A' && r.value_ <= 'Z';
+            return System::Globalization::detail::LookupUnicodeCategory(r.value_)
+                 == System::Globalization::UnicodeCategory::UppercaseLetter;
+        }
+        /** Returns true if the Rune is a Unicode lowercase letter. */
+        static bool IsLower(Rune r) {
+            if (IsAscii(r)) return r.value_ >= 'a' && r.value_ <= 'z';
+            return System::Globalization::detail::LookupUnicodeCategory(r.value_)
+                 == System::Globalization::UnicodeCategory::LowercaseLetter;
+        }
+
+        /**
+         * Converts the Rune to its invariant uppercase form.
+         *
+         * C++ counterpart of .NET Rune.ToUpperInvariant. This is the **simple** mapping only,
+         * one code point to one code point: U+00DF SHARP S stays itself rather than becoming
+         * "SS", because a full mapping can produce more than one Rune and the return type is
+         * one Rune -- which is .NET's constraint too, not a shortcut taken here.
+         */
+        static Rune ToUpper(Rune r) {
+            if (IsAscii(r)) return IsLower(r) ? Rune(r.value_ - 32) : r;
+            return Rune(System::Globalization::detail::LookupToUpperInvariant(r.value_));
+        }
+        /** Converts the Rune to its invariant lowercase form. See ToUpper for the simple-mapping note. */
         static Rune ToLower(Rune r) {
-            if (IsUpper(r)) return Rune(r.value_ + 32);
-            return r;
+            if (IsAscii(r)) return IsUpper(r) ? Rune(r.value_ + 32) : r;
+            return Rune(System::Globalization::detail::LookupToLowerInvariant(r.value_));
         }
 
         /** Returns the UTF-8 encoded string representation of this Rune. */

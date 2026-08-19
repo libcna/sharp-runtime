@@ -58,38 +58,97 @@ using System::Text::Rune;
 // SR-AUD-294 / #2018 (cause T-L) — Rune's category and case members are ASCII-only.
 // ---------------------------------------------------------------------------------------
 
-TEST(TextGatedBehaviourPinTests, RuneCategoryMembersAreStillAsciiOnly) {
-    const Rune eAcuteLower{uint32_t(0x00E9)};  // é  LATIN SMALL LETTER E WITH ACUTE
-    const Rune eAcuteUpper{uint32_t(0x00C9)};  // É  LATIN CAPITAL LETTER E WITH ACUTE
-    const Rune arabicZero{uint32_t(0x0660)};   // ٠  ARABIC-INDIC DIGIT ZERO
-    const Rune greekAlpha{uint32_t(0x03B1)};   // α  GREEK SMALL LETTER ALPHA
+TEST(TextGatedBehaviourPinTests, Fix2018_RuneCategoryMembersAreUnicodeAware) {
+    // INVERTED by #2018. Every row below asserted the divergence the finding recorded and now
+    // asserts the value the finding said .NET returns.
+    const Rune eAcuteLower{uint32_t(0x00E9)};  // LATIN SMALL LETTER E WITH ACUTE
+    const Rune eAcuteUpper{uint32_t(0x00C9)};  // LATIN CAPITAL LETTER E WITH ACUTE
+    const Rune arabicZero{uint32_t(0x0660)};   // ARABIC-INDIC DIGIT ZERO
+    const Rune greekAlpha{uint32_t(0x03B1)};   // GREEK SMALL LETTER ALPHA
 
-    EXPECT_FALSE(Rune::IsLetter(eAcuteLower)) << "gated by #2018 (plan §14.6): .NET reports true";
-    EXPECT_FALSE(Rune::IsLetter(eAcuteUpper)) << "gated by #2018: .NET reports true";
-    EXPECT_FALSE(Rune::IsLetter(greekAlpha)) << "gated by #2018: .NET reports true";
-    EXPECT_FALSE(Rune::IsDigit(arabicZero)) << "gated by #2018: .NET reports true";
-    EXPECT_FALSE(Rune::IsLetterOrDigit(eAcuteLower)) << "gated by #2018";
-    EXPECT_FALSE(Rune::IsUpper(eAcuteUpper)) << "gated by #2018: .NET reports true";
-    EXPECT_FALSE(Rune::IsLower(eAcuteLower)) << "gated by #2018: .NET reports true";
+    EXPECT_TRUE(Rune::IsLetter(eAcuteLower));
+    EXPECT_TRUE(Rune::IsLetter(eAcuteUpper));
+    EXPECT_TRUE(Rune::IsLetter(greekAlpha));
+    EXPECT_TRUE(Rune::IsDigit(arabicZero));
+    EXPECT_TRUE(Rune::IsLetterOrDigit(eAcuteLower));
+    EXPECT_TRUE(Rune::IsUpper(eAcuteUpper));
+    EXPECT_TRUE(Rune::IsLower(eAcuteLower));
 
-    // The ASCII range is the whole of what works, which is why the pre-existing ASCII-only
-    // Rune tests cannot detect the divergence in either direction.
+    // ASCII is unchanged -- the widening must not have moved the range that already worked.
     EXPECT_TRUE(Rune::IsLetter(Rune('A')));
     EXPECT_TRUE(Rune::IsDigit(Rune('7')));
     EXPECT_TRUE(Rune::IsUpper(Rune('A')));
     EXPECT_TRUE(Rune::IsLower(Rune('a')));
+    EXPECT_FALSE(Rune::IsLetter(Rune('7')));
+    EXPECT_FALSE(Rune::IsDigit(Rune('A')));
+
+    // IsLetter is the FIVE letter categories, not just the cased two -- the row that fails if
+    // it is written as IsUpper || IsLower.
+    EXPECT_TRUE(Rune::IsLetter(Rune(uint32_t(0x01C5))));   // Lt DZ WITH CARON
+    EXPECT_TRUE(Rune::IsLetter(Rune(uint32_t(0x02B0))));   // Lm MODIFIER LETTER SMALL H
+    EXPECT_TRUE(Rune::IsLetter(Rune(uint32_t(0x05D0))));   // Lo HEBREW LETTER ALEF
+    EXPECT_FALSE(Rune::IsUpper(Rune(uint32_t(0x01C5))));   // titlecase is not uppercase
+    EXPECT_FALSE(Rune::IsLower(Rune(uint32_t(0x01C5))));
+
+    // IsDigit is DecimalDigitNumber only, not "has a numeric value" -- so a Roman numeral and
+    // a circled digit are both false, which is .NET's distinction and not an accident.
+    EXPECT_FALSE(Rune::IsDigit(Rune(uint32_t(0x216B))));   // Nl ROMAN NUMERAL TWELVE
+    EXPECT_FALSE(Rune::IsDigit(Rune(uint32_t(0x2460))));   // No CIRCLED DIGIT ONE
+    EXPECT_TRUE(Rune::IsLetterOrDigit(Rune(uint32_t(0x0660))));
+    EXPECT_FALSE(Rune::IsLetterOrDigit(Rune(uint32_t(0x2460))));
+
+    // Supplementary code points work, which is the half a char-based table could not do.
+    EXPECT_TRUE(Rune::IsLetter(Rune(uint32_t(0x10000))));   // LINEAR B SYLLABLE B008 A
+    EXPECT_TRUE(Rune::IsDigit(Rune(uint32_t(0x1D7CE))));    // MATHEMATICAL BOLD DIGIT ZERO
+    EXPECT_TRUE(Rune::IsUpper(Rune(uint32_t(0x10400))));    // DESERET CAPITAL LETTER LONG I
+    EXPECT_TRUE(Rune::IsLower(Rune(uint32_t(0x10428))));    // DESERET SMALL LETTER LONG I
 }
 
-TEST(TextGatedBehaviourPinTests, RuneCasingIsStillANoOpOutsideAscii) {
-    EXPECT_EQ(0x00E9u, Rune::ToUpper(Rune(uint32_t(0x00E9))).getValueProperty())
-        << "gated by #2018 (plan §14.6): .NET maps é to É (U+00C9)";
-    EXPECT_EQ(0x00C9u, Rune::ToLower(Rune(uint32_t(0x00C9))).getValueProperty())
-        << "gated by #2018: .NET maps É to é (U+00E9)";
-    EXPECT_EQ(0x03B1u, Rune::ToUpper(Rune(uint32_t(0x03B1))).getValueProperty())
-        << "gated by #2018: .NET maps α to Α (U+0391)";
+TEST(TextGatedBehaviourPinTests, Fix2018_RuneCasingUsesTheSimpleMappingTable) {
+    // INVERTED by #2018: each of these was a no-op and now maps.
+    EXPECT_EQ(0x00C9u, Rune::ToUpper(Rune(uint32_t(0x00E9))).getValueProperty());
+    EXPECT_EQ(0x00E9u, Rune::ToLower(Rune(uint32_t(0x00C9))).getValueProperty());
+    EXPECT_EQ(0x0391u, Rune::ToUpper(Rune(uint32_t(0x03B1))).getValueProperty());
 
     EXPECT_EQ(static_cast<uint32_t>('A'), Rune::ToUpper(Rune('a')).getValueProperty());
     EXPECT_EQ(static_cast<uint32_t>('a'), Rune::ToLower(Rune('A')).getValueProperty());
+
+    // Supplementary casing, which is where the plane-preserving mask earns its keep: a 16-bit
+    // delta cannot cross a plane, so the high half is carried rather than added.
+    EXPECT_EQ(0x10428u, Rune::ToLower(Rune(uint32_t(0x10400))).getValueProperty());
+    EXPECT_EQ(0x10400u, Rune::ToUpper(Rune(uint32_t(0x10428))).getValueProperty());
+
+    // THE SIMPLE MAPPING IS ALL THERE IS, and that is .NET's constraint too rather than a
+    // shortcut: a full mapping can produce more than one Rune and the return type is one Rune.
+    EXPECT_EQ(0x00DFu, Rune::ToUpper(Rune(uint32_t(0x00DF))).getValueProperty())
+        << "SHARP S has no single-code-point uppercase; .NET leaves it alone as well";
+    // ...and a character with no case at all is returned unchanged rather than perturbed.
+    EXPECT_EQ(0x0660u, Rune::ToUpper(Rune(uint32_t(0x0660))).getValueProperty());
+    EXPECT_EQ(0x4E00u, Rune::ToLower(Rune(uint32_t(0x4E00))).getValueProperty());
+
+    // Round-trip over every uppercase BMP scalar: lower it, raise it back, and it must land
+    // where it started -- except where Unicode itself says otherwise. Asserted as the EXACT
+    // SET rather than a count, because the five exceptions turn out to have one explanation
+    // and a bare number would have hidden it.
+    //
+    // Four of the five are Unicode's own DUPLICATE letters, which lowercase into the canonical
+    // letter whose uppercase is the canonical capital, not the duplicate. The fifth is SHARP S.
+    // None of them is a defect in this table; a repair that "fixed" the round trip would be
+    // disagreeing with the UCD.
+    std::vector<uint32_t> notRoundTripped;
+    for (uint32_t cp = 0; cp <= 0xFFFF; ++cp) {
+        if (cp >= 0xD800 && cp <= 0xDFFF) continue;          // surrogates are not scalars
+        const Rune r{cp};
+        if (!Rune::IsUpper(r)) continue;
+        if (Rune::ToUpper(Rune::ToLower(r)).getValueProperty() != cp) notRoundTripped.push_back(cp);
+    }
+    EXPECT_EQ(notRoundTripped, (std::vector<uint32_t>{
+        0x03F4,   // GREEK CAPITAL THETA SYMBOL -> U+03B8 -> U+0398 GREEK CAPITAL LETTER THETA
+        0x1E9E,   // LATIN CAPITAL LETTER SHARP S -> U+00DF, which has no single-scalar upper
+        0x2126,   // OHM SIGN -> U+03C9 -> U+03A9 GREEK CAPITAL LETTER OMEGA
+        0x212A,   // KELVIN SIGN -> U+006B -> U+004B LATIN CAPITAL LETTER K
+        0x212B,   // ANGSTROM SIGN -> U+00E5 -> U+00C5 LATIN CAPITAL LETTER A WITH RING ABOVE
+    }));
 }
 
 TEST(TextGatedBehaviourPinTests, RuneIsWhiteSpaceIsUnicodeAwareAndIncludesOneScalarDotNetDoesNot) {
