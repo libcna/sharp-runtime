@@ -16,24 +16,26 @@ struct IPinnable;
  * Wraps a raw pointer to pinned memory and optionally holds a reference to an
  * IPinnable that must be unpinned on disposal.
  *
- * @warning **This type performs no RAII cleanup: the caller MUST call Dispose()
- * explicitly.** There is no destructor that calls Dispose, and the inherited
- * `~IDisposable` does nothing, so letting a MemoryHandle go out of scope leaves its
- * IPinnable pinned. The header previously claimed the destructor would do it; it
- * never did (SR-AUD-088).
+ * @note **The caller must call Dispose() explicitly. Scope exit does not unpin — and
+ * that MATCHES .NET, which is why no destructor is added here.** .NET's
+ * `MemoryHandle` is a `public unsafe struct` with no finalizer
+ * (`MemoryHandle.cs:12`), so letting one go out of scope leaves its `IPinnable`
+ * pinned there too. `using var handle = memory.Pin();` is a *language* construct that
+ * calls `Dispose()`; it is not something the type does for you.
  *
- * Adding such a destructor is **not** a small correction and is deliberately not made
- * here: this is a copyable aggregate with public members, so an unpinning destructor
- * would make every copy unpin the same IPinnable more than once. A correct repair needs
- * move-only or reference-counted semantics on a type that `Memory.hpp` and
- * `ReadOnlyMemory.hpp` include, i.e. reaching all of `Core.Base`. That is blocked ticket
- * **#2059** (CCF-019); see docs/BuffersNamespaceReviewPlan.md §4.11. The behaviour
- * documented above is pinned by a permanent test, so it cannot change silently.
+ * SR-AUD-088 reported that this header *promised* RAII cleanup — "should call
+ * Dispose() explicitly (or let the destructor do it)" — that it never performed. That
+ * promise was the defect and it has been removed. Ticket **#2059** then measured the
+ * proposed repair against the reference and **declined it**: adding
+ * `~MemoryHandle(){ Dispose(); }` would be a divergence from .NET rather than a repair,
+ * and the hazard is real as well as theoretical — this is a copyable handle, so an
+ * unpinning destructor would unpin once per copy for a single pin. The absence is pinned
+ * by `MemoryHandlePinTests`.
+ *
+ * `Dispose()` is idempotent, exactly as .NET's is (`MemoryHandle.cs:41-53`): it unpins,
+ * clears the `IPinnable` and nulls the pointer, so a second call does nothing.
  */
 struct MemoryHandle : System::IDisposable {
-    void*      pointer_  = nullptr;
-    IPinnable* pinnable_ = nullptr;
-
     /** @brief Constructs a default (null) MemoryHandle. */
     MemoryHandle() = default;
 
@@ -57,6 +59,17 @@ struct MemoryHandle : System::IDisposable {
      * Defined after IPinnable is complete (see IPinnable.hpp).
      */
     void Dispose() override;
+
+private:
+    // PRIVATE, matching .NET's `private void* _pointer` / `private IPinnable? _pinnable`
+    // (MemoryHandle.cs:14-16). This port published both, so a caller could retarget a live
+    // handle at an unrelated address, or detach its IPinnable and leak the pin, behind the
+    // owner's back. .NET publishes only `Pointer`, and only as a getter.
+    //
+    // .NET's third field, `private GCHandle _handle`, is deliberately absent: this runtime
+    // has no moving collector, so there is no GC handle to free.
+    void*      pointer_  = nullptr;
+    IPinnable* pinnable_ = nullptr;
 };
 
 } // namespace System::Buffers

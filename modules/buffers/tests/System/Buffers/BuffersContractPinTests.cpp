@@ -67,7 +67,10 @@ static_assert(sizeof(ArrayBufferWriter<char>) == 40,
 static_assert(sizeof(StandardFormat) == 2,
               "#2052 must not have added state");
 static_assert(sizeof(MemoryHandle) == 24,
-              "#2059's move-only or refcounted semantics would change this");
+              "#2059 made the two members PRIVATE, which is an access change and not a layout "
+              "change -- 24 before and 24 after, so no consumer rebuilds. A destructor or "
+              "refcounted semantics would change this, and #2059 measured the reference and "
+              "declined both.");
 
 TEST(BuffersLayoutPinTests, LayoutsAreStaticallyAsserted) {
     SUCCEED() << "The static_asserts above are the test; this keeps it visible in the suite.";
@@ -244,7 +247,22 @@ TEST(ReadOnlySequenceSegmentPinTests, EverySequenceReportsASingleSegment) {
 }
 
 // ===========================================================================
-// SR-AUD-088 — MemoryHandle performs no RAII cleanup (blocked #2059)
+// SR-AUD-088 — MemoryHandle performs no RAII cleanup (#2059 RESOLVED).
+//
+// THE FINDING'S PREMISE DOES NOT SURVIVE THE REFERENCE, and the pins below used to
+// restate it. .NET's MemoryHandle is `public unsafe struct MemoryHandle : IDisposable`
+// (MemoryHandle.cs:12) -- a value type with no finalizer -- so scope exit does not unpin
+// THERE EITHER. `using var h = memory.Pin();` is a language construct that calls
+// Dispose(); it is not something the type does.
+//
+// What SR-AUD-088 actually found was a DOC-COMMENT that promised "or let the destructor
+// do it". That promise was the defect and it is gone. The behaviour it described was
+// never wrong.
+//
+// #2059 therefore declines the destructor rather than deferring it: adding one would be
+// a divergence from .NET, and the copy hazard below is the second, independent reason.
+// What #2059 DID land is the divergence the ticket never named -- the two data members
+// were public here and are private in .NET -- under SA-8, at zero migration sites.
 // ===========================================================================
 
 namespace {
@@ -262,9 +280,11 @@ TEST(MemoryHandlePinTests, ScopeExitDoesNotUnpin) {
     {
         MemoryHandle handle = p.Pin(0);
         EXPECT_EQ(handle.getPointerProperty(), &p.value);
-    }   // .NET-style RAII would unpin here. It does not. #2059.
+    }   // No unpin here -- and .NET does not unpin here either (MemoryHandle.cs:12, a
+        // struct with no finalizer). This asserts PARITY, not a known gap.
     EXPECT_EQ(p.unpinCount, 0)
-        << "if this becomes 1, MemoryHandle has grown a destructor -- #2059 has landed";
+        << "if this becomes 1, MemoryHandle has grown a destructor and now diverges from "
+           ".NET -- #2059 measured that and declined it";
 }
 
 TEST(MemoryHandlePinTests, ExplicitDisposeUnpinsExactlyOnce) {
@@ -278,14 +298,48 @@ TEST(MemoryHandlePinTests, ExplicitDisposeUnpinsExactlyOnce) {
 }
 
 TEST(MemoryHandlePinTests, ACopyStillReferencesTheSamePinnable) {
-    // This is why #2059 cannot simply add a destructor: an unpinning destructor on a
-    // freely copyable aggregate would unpin once per copy.
+    // The SECOND reason #2059 declined the destructor, independent of the reference: an
+    // unpinning destructor on a freely copyable handle would unpin once per copy for a
+    // single pin. .NET has the same copy semantics and the same absence of a destructor.
     CountingPinnable p;
     MemoryHandle original = p.Pin(0);
     MemoryHandle copy = original;
     copy.Dispose();
     original.Dispose();
     EXPECT_EQ(p.unpinCount, 2) << "two handles, two Unpins -- one pin";
+}
+
+namespace {
+    /** True iff `T::pointer_` is reachable from outside the type. */
+    template <typename T>
+    concept HasPublicPointerMember = requires(T h) { h.pointer_; };
+    template <typename T>
+    concept HasPublicPinnableMember = requires(T h) { h.pinnable_; };
+}
+
+TEST(MemoryHandlePinTests, TheRepresentationIsPrivateAsInDotNet) {
+    // .NET publishes only `Pointer`, as a getter (MemoryHandle.cs:35). Both fields are
+    // private there and are now private here.
+    //
+    // The parameter is DEPENDENT on purpose: gcc evaluates a non-dependent `requires`
+    // eagerly and hard-errors on the access instead of yielding false (the #2299 trap).
+    static_assert(!HasPublicPointerMember<MemoryHandle>,
+                  "#2059: pointer_ is private -- read it with getPointerProperty()");
+    static_assert(!HasPublicPinnableMember<MemoryHandle>,
+                  "#2059: pinnable_ is private, and .NET publishes no accessor for it at all");
+
+    // What did NOT change, asserted so the pin proves the boundary is an access change and
+    // nothing else: the two public constructors, the getter, copyability and the size.
+    CountingPinnable p;
+    MemoryHandle handle(&p.value, &p);
+    EXPECT_EQ(handle.getPointerProperty(), &p.value);
+    MemoryHandle copied = handle;
+    EXPECT_EQ(copied.getPointerProperty(), &p.value);
+    EXPECT_EQ(MemoryHandle().getPointerProperty(), nullptr);
+    static_assert(std::is_copy_constructible_v<MemoryHandle>, "still copyable");
+    static_assert(sizeof(MemoryHandle) == 24, "an access change moves no layout");
+    handle.Dispose();
+    copied.Dispose();
 }
 
 // ===========================================================================
