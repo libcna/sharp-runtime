@@ -24,6 +24,7 @@
 // change them; hand-authoring a partial table is not.
 #include <gtest/gtest.h>
 #include <locale>
+#include <map>
 #include <string>
 #include <vector>
 #include "System/Char.hpp"
@@ -69,13 +70,20 @@ namespace {
 // (2) Surrogates
 // ---------------------------------------------------------------------------
 
-TEST(CharUnicodeInfoClassificationTests, SurrogateRange_BoundariesAreSurrogate) {
+TEST(CharUnicodeInfoClassificationTests, Fix2315_SurrogateRangeBoundaries) {
+    // #2315 moved the UPPER boundary off OtherNotAssigned -- U+E000 is the first private-use
+    // code point -- and left the lower one alone. U+D7FF really is unassigned in UCD 16.0
+    // (the Hangul Jamo Extended-B block stops at U+D7FB), so the value #2316 pinned there was
+    // right for a reason it could not have known, and is kept rather than "updated".
+    //
+    // The surrogate range itself is also unchanged: #2316 fixed it from Char::IsSurrogate and
+    // the UCD agrees, which is the cheapest possible confirmation that #2316 was right.
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0xD7FF), UnicodeCategory::OtherNotAssigned);
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0xD800), UnicodeCategory::Surrogate);
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0xDBFF), UnicodeCategory::Surrogate);
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0xDC00), UnicodeCategory::Surrogate);
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0xDFFF), UnicodeCategory::Surrogate);
-    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0xE000), UnicodeCategory::OtherNotAssigned);
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0xE000), UnicodeCategory::PrivateUse);
 }
 
 // The contradiction itself, stated as an equivalence over every code unit rather than as
@@ -150,18 +158,25 @@ TEST(CharUnicodeInfoClassificationTests, Category_DoesNotDependOnTheGlobalLocale
 // Supplementary code points are the region where the old ladder was platform-dependent as
 // well as locale-dependent: with a 16-bit wchar_t it substituted L'\0' and answered
 // Control, with a 32-bit one it answered whatever the ambient locale said.
-TEST(CharUnicodeInfoClassificationTests, SupplementaryCodePoints_AreTheDeclaredReduction) {
-    for (int cp : {0x10000, 0x1F600, 0x2000B, 0x10FFFF}) {
-        EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(cp), UnicodeCategory::OtherNotAssigned)
-            << "U+" << std::hex << cp;
-    }
+TEST(CharUnicodeInfoClassificationTests, Fix2315_SupplementaryCodePointsAreClassifiedForReal) {
+    // #2316 pinned all four as the declared reduction. #2315 answers them, and the locale
+    // half of #2316's statement is KEPT -- a table lookup consults no locale facet at all,
+    // which is a stronger guarantee than the ASCII ladder's, not a weaker one.
+    const std::vector<std::pair<int, UnicodeCategory>> rows = {
+        {0x10000,  UnicodeCategory::OtherLetter},        // LINEAR B SYLLABLE B008 A
+        {0x1F600,  UnicodeCategory::OtherSymbol},        // GRINNING FACE
+        {0x2000B,  UnicodeCategory::OtherLetter},        // CJK Extension B ideograph
+        {0x10FFFF, UnicodeCategory::OtherNotAssigned},   // genuinely unassigned, and still is
+    };
+    for (const auto& [cp, expected] : rows)
+        EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(cp), expected) << "U+" << std::hex << cp;
+
     const std::string localeName = findNonInvariantLocaleName();
     if (localeName.empty()) return;
     ScopedGlobalLocale guard{std::locale(localeName)};
-    for (int cp : {0x10000, 0x1F600, 0x2000B, 0x10FFFF}) {
-        EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(cp), UnicodeCategory::OtherNotAssigned)
+    for (const auto& [cp, expected] : rows)
+        EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(cp), expected)
             << "U+" << std::hex << cp << " under locale " << localeName;
-    }
 }
 
 // The consumers reached through Char must be locale-independent for the same reason.
@@ -193,34 +208,38 @@ TEST(CharUnicodeInfoClassificationTests, CharPredicates_DoNotDependOnTheGlobalLo
 // The ASCII table this port does answer from its own knowledge
 // ---------------------------------------------------------------------------
 
-// Counts, not a restatement of the implementation: 128 ASCII code points split 33 Control
-// (U+0000-U+001F and U+007F), 26 + 26 letters, 10 digits, 1 SpaceSeparator (U+0020 alone --
-// TAB/LF/VT/FF/CR are Cc, not Zs) and 32 punctuation. This is exactly what the removed
-// locale-sensitive ladder produced in the "C" locale, over all 1,114,112 code points.
-TEST(CharUnicodeInfoClassificationTests, AsciiCategoryCensus) {
-    int control = 0, upper = 0, lower = 0, digit = 0, space = 0, punct = 0, other = 0;
-    for (int cp = 0; cp <= 0x7F; ++cp) {
-        switch (CharUnicodeInfo::GetUnicodeCategory(cp)) {
-            case UnicodeCategory::Control:            ++control; break;
-            case UnicodeCategory::UppercaseLetter:    ++upper;   break;
-            case UnicodeCategory::LowercaseLetter:    ++lower;   break;
-            case UnicodeCategory::DecimalDigitNumber: ++digit;   break;
-            case UnicodeCategory::SpaceSeparator:     ++space;   break;
-            case UnicodeCategory::OtherPunctuation:   ++punct;   break;
-            default:                                  ++other;   break;
-        }
-    }
-    EXPECT_EQ(control, 33);
-    EXPECT_EQ(upper, 26);
-    EXPECT_EQ(lower, 26);
-    EXPECT_EQ(digit, 10);
-    EXPECT_EQ(space, 1);
-    EXPECT_EQ(punct, 32);
-    EXPECT_EQ(other, 0);
-    EXPECT_EQ(control + upper + lower + digit + space + punct, 128);
+// Counts, not a restatement of the implementation. #2316's version of this census had one
+// bucket for all 32 punctuation and symbol characters, because the ladder it pinned answered
+// OtherPunctuation for every one of them. UCD 16.0 splits those 32 across SEVEN categories,
+// and that split is the whole of what #2315 changed inside ASCII: 17 of the 128 moved, and
+// every letter, digit, control and the single space stayed exactly where they were.
+TEST(CharUnicodeInfoClassificationTests, Fix2315_AsciiCategoryCensus) {
+    std::map<UnicodeCategory, int> census;
+    for (int cp = 0; cp <= 0x7F; ++cp) ++census[CharUnicodeInfo::GetUnicodeCategory(cp)];
+
+    EXPECT_EQ(census[UnicodeCategory::Control], 33);              // U+0000-U+001F and U+007F
+    EXPECT_EQ(census[UnicodeCategory::UppercaseLetter], 26);
+    EXPECT_EQ(census[UnicodeCategory::LowercaseLetter], 26);
+    EXPECT_EQ(census[UnicodeCategory::DecimalDigitNumber], 10);
+    EXPECT_EQ(census[UnicodeCategory::SpaceSeparator], 1);        // U+0020 alone; TAB..CR are Cc
+    // The seven-way split of the 32 the ladder lumped together.
+    EXPECT_EQ(census[UnicodeCategory::OtherPunctuation], 15);
+    EXPECT_EQ(census[UnicodeCategory::MathSymbol], 6);            // + < = > | ~
+    EXPECT_EQ(census[UnicodeCategory::OpenPunctuation], 3);       // ( [ {
+    EXPECT_EQ(census[UnicodeCategory::ClosePunctuation], 3);      // ) ] }
+    EXPECT_EQ(census[UnicodeCategory::ModifierSymbol], 2);        // ^ `
+    EXPECT_EQ(census[UnicodeCategory::CurrencySymbol], 1);        // $
+    EXPECT_EQ(census[UnicodeCategory::DashPunctuation], 1);       // -
+    EXPECT_EQ(census[UnicodeCategory::ConnectorPunctuation], 1);  // _
+
+    int total = 0;
+    for (const auto& [_, n] : census) total += n;
+    EXPECT_EQ(total, 128);
+    EXPECT_EQ(census[UnicodeCategory::OtherNotAssigned], 0)
+        << "no ASCII code point is unassigned";
 }
 
-TEST(CharUnicodeInfoClassificationTests, AsciiBoundaries) {
+TEST(CharUnicodeInfoClassificationTests, Fix2315_AsciiBoundaries) {
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x1F), UnicodeCategory::Control);
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x20), UnicodeCategory::SpaceSeparator);
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x21), UnicodeCategory::OtherPunctuation);
@@ -230,30 +249,160 @@ TEST(CharUnicodeInfoClassificationTests, AsciiBoundaries) {
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x40), UnicodeCategory::OtherPunctuation);
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x41), UnicodeCategory::UppercaseLetter);
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x5A), UnicodeCategory::UppercaseLetter);
-    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x5B), UnicodeCategory::OtherPunctuation);
-    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x60), UnicodeCategory::OtherPunctuation);
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x5B), UnicodeCategory::OpenPunctuation);
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x60), UnicodeCategory::ModifierSymbol);
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x61), UnicodeCategory::LowercaseLetter);
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x7A), UnicodeCategory::LowercaseLetter);
-    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x7B), UnicodeCategory::OtherPunctuation);
-    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x7E), UnicodeCategory::OtherPunctuation);
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x7B), UnicodeCategory::OpenPunctuation);
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x7E), UnicodeCategory::MathSymbol);
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x7F), UnicodeCategory::Control);
 }
 
-// The frozen finding's own non-ASCII probe rows. Every one of them is still divergent from
-// .NET and stays that way until Approval F / #2018 unblocks #2315; pinning them as the
-// declared reduction is what keeps SR-AUD-174 honestly open rather than quietly forgotten.
-TEST(CharUnicodeInfoClassificationTests, NonAsciiRemainsTheDeclaredReduction) {
-    for (int cp : {0x00A0, 0x00C9, 0x0301, 0x2014, 0x2028, 0xE000, 0xFFFD}) {
-        EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(cp), UnicodeCategory::OtherNotAssigned)
-            << "U+" << std::hex << cp;
-    }
+// The frozen finding's own non-ASCII probe rows, with the values its MANAGED PROBE recorded.
+// #2316 could only pin them as the declared reduction; #2315 answers every one of them, and
+// each now matches what the finding said .NET returns. That is the closure of SR-AUD-174's
+// table clause, expressed as the finding's own evidence rather than as new assertions.
+TEST(CharUnicodeInfoClassificationTests, Fix2315_TheFindingsOwnProbeRowsNowAgreeWithDotNet) {
+    const std::vector<std::pair<int, UnicodeCategory>> rows = {
+        {0x00A0, UnicodeCategory::SpaceSeparator},     // NO-BREAK SPACE
+        {0x00C9, UnicodeCategory::UppercaseLetter},    // LATIN CAPITAL LETTER E WITH ACUTE
+        {0x0301, UnicodeCategory::NonSpacingMark},     // COMBINING ACUTE ACCENT
+        {0x2014, UnicodeCategory::DashPunctuation},    // EM DASH
+        {0x2028, UnicodeCategory::LineSeparator},      // LINE SEPARATOR
+        {0xE000, UnicodeCategory::PrivateUse},         // the probe's own private-use row
+        {0xFFFD, UnicodeCategory::OtherSymbol},        // REPLACEMENT CHARACTER
+    };
+    for (const auto& [cp, expected] : rows)
+        EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(cp), expected) << "U+" << std::hex << cp;
 }
 
-// U+E000 is deliberately NOT classified PrivateUse. The audit's managed probe records that
-// value for that single code point, but no private-use *range* is fixed anywhere in this
-// repository -- unlike the surrogate range, which Char::IsSurrogate fixes. Extending one
-// probed point to a range would be an inference, so it waits for the real table.
-TEST(CharUnicodeInfoClassificationTests, PrivateUseIsNotInferredFromOneProbedCodePoint) {
-    EXPECT_NE(CharUnicodeInfo::GetUnicodeCategory(0xE000), UnicodeCategory::PrivateUse);
-    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0xE000), UnicodeCategory::OtherNotAssigned);
+// #2316 pinned U+E000 as deliberately NOT PrivateUse, on the ground that one probed point is
+// not a range and extending it would be an INFERENCE. That reasoning was right and its
+// conclusion is now obsolete for the right reason: the range is no longer inferred, it is
+// read from the UCD. All three private-use ranges answer, which is what distinguishes a table
+// from the single-point generalisation #2316 refused to make.
+TEST(CharUnicodeInfoClassificationTests, Fix2315_PrivateUseIsReadFromTheTableNotInferred) {
+    for (int cp : {0xE000, 0xF8FF,                    // BMP private use area
+                   0xF0000, 0xFFFFD,                  // Plane 15
+                   0x100000, 0x10FFFD}) {             // Plane 16
+        EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(cp), UnicodeCategory::PrivateUse)
+            << "U+" << std::hex << cp;
+    }
+    // ...and the code points just outside each range are not, which is what makes the above a
+    // range rather than six lucky points.
+    EXPECT_NE(CharUnicodeInfo::GetUnicodeCategory(0xDFFF), UnicodeCategory::PrivateUse);
+    EXPECT_NE(CharUnicodeInfo::GetUnicodeCategory(0xF900), UnicodeCategory::PrivateUse);
+    EXPECT_NE(CharUnicodeInfo::GetUnicodeCategory(0x10FFFE), UnicodeCategory::PrivateUse);
+}
+
+// ===========================================================================
+// #2315 — the table itself: version, coverage and the corpora cross-check
+//
+// SA-4 requires the Unicode version to be "named in the generated header and
+// in every test file", pinned until an explicit bump ticket, and every
+// disagreement with the cross-check corpora listed rather than averaged away.
+// These cases are that requirement expressed as assertions.
+// ===========================================================================
+
+TEST(CharUnicodeInfoTableTests, Fix2315_TheUnicodeVersionIsPinnedAtUcd16) {
+    // SA-4 pins the version until an explicit bump ticket. If this fails, either the source
+    // of record moved or someone regenerated against a different UCD -- both of which are
+    // decisions, not maintenance, and both of which must move
+    // docs/Migration-UnicodeCategoryTable.md's cross-check numbers with them.
+    EXPECT_STREQ(System::Globalization::detail::kUnicodeVersion, "16.0");
+}
+
+TEST(CharUnicodeInfoTableTests, Fix2315_EveryCodePointIsAnswerableAndInRange) {
+    // The trie must not walk off any of its three levels, and every answer must be a real
+    // UnicodeCategory. Sweeping the whole code space is the only way to say that about a
+    // three-level index; sampling cannot.
+    std::map<UnicodeCategory, int> census;
+    for (int cp = 0; cp <= 0x10FFFF; ++cp) {
+        const auto cat = CharUnicodeInfo::GetUnicodeCategory(cp);
+        ASSERT_GE(static_cast<int>(cat), 0) << "U+" << std::hex << cp;
+        ASSERT_LE(static_cast<int>(cat), static_cast<int>(UnicodeCategory::OtherNotAssigned))
+            << "U+" << std::hex << cp;
+        ++census[cat];
+    }
+    int total = 0;
+    for (const auto& [_, n] : census) total += n;
+    ASSERT_EQ(total, 1114112);
+
+    // The counts, DECOMPOSED rather than aggregated -- and the decomposition is what makes
+    // this external evidence rather than the table agreeing with itself. Subtract the three
+    // categories that are ranges rather than characters (private use, surrogates, controls)
+    // and what is left is the count of graphic and format characters:
+    //
+    //   1,114,112 - 819,533 Cn = 294,579 assigned
+    //   294,579 - 137,468 Co - 2,048 Cs - 65 Cc = 154,998
+    //
+    // and **154,998 is the number of characters Unicode 16.0 itself publishes**. An
+    // all-unassigned table, an off-by-one level index, or a regeneration against a different
+    // UCD all move it.
+    const int cn = census[UnicodeCategory::OtherNotAssigned];
+    const int co = census[UnicodeCategory::PrivateUse];
+    const int cs = census[UnicodeCategory::Surrogate];
+    const int cc = census[UnicodeCategory::Control];
+    EXPECT_EQ(cn, 819533);
+    EXPECT_EQ(co, 137468);   // 6,400 in the BMP plus two full planes less two noncharacters
+    EXPECT_EQ(cs, 2048);     // U+D800..U+DFFF, and Char::IsSurrogate agrees (case above)
+    EXPECT_EQ(cc, 65);       // C0 and C1
+    EXPECT_EQ(1114112 - cn - co - cs - cc, 154998)
+        << "this is Unicode 16.0's own published character count";
+}
+
+TEST(CharUnicodeInfoTableTests, Fix2315_TheCategoriesAreNotAllTheSame) {
+    // The control for the sweep above: a table that answered one value everywhere would pass
+    // a range check. All thirty categories must actually occur.
+    std::map<UnicodeCategory, int> seen;
+    for (int cp = 0; cp <= 0x10FFFF; ++cp) ++seen[CharUnicodeInfo::GetUnicodeCategory(cp)];
+    EXPECT_EQ(seen.size(), 30u) << "every UnicodeCategory value must be reachable";
+}
+
+TEST(CharUnicodeInfoTableTests, Fix2315_SpotRowsAcrossEveryCategory) {
+    // One row per category, so a mutation that corrupts a single level-3 entry has somewhere
+    // to show up. Values are the UCD's, cross-checked against Python 3.13.5 unicodedata.
+    const std::vector<std::pair<int, UnicodeCategory>> rows = {
+        {0x0041, UnicodeCategory::UppercaseLetter},        {0x0061, UnicodeCategory::LowercaseLetter},
+        {0x01C5, UnicodeCategory::TitlecaseLetter},        {0x02B0, UnicodeCategory::ModifierLetter},
+        {0x00AA, UnicodeCategory::OtherLetter},            {0x0300, UnicodeCategory::NonSpacingMark},
+        {0x0903, UnicodeCategory::SpacingCombiningMark},   {0x0488, UnicodeCategory::EnclosingMark},
+        {0x0030, UnicodeCategory::DecimalDigitNumber},     {0x16EE, UnicodeCategory::LetterNumber},
+        {0x00B2, UnicodeCategory::OtherNumber},            {0x0020, UnicodeCategory::SpaceSeparator},
+        {0x2028, UnicodeCategory::LineSeparator},          {0x2029, UnicodeCategory::ParagraphSeparator},
+        {0x0000, UnicodeCategory::Control},                {0x00AD, UnicodeCategory::Format},
+        {0xD800, UnicodeCategory::Surrogate},              {0xE000, UnicodeCategory::PrivateUse},
+        {0x005F, UnicodeCategory::ConnectorPunctuation},   {0x002D, UnicodeCategory::DashPunctuation},
+        {0x0028, UnicodeCategory::OpenPunctuation},        {0x0029, UnicodeCategory::ClosePunctuation},
+        {0x00AB, UnicodeCategory::InitialQuotePunctuation},{0x00BB, UnicodeCategory::FinalQuotePunctuation},
+        {0x0021, UnicodeCategory::OtherPunctuation},       {0x002B, UnicodeCategory::MathSymbol},
+        {0x0024, UnicodeCategory::CurrencySymbol},         {0x005E, UnicodeCategory::ModifierSymbol},
+        {0x00A6, UnicodeCategory::OtherSymbol},            {0x0378, UnicodeCategory::OtherNotAssigned},
+    };
+    EXPECT_EQ(rows.size(), 30u) << "one row per category, or the coverage claim is false";
+    for (const auto& [cp, expected] : rows)
+        EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(cp), expected) << "U+" << std::hex << cp;
+}
+
+TEST(CharUnicodeInfoTableTests, Fix2315_TheCorporaDisagreementsAreExactlyTheOnesRecorded) {
+    // SA-4: "every disagreement must be listed in the design record rather than averaged
+    // away". The full listing is docs/Migration-UnicodeCategoryTable.md; what is asserted
+    // here is the SHAPE of the disagreement, because that is the part a future regeneration
+    // could silently change.
+    //
+    // Against Python 3.13.5 (UCD 15.1.0): 5,186 disagreements, 5,185 of them code points
+    // ASSIGNED in 16.0 and unassigned in 15.1, and exactly ONE genuine reclassification.
+    // Against Perl 5.40.1 unicore (UCD 15.0.0): 5,813, again with exactly one.
+    // The same one, in both: U+1171E AHOM CONSONANT SIGN MEDIAL RA, Mn -> Mc in Unicode 16.0.
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x1171E),
+              UnicodeCategory::SpacingCombiningMark)
+        << "the single cross-corpus reclassification; both corpora say NonSpacingMark and "
+           "both are at an older UCD than the pinned one";
+
+    // The 627-code-point gap between the two disagreement counts is Unicode 15.1's own
+    // additions, which Python has and Perl does not -- so the two corpora corroborate each
+    // other rather than merely both differing from the table. One 15.1 addition, asserted so
+    // that claim is not just arithmetic in a document.
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x2FFC), UnicodeCategory::OtherSymbol)
+        << "U+2FFC was added in Unicode 15.1";
 }

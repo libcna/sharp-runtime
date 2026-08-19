@@ -6,6 +6,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/UnicodeCategory.hpp"
+#include "System/Globalization/detail/UnicodeCategoryLookup.hpp"
 
 namespace System::Globalization {
 
@@ -204,29 +205,17 @@ public:
         if (codePoint < 0 || codePoint > 0x10FFFF) {
             throw System::ArgumentOutOfRangeException("codePoint");
         }
-        // ASCII, U+0000-U+007F. These ranges reproduce exactly what the previous
-        // std::iswupper/iswlower/iswdigit/iswspace/iswpunct/iswalpha/iswcntrl ladder
-        // returned in the "C" locale, restated as explicit ranges. The isw* functions are
-        // locale-sensitive, so the old ladder gave a different category for the same code
-        // point once any process installed a different global locale -- the very thing a
-        // culture-insensitive CharUnicodeInfo must not do.
-        //
-        // C0 controls (U+0000-U+001F) and DEL (U+007F) are Cc; only U+0020 itself is Zs, so
-        // TAB/LF/VT/FF/CR must be Control and not SpaceSeparator.
-        if (codePoint < 0x20 || codePoint == 0x7F)      return UnicodeCategory::Control;
-        if (codePoint >= 'A' && codePoint <= 'Z')       return UnicodeCategory::UppercaseLetter;
-        if (codePoint >= 'a' && codePoint <= 'z')       return UnicodeCategory::LowercaseLetter;
-        if (codePoint >= '0' && codePoint <= '9')       return UnicodeCategory::DecimalDigitNumber;
-        if (codePoint == ' ')                           return UnicodeCategory::SpaceSeparator;
-        if ((codePoint >= 0x21 && codePoint <= 0x2F) || (codePoint >= 0x3A && codePoint <= 0x40)
-            || (codePoint >= 0x5B && codePoint <= 0x60) || (codePoint >= 0x7B && codePoint <= 0x7E))
-            return UnicodeCategory::OtherPunctuation;
-        // Surrogate code points. This is not Unicode-table knowledge: the range is already
-        // fixed by this port itself in System::Char::IsSurrogate ("c >= 0xD800u && c <=
-        // 0xDFFFu"), and answering OtherNotAssigned here made the two contradict each other
-        // -- one calling U+D800-U+DFFF surrogates, the other calling them unassigned.
-        if (codePoint >= 0xD800 && codePoint <= 0xDFFF) return UnicodeCategory::Surrogate;
-        return UnicodeCategory::OtherNotAssigned;
+        // #2315. The whole code space is answered from the generated Unicode 16.0 table, and
+        // the ASCII/surrogate ladder that stood here is GONE rather than kept as a fast path.
+        // Keeping it would have been two sources of truth for the same 128 code points, which
+        // is the shape of defect this repository keeps removing -- and it would have hidden
+        // #2316's own finding, since the ladder answered OtherPunctuation for all 32 ASCII
+        // punctuation and symbol characters where Unicode has six different categories for
+        // them. Measured, the table disagrees with the ladder on 17 of the 128 ASCII code
+        // points -- every one a punctuation or symbol character the ladder called
+        // OtherPunctuation and Unicode calls something more specific -- and on 292,420 of the
+        // 1,114,112 code points overall. See docs/Migration-UnicodeCategoryTable.md.
+        return detail::LookupUnicodeCategory(static_cast<uint32_t>(codePoint));
     }
 };
 
