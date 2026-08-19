@@ -1587,3 +1587,112 @@ TEST(ThreadLocalValuesTests, Fix1958_DisposeReleasesTheTrackedValues) {
 
     EXPECT_THROW((void)local.getValuesProperty(), System::ObjectDisposedException);
 }
+
+// =============================================================================================
+// Ticket #1958 / SR-AUD-194 — Thread::Start(void*) actually forwards its parameter.
+//
+// The member captured its argument and then discarded it with a literal `(void)parameter;`,
+// while its own doc-comment said the value was "forwarded to the thread function". There was no
+// way for a caller to receive it and no diagnostic saying so, because the ONLY accepted callback
+// shape had no parameter slot.
+//
+// The repair is therefore ADDITIVE, not a signature change: a second constructor taking
+// std::function<void(void*)> -- .NET's Thread(ParameterizedThreadStart) (Thread.cs:152) -- plus a
+// guard on Start(void*) matching .NET's `startHelper._start is ThreadStart` test
+// (Thread.cs:206-210), with .NET's verbatim message.
+//
+// Landed under SA-5 with SA-3's layout condition discharged: sizeof(Thread) grows 104 -> 136.
+// =============================================================================================
+
+TEST(ThreadParameterizedStartTests, Decl1958_TheSecondCallableGrowsTheType) {
+    static_assert(sizeof(System::Threading::Thread) == 136,
+                  "#1958/SR-AUD-194 grew Thread 104 -> 136; a further change needs its own pin");
+    EXPECT_EQ(sizeof(System::Threading::Thread), 136u);
+}
+
+TEST(ThreadParameterizedStartTests, Fix1958_TheParameterActuallyReachesTheBody) {
+    // THE DEFECT: before the repair there was no callable shape that could receive this at all.
+    int payload = 4242;
+    std::atomic<int> seen{0};
+    // Null-SAFE on purpose: the mutation that discards the parameter again passes nullptr, and a
+    // dereference there would SEGV -- caught, but as a crash rather than by name.
+    System::Threading::Thread t(std::function<void(void*)>(
+        [&seen](void* p) { seen.store(p ? *static_cast<int*>(p) : -1); }));
+    t.Start(&payload);
+    t.Join();
+    EXPECT_EQ(seen.load(), 4242);
+}
+
+TEST(ThreadParameterizedStartTests, Fix1958_StartWithAParameterOnAParameterlessThreadThrows) {
+    // .NET: `if (startHelper._start is ThreadStart) throw new InvalidOperationException(
+    //        SR.InvalidOperation_ThreadWrongThreadStart);` (Thread.cs:206-210).
+    std::atomic<bool> ran{false};
+    System::Threading::Thread t(std::function<void()>([&ran] { ran.store(true); }));
+    int payload = 1;
+    EXPECT_THROW(t.Start(&payload), System::InvalidOperationException);
+    EXPECT_FALSE(ran.load()) << "the rejected Start must not have started anything";
+
+    // ...and the thread is still usable through the door that matches its shape.
+    EXPECT_NO_THROW(t.Start());
+    t.Join();
+    EXPECT_TRUE(ran.load());
+}
+
+TEST(ThreadParameterizedStartTests, Decl1958_ParameterlessStartOnAParameterizedThreadPassesNull) {
+    // THE ASYMMETRY, pinned because "reject it for symmetry" is the plausible wrong answer.
+    // .NET's private Start(bool) sets `startHelper._startArg = null` and performs NO delegate
+    // shape check at all (Thread.cs:239-253) -- only Start(parameter) guards.
+    std::atomic<bool> ran{false};
+    std::atomic<bool> gotNull{false};
+    System::Threading::Thread t(std::function<void(void*)>([&](void* p) {
+        gotNull.store(p == nullptr);
+        ran.store(true);
+    }));
+    EXPECT_NO_THROW(t.Start()) << "a parameterized thread may be started with no parameter";
+    t.Join();
+    EXPECT_TRUE(ran.load());
+    EXPECT_TRUE(gotNull.load()) << "it receives null, as .NET's _startArg = null gives";
+}
+
+TEST(ThreadParameterizedStartTests, Decl1958_TheShapeCheckAppliesOnlyBeforeTheFirstStart) {
+    // THIS TEST WAS WRITTEN ASSERTING THE OPPOSITE AND FAILED -- and the reference showed the
+    // TEST was wrong, not the code. .NET wraps the whole shape check in
+    // `if (startHelper != null)` (Thread.cs:204-214), and the comment above it says why: "In the
+    // case of a null startHelper (second call to start on same thread) StartCore method will take
+    // care of the error reporting."
+    //
+    // So the wrong-shape error is reported only while the thread has not been started; a SECOND
+    // Start(void*) reports the RESTART error. This port gets the same rule from the same fact --
+    // fn_ is moved from on the first successful start, exactly as .NET's startHelper is nulled.
+    std::atomic<bool> ran{false};
+    System::Threading::Thread t(std::function<void()>([&ran] { ran.store(true); }));
+
+    // Before any start: the shape check fires.
+    int payload = 1;
+    EXPECT_THROW(t.Start(&payload), System::InvalidOperationException);
+
+    t.Start();
+    t.Join();
+
+    // After starting: the restart check fires, through EITHER door.
+    EXPECT_THROW(t.Start(&payload), System::Threading::ThreadStateException)
+        << "a second Start(parameter) reports the restart, as .NET's null startHelper does";
+    EXPECT_THROW(t.Start(), System::Threading::ThreadStateException);
+}
+
+TEST(ThreadParameterizedStartTests, Fix1958_AnEmptyParameterizedCallableIsRejectedAtConstruction) {
+    // The same SR-AUD-192 reasoning as the parameterless constructor: deferring it means
+    // std::bad_function_call on a thread with no handler, i.e. std::terminate.
+    EXPECT_THROW(System::Threading::Thread(std::function<void(void*)>()),
+                 System::ArgumentNullException);
+}
+
+TEST(ThreadParameterizedStartTests, Fix1958_BothShapesGetDistinctManagedThreadIds) {
+    // The new constructor must consume an id like the old one -- SR-AUD-193's uniqueness contract
+    // covers every Thread object regardless of shape.
+    System::Threading::Thread a(std::function<void()>([] {}));
+    System::Threading::Thread b(std::function<void(void*)>([](void*) {}));
+    EXPECT_NE(a.getManagedThreadIdProperty(), b.getManagedThreadIdProperty());
+    EXPECT_GT(a.getManagedThreadIdProperty(), 1);
+    EXPECT_GT(b.getManagedThreadIdProperty(), 1);
+}

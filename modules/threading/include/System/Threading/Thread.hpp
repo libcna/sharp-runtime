@@ -16,6 +16,7 @@
 #include "System/LocalDataStoreSlot.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentNullException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Threading/ApartmentState.hpp"
 #include "System/Threading/ThreadPriority.hpp"
@@ -90,6 +91,11 @@ namespace System::Threading {
 
         std::shared_ptr<RunState> state_ = std::make_shared<RunState>();
         std::function<void()>  fn_;
+        // Ticket #1958 / SR-AUD-194. Exactly ONE of these two is ever set, and which one records
+        // the delegate shape -- so no separate flag is needed. `fn_` non-empty means the thread
+        // was built with the parameterless shape, which is precisely .NET's
+        // `startHelper._start is ThreadStart` test.
+        std::function<void(void*)> paramFn_;
         std::thread            thread_;
         std::string            name_;
         bool                   isThreadPoolThread_ = false;
@@ -120,6 +126,31 @@ namespace System::Threading {
             state_->managedThreadId = nextManagedId_.fetch_add(1);
         }
 
+        /**
+         * @brief Constructs a Thread whose body ACCEPTS the parameter `Start(void*)` supplies.
+         * @param start Function to execute on the new thread, receiving `Start`'s argument.
+         * @throws System::ArgumentNullException if @p start is an empty std::function.
+         *
+         * C++ counterpart of .NET's `Thread(ParameterizedThreadStart start)`
+         * (`Thread.cs:152`). Ticket #1958 / SR-AUD-194.
+         *
+         * **This constructor is what makes `Start(void*)` mean anything.** Before it, the only
+         * accepted callback shape had no parameter slot, so `Start(void*)` captured its argument
+         * and then discarded it with a literal `(void)parameter;` while its own doc-comment said
+         * the value was "forwarded to the thread function". There was no way for a caller to
+         * receive it and no diagnostic saying so.
+         *
+         * The same `ArgumentNullException` guard applies for the same reason as the parameterless
+         * constructor's (SR-AUD-192): deferring it means `std::bad_function_call` on a thread with
+         * no handler, i.e. `std::terminate`.
+         */
+        explicit Thread(std::function<void(void*)> start)
+            : paramFn_(std::move(start))
+        {
+            if (!paramFn_) throw System::ArgumentNullException("start");
+            state_->managedThreadId = nextManagedId_.fetch_add(1);
+        }
+
         ~Thread() {
             if (thread_.joinable()) thread_.detach();
         }
@@ -138,9 +169,15 @@ namespace System::Threading {
         void Start() {
             if (started_.exchange(true))
                 throw System::Threading::ThreadStateException("Thread is running or terminated; it cannot restart.");
-            thread_ = std::thread([state = state_, fn = std::move(fn_)]() mutable {
+            // A PARAMETERIZED thread started this way runs with a null argument and NO exception.
+            // That asymmetry is .NET's: its private Start(bool) sets `startHelper._startArg = null`
+            // and performs no delegate-shape check at all (Thread.cs:239-253) -- only
+            // Start(parameter) guards. Pinned by a test, because "reject it for symmetry" is the
+            // plausible wrong answer.
+            thread_ = std::thread([state = state_, fn = std::move(fn_),
+                                   paramFn = std::move(paramFn_)]() mutable {
                 currentThreadState_ = state;
-                fn();
+                if (fn) fn(); else paramFn(nullptr);
                 state->finished.store(true);
             });
         }
@@ -151,12 +188,29 @@ namespace System::Threading {
          * @throws System::Threading::ThreadStateException if Start() has already been called.
          */
         void Start(void* parameter) {
+            // THE SHAPE CHECK COMES FIRST -- but only while the thread has NOT been started, and
+            // that qualification is .NET's rather than an accident here. Its private
+            // Start(object, bool) wraps the whole check in `if (startHelper != null)`
+            // (Thread.cs:204-214), and the comment two lines above says why: "In the case of a
+            // null startHelper (second call to start on same thread) StartCore method will take
+            // care of the error reporting."
+            //
+            // So a SECOND Start(void*) reports the RESTART error, not the wrong-shape error. This
+            // port gets the same rule from the same fact: fn_ is MOVED FROM into the thread body
+            // on the first successful start, so it is empty afterwards and the guard falls
+            // through -- exactly as .NET's startHelper becomes null. A pin asserts both halves,
+            // and it was written asserting the opposite first: the test failed, and the reference
+            // showed the test was wrong rather than the code.
+            if (fn_) {
+                throw System::InvalidOperationException(
+                    "The thread was created with a ThreadStart delegate that does not accept a "
+                    "parameter.");
+            }
             if (started_.exchange(true))
                 throw System::Threading::ThreadStateException("Thread is running or terminated; it cannot restart.");
-            thread_ = std::thread([state = state_, fn = std::move(fn_), parameter]() mutable {
+            thread_ = std::thread([state = state_, paramFn = std::move(paramFn_), parameter]() mutable {
                 currentThreadState_ = state;
-                (void)parameter;
-                fn();
+                paramFn(parameter);
                 state->finished.store(true);
             });
         }
