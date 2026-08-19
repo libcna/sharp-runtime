@@ -2,8 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <cstddef>
 #include <iomanip>
 #include <sstream>
+#include <string>
+#include <type_traits>
+#include <vector>
 #include "System/Security/Cryptography/RNGCryptoServiceProvider.hpp"
 #include "System/Security/Cryptography/RandomNumberGenerator.hpp"
 #include "System/Security/Cryptography/Rfc2898DeriveBytes.hpp"
@@ -61,12 +65,91 @@ TEST(RandomNumberGeneratorTests, Create_ReturnsWorkingInstance) {
     EXPECT_EQ(buffer.size(), 8u);
 }
 
-TEST(RNGCryptoServiceProviderTests, GetBytes_ProducesRequestedLength) {
+// #2399 made this type `final` and `[[deprecated]]`, transcribing .NET's `public sealed class` and
+// its [Obsolete] with diagnostic id SYSLIB0023 (RNGCryptoServiceProvider.cs:8-10, message at
+// Obsoletions.cs:82). THE SUPPRESSION BELOW IS THE EVIDENCE: it is REQUIRED, and deleting it fails
+// this build with "error: ... is deprecated ... [-Werror=deprecated-declarations]" -- the diagnostic
+// demonstrated rather than asserted, which is the idiom #2289 established.
+//
+// The assertion also changed. It used to be EXPECT_EQ(buffer.size(), 24u) on a buffer whose size was
+// fixed BEFORE the call, so it passed against a generator that wrote nothing at all.
+TEST(RNGCryptoServiceProviderTests, GetBytes_DelegatesToARealGenerator) {
+    constexpr SharpRuntime::bytecs sentinel = 0x5A;
+    std::vector<SharpRuntime::bytecs> buffer(24, sentinel);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     RNGCryptoServiceProvider rng;
-    std::vector<SharpRuntime::bytecs> buffer(24);
+#pragma GCC diagnostic pop
     rng.GetBytes(buffer);
-    EXPECT_EQ(buffer.size(), 24u);
+    ASSERT_EQ(buffer.size(), 24u);
+    EXPECT_NE(buffer, std::vector<SharpRuntime::bytecs>(24, sentinel))
+        << "the buffer is untouched, so this type is not reaching a generator at all";
 }
+
+// .NET's (string) and (byte[]) constructors ignore their argument entirely -- both chain to
+// `this((CspParameters?)null)` (RNGCryptoServiceProvider.cs:14-16). Asserted by building through
+// each and checking the result still writes, because "ignores its argument" and "does not
+// construct a generator" look identical to a compile-only test.
+TEST(RNGCryptoServiceProviderTests, TheTwoIgnoringConstructorsStillBuildAWorkingGenerator) {
+    constexpr SharpRuntime::bytecs sentinel = 0x5A;
+    const std::vector<SharpRuntime::bytecs> seed = {1, 2, 3, 4};
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    RNGCryptoServiceProvider fromString(std::string("ignored"));
+    RNGCryptoServiceProvider fromBytes(seed);
+#pragma GCC diagnostic pop
+    std::vector<SharpRuntime::bytecs> a(16, sentinel), b(16, sentinel);
+    fromString.GetBytes(a);
+    fromBytes.GetBytes(b);
+    EXPECT_NE(a, std::vector<SharpRuntime::bytecs>(16, sentinel));
+    EXPECT_NE(b, std::vector<SharpRuntime::bytecs>(16, sentinel));
+    // The byte[] overload must not be a seed: two generators built from the same bytes must not
+    // agree, or the argument is not being ignored at all.
+    std::vector<SharpRuntime::bytecs> c(16, sentinel);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    RNGCryptoServiceProvider alsoFromBytes(seed);
+#pragma GCC diagnostic pop
+    alsoFromBytes.GetBytes(c);
+    EXPECT_NE(b, c) << "two generators built from the same bytes agreed, so the argument is a seed";
+}
+
+// #2399 pins the SHAPE, not only the behaviour. A behavioural test cannot see a seal, and it
+// cannot see an overload that was never added.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+TEST(RNGCryptoServiceProviderTests, TheShapeIsDotNets) {
+    using Rng = RNGCryptoServiceProvider;
+    // RNGCryptoServiceProvider.cs:10 -- `public sealed class`.
+    static_assert(std::is_final_v<Rng>, "#2399: .NET declares this type sealed");
+    // ...and still a RandomNumberGenerator, which the seal must not have cost.
+    static_assert(std::is_base_of_v<RandomNumberGenerator, Rng>,
+                  "#2399: sealing must not change what this type IS");
+
+    // RNGCryptoServiceProvider.cs:13-15 -- the three constructors this port can transcribe.
+    static_assert(std::is_constructible_v<Rng>);
+    static_assert(std::is_constructible_v<Rng, std::string>);
+    static_assert(std::is_constructible_v<Rng, std::vector<SharpRuntime::bytecs>>);
+
+    // Both single-argument constructors are `explicit`, because a C# constructor never
+    // participates in an implicit conversion -- so `explicit` is the faithful translation rather
+    // than a narrowing this port invented.
+    static_assert(!std::is_convertible_v<std::string, Rng>);
+    static_assert(!std::is_convertible_v<std::vector<SharpRuntime::bytecs>, Rng>);
+
+    // .NET'S FOURTH CONSTRUCTOR, `(CspParameters?)`, IS DELIBERATELY ABSENT, because
+    // CspParameters does not exist in this port and inventing it to carry a type whose only
+    // behaviour is `if (cspParams != null) throw new PlatformNotSupportedException()` would be
+    // inventing public surface rather than porting it. There is no expression that names a type
+    // which does not exist, so what is pinned is the SHAPE such an overload would introduce: a
+    // constructor this type can reach with a null. A later ticket that adds CspParameters trips
+    // this and has to justify the type first.
+    static_assert(!std::is_constructible_v<Rng, std::nullptr_t>,
+                  "#2399: adding a null-accepting constructor means CspParameters was invented");
+
+    SUCCEED();
+}
+#pragma GCC diagnostic pop
 
 // --- Rfc2898DeriveBytes (PBKDF2, RFC 6070 test vectors) ------------------------------------
 

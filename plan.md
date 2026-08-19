@@ -1,12 +1,12 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-19 — branch **`next`**, working tree clean. Gate **17,625 across 38
-executables: 17,625 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs
+*Last verified: 2026-08-19 — branch **`next`**, working tree clean. Gate **17,627 across 38
+executables: 17,627 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs
 with every executable run separately and continuing past failures, zero build warnings at
 `--parallel 2`. Graph **41 / 93**, seams **3 / 20**, negative fixtures **48 / 245** (unchanged —
-#2397 and #2398 outlawed no spelling). `ticket` has **1 `todo`** — **#2399**, split out of #2398
-because every part of it is a public source break — plus 2,381 done, 9 blocked, 1 needs_user, 5
-wontfix; `task` has 0 unclassified.*
+#2397 and #2398 outlawed no spelling; #2399 added a fixture, taking the set to **49 / 248**). **BOTH
+WORK QUEUES ARE EMPTY**: `ticket` has 0 `todo` (2,383 done, 9 blocked, 1 needs_user, 5 wontfix) and
+`task` has 0 unclassified.*
 
 ***The latest change is #2397, and what it demonstrates matters more than what it repaired.*** *The
 queues were already empty, so the work was **found by measurement**: the restored reference was
@@ -25,8 +25,12 @@ the ninth a **proven equivalence** measured over 288 (pattern, input) pairs rath
 there through the very `getentropy()` call the cryptographic RNG refused to make, and .NET does not
 refuse either. **Its shipped tests could not have caught it**: two cases asserting `buffer.size()`
 after filling a buffer sized before the call. Four platform arms became two, so the arm Emscripten
-takes is now the arm the Linux gate runs. `NEXT.md` §4b lists what remains and says plainly which
-candidates are and are not worth the same treatment.*
+takes is now the arm the Linux gate runs. **#2399 finished that module**, giving
+`RNGCryptoServiceProvider` .NET's `sealed` and `[Obsolete]` shape. **The signal common to all three
+is worth more than the module list**: every defect sat under a test that could not fail —
+`EXPECT_EQ(buffer.size(), 24u)` on a buffer sized before the call, twice, and a `Split` suite that
+never used a capturing group. `NEXT.md` §4b records both the remaining candidates and that cheaper
+search.*
 
 *Prior snapshot, retained historically:*
 

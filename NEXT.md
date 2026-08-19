@@ -3,8 +3,8 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-19 — 17,625 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,625 run: 17,625 passed, 0 failed, 0 skipped**, recounted from the
+> **Test-count floor, 2026-08-19 — 17,627 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,627 run: 17,627 passed, 0 failed, 0 skipped**, recounted from the
 > per-executable logs with every executable run separately and continuing past failures, zero build
 > warnings at `--parallel 2`. Every checkpoint below this one ends with *"the gate is not green"*;
 > this one does not. Two of the three historical failure sources were environmental and are simply
@@ -32,12 +32,13 @@
 > undetected divergence survives, and a test that cannot fail is how it survives there. §4b lists
 > the two remaining candidates and says plainly which is and is not worth the measurement.
 >
-> **THE `todo` QUEUE IS NOT EMPTY: #2399 IS OPEN.** It was split out of #2398 rather than bundled,
-> because every part of it — making `RNGCryptoServiceProvider` `sealed`, marking it `[Obsolete]`,
-> and adding constructors — is a public source break or new public surface, where #2398 outlawed no
-> spelling at all. `task` has **0** unclassified (14,979 ignored / 1,082 ported / 140 ignore).
-> Ticket totals: **2,381 done, 1 todo, 9 blocked, 1 needs_user, 5 wontfix**. What remains *blocked*
-> needs the user or an external event, and each is itemised in §2 below.
+> **BOTH WORK QUEUES ARE EMPTY AGAIN.** #2399 closed the same day it was filed (`RNGCryptoServiceProvider`
+> is now `final` and `[[deprecated]]`, with two of .NET's three missing constructors and the third
+> pinned as unreachable), and #2400 is its downstream record. `ticket` has **0 `todo`**; `task` has
+> **0** unclassified (14,979 ignored / 1,082 ported / 140 ignore). Ticket totals: **2,383 done, 9
+> blocked, 1 needs_user, 5 wontfix**. What remains *blocked* needs the user or an external event,
+> and each is itemised in §2 below. **§4b says where to look next, and the method that found all
+> three of today's tickets.**
 
 ## Handoff for a new context, 2026-08-19 (queue exhausted)
 
@@ -145,7 +146,7 @@ coverage" and the difference matters:
 |---|---|---|
 | `text-regular-expressions` | `Text.RegularExpressions` | a section of `tests/integration/System/Text/TextRemainingTests.cpp` — **this is the one #2397 measured, and it held four divergences** |
 | `io-compression-zip` | `IO.Compression.Zip` | `tests/integration/System/IO/Compression/CompressionTests.cpp` (145 cases in the file, covering the whole namespace) |
-| `security-cryptography-random` | `Security.Cryptography.Random` | **measured by #2398 and it held the Emscripten defect**; its two shipped cases could not fail. Thirteen real cases now live in `RandomNumberGeneratorEntropyTests.cpp`; `RNGCryptoServiceProvider` remains, as **#2399** |
+| `security-cryptography-random` | `Security.Cryptography.Random` | **exhausted — measured by #2398 and #2399, and both found real defects.** Its three shipped cases could not fail: each asserted a buffer's size *after* filling a buffer sized before the call |
 | `storage` | `Storage` | `tests/integration/Task39RemainingTests.cpp` (78 cases in the file) — one header, `StoragePaths` |
 
 **Do not read the table as four equal opportunities.** `io-compression-zip` is genuinely well
@@ -156,11 +157,17 @@ It was: *#2228 put a real CSPRNG behind `Guid::NewGuid` — do the types whose w
 cryptographic randomness reach the same source?* They did not. Asking a repaired subsystem's
 question of its neighbours is cheap and it found a defect on the first try.
 
+**A second signal is now visible and is worth more than the module list.** Every defect these three
+tickets found sat under a test that *could not fail*: `EXPECT_EQ(buffer.size(), 24u)` on a buffer
+sized before the call (twice), and a `Split` suite that never used a capturing group. **Looking for
+assertions that cannot fail is a cheaper search than reading modules**, and it is not confined to
+modules without test sources.
+
 What is left here: a **second pass over `Text.RegularExpressions`**, whose remaining gaps #2397
 listed rather than closed (`Regex::Unescape` absent, the `count`/`startat` `Split` overloads absent,
-`Match::Empty().Groups().Count` 0 here against .NET's 1), and **#2399** for
-`RNGCryptoServiceProvider`. `io-compression-zip` and `storage` were checked and are **not**
-recommended: the first is covered by 145 sibling cases, the second is one 48-line header.
+`Match::Empty().Groups().Count` 0 here against .NET's 1). `io-compression-zip` and `storage` were
+checked and are **not** recommended: the first is covered by 145 sibling cases, the second is one
+48-line header.
 
 **Adding a 39th executable was considered and not taken.** A dedicated
 `SharpRuntimeTests_Text_RegularExpressions` would be the architecturally tidier home, and the
