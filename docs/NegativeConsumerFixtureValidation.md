@@ -1447,3 +1447,117 @@ the pool at all already required a default-constructible `T`, and pinning the ca
 **11 fixtures / 94 sites.** The bounded checker run over this fixture alone:
 `OK: 1 negative consumer fixture(s), 13 negative site(s), every site rejected (g++ 13.3.0,
 14 compiler invocation(s), peak 2 job(s), 5.4s)`.
+
+## 22. Ticket #1894 — the CCF-019 fixtures that have nothing to reject (2026-08-19)
+
+**#1894 closes with its negative-fixture half NOT APPLICABLE and its sanitizer half re-measured.**
+It is the only ticket in this document whose fixtures were never written, and the reason is worth
+recording rather than leaving as an absence.
+
+### 22.1 Why there is nothing to pin
+
+#1894 exists to add *"one negative consumer fixture site per spelling the CCF-019 implementation
+tickets outlaw"*. Its own 2026-07-31 analysis concluded that **no CCF-019 repair has outlawed any
+spelling** in `text-json` or `xml-linq` — every landed repair there (#1886, #1887, #1890, #1891,
+#1895, #1898) is source-compatible by construction. The two that *would* have created outlawed
+spellings are **#1888** (delete `JsonNode`'s copy/move and make `DetachParent` non-public) and
+**#1899** (return non-owning view types from `Ancestors`/`AncestorsAndSelf`).
+
+**Both are now declined.** #1888 was declined earlier; **#1899 was declined on 2026-08-19**, which
+is the condition #1894's own note set for this classification: *"close the negative-fixture half as
+not applicable if #1899 is declined/wontfix; do not invent Text.Json sites while #1888 remains
+declined."*
+
+**Verified rather than taken on trust.** A probe compiled against the shipped headers confirms all
+four spellings are still legal today:
+
+| spelling | ticket that would outlaw it | status |
+|---|---|---|
+| `JsonArray` copy-constructible | #1888 | **legal** |
+| `JsonArray` move-constructible | #1888 | **legal** |
+| `JsonNode::DetachParent()` callable | #1888 | **legal** |
+| `Extensions::Ancestors` returns `std::vector<XElement*>` | #1899 | **legal** |
+
+A negative fixture asserts that a spelling is *rejected by the compiler*. With nothing rejected,
+writing one would mean **inventing an outlawed spelling to pin**, which is the opposite of what
+these fixtures are for. Neither `test/consumer/text_json_node_lifetime_negative.cpp` nor
+`test/consumer/xml_linq_object_lifetime_negative.cpp` exists, and neither should.
+
+**This is not a claim that CCF-019 produced no fixtures at all.** Its *async* members did: #1959
+landed a public source break in three spellings with
+`test/consumer/threading_borrowed_callback_negative.cpp`. What #1894 scoped — the two owned-tree
+modules — is where nothing was outlawed.
+
+### 22.2 The sanitizer half, re-measured because the recorded figures were stale
+
+#1894's note recorded a clean ASan+UBSan+LSan run over **218/218** `SharpRuntimeTests_Text_Json`
+and **184/184** `SharpRuntimeTests_Xml_Linq`, from 2026-07-31. Both suites have grown a great deal
+since — through #1897, #2115, #2117, #2118, #2119, #2199, #2200, #2201, #1896, #2350 and others —
+so the recorded figures are evidence about a tree that no longer exists. Re-run on 2026-08-19:
+
+| suite | ASan + LSan | UBSan |
+|---|---|---|
+| `SharpRuntimeTests_Text_Json` | **302 / 302, 0 reports** | **302 / 302, 0 reports** — after one repair, §22.2b |
+| `SharpRuntimeTests_Xml_Linq` | **349 / 349, 0 reports** | **349 / 349, 0 reports** |
+
+ASan was run with `detect_leaks=1`, `detect_stack_use_after_return=1`, `strict_string_checks=1`,
+`check_initialization_order=1` and `detect_odr_violation=2`. UBSan was built with
+`-fno-sanitize-recover=undefined`, so a violation aborts rather than printing and continuing.
+
+### 22.2b The re-measurement found a real defect that the stale figures had hidden
+
+**UBSan was not clean on `SharpRuntimeTests_Text_Json`, and that is the whole reason for
+re-measuring rather than citing the 2026-07-31 note.** The suite **aborted** — the tree is built
+with `-fno-sanitize-recover=undefined`, so a violation ends the run rather than printing and
+continuing:
+
+```
+/usr/include/c++/14/bits/char_traits.h:793:20: runtime error: reference binding to misaligned
+address 0x... for type 'const char_type', which requires 2 byte alignment
+  #0 std::char_traits<char16_t>::length(char16_t const*)
+  #1 std::u16string::basic_string(char16_t const*, allocator const&)
+  #2 JsonEncodedTextTests_BOTHOverloadsAgreeOnEveryInputClassTheyCanBOTHExpress_Test::TestBody()
+```
+
+**It is a defect in a test, not in production code**, and finding *which* construction caused it
+took measurement rather than reading: the array was copied verbatim into a standalone probe and
+**did not reproduce**, and so did every individual literal in it. The manifestation is
+**translation-unit-layout dependent** — the reported address holds a run of NUL bytes inside the
+narrow string pool, which is the empty `u""` literal merged into a **1-byte-aligned** mergeable
+section alongside narrow literals. `char_traits<char16_t>::length` then binds a
+`const char16_t&` to an odd address to read the terminator. The value it computes is correct; the
+reference binding is not.
+
+The repair is one line — `u""` becomes `std::u16string()`, which is the same empty UTF-16 string
+with no literal to misalign, so the case's coverage is unchanged:
+
+| | before | after |
+|---|---|---|
+| `SharpRuntimeTests_Text_Json` under UBSan | **aborted, 1 runtime error** | **302 / 302, 0 errors** |
+| the same suite in the ordinary build | 302 / 302 | 302 / 302 |
+
+**Mutation**: restoring the `u""` literal reproduces the report (1 error). Caught.
+
+### 22.3 The instrumentation was shown able to report
+
+A clean run is only evidence about the *code* if a dirty run is evidence about the *sanitizer* —
+the lesson #1957/SR-AUD-204 recorded when a silent TSan turned out to say nothing. So each
+sanitizer was given a deliberate defect built with the same flags:
+
+| probe | result |
+|---|---|
+| heap-buffer-overflow under ASan | **1 report — instrumentation live** |
+| unfreed allocation under LSan | **1 report — instrumentation live** |
+| shift exponent ≥ width under UBSan | **1 report — instrumentation live** |
+| no defect (control) | **0 reports — correctly silent** |
+
+### 22.4 A correction to this document's running total
+
+§21.5 records **11 fixtures / 94 sites**, and that has been stale since 2026-08-04: the measured
+total today is **45 fixtures / 231 sites**. The ~34 fixtures added between #2054 and now were each
+recorded in their own ticket's migration note rather than here, so the record exists — it is this
+document's *running total* that fell behind, not the evidence. #1894 adds no fixture of its own, so
+the total is unchanged by this section.
+
+Build directories used: `build-asan` (reused) and `build-ubsan` (created), both `--parallel 2`,
+both with `ccache`.

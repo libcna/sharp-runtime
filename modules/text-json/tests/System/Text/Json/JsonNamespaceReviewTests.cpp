@@ -492,7 +492,7 @@ TEST(JsonEncodedTextTests, BOTHOverloadsAgreeOnEveryInputClassTheyCanBOTHExpress
     struct Pair { const char* name; std::string narrow; std::u16string wide; };
     const Pair pairs[] = {
         {"ASCII",            std::string("hello"),            u"hello"},
-        {"empty",            std::string(""),                 u""},
+        {"empty",            std::string(""),                 std::u16string()},
         {"U+00E9",           std::string("\xC3\xA9"),         u"é"},
         {"U+1F600",          std::string("\xF0\x9F\x98\x80"), u"\U0001F600"},
         {"lone HIGH surrogate", std::string("\xED\xA0\x80"),  std::u16string(1, 0xD800)},
