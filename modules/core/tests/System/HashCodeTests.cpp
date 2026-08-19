@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -10,6 +11,12 @@
 #include "System/Span.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#if defined(__linux__)
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <cstdlib>
+#endif
 
 using System::HashCode;
 
@@ -145,7 +152,30 @@ TEST(HashCodeTests, AddBytes_EmptySpan_IsANoOp) {
     EXPECT_EQ(withEmpty.ToHashCode(), without.ToHashCode());
 }
 
-TEST(HashCodeTests, Seed_DiffersAcrossProcessesButConsistentWithinOne) {
+// ===========================================================================================
+// #2402 -- the seed is per-PROCESS, and both halves of that are now asserted.
+//
+// This case used to assert only the within-one-process half, so THE FIRST CLAUSE OF ITS OWN NAME
+// WAS UNTESTED: a constant seed satisfies every assertion it made. The across-processes half is
+// the one the property exists for -- `HashCode.hpp`'s doc-comment states it in terms ("consistent
+// within a run but differ across runs (by design, to discourage persisting hash codes and to
+// resist hash-flooding)"), and it is .NET's, whose `s_seed` is `GenerateGlobalSeed()`
+// (`HashCode.cs:58,70-75`).
+//
+// A PLAIN fork() CANNOT TEST IT, and finding that out is worth recording: the seed is a
+// function-local static initialised on first use, so a forked child INHERITS it and reports the
+// same hash whatever the source. The child must re-exec, which is the idiom #1979 established for
+// PosixSignalTests and for the same class of reason -- a fresh process is the only place the
+// property is observable.
+//
+// NOT A CSPRNG, AND THAT IS PARITY RATHER THAN A GAP (#2402). .NET has two entropy entry points
+// and chooses between them deliberately (`Interop.GetRandomBytes.cs:18-27`); `GenerateGlobalSeed`
+// calls the NON-cryptographic one. `std::random_device` here is the counterpart. Upgrading it
+// would be a divergence, and would put a cryptography component under every consumer of
+// `Core.Base`.
+// ===========================================================================================
+
+TEST(HashCodeTests, Seed_IsSharedByEveryInstanceWithinOneProcess) {
     // The per-process global seed is generated once and shared by every HashCode
     // instance in this run, so two independently-constructed accumulators given the
     // same input still agree (the seed is not per-instance randomness).
@@ -154,3 +184,88 @@ TEST(HashCodeTests, Seed_DiffersAcrossProcessesButConsistentWithinOne) {
     hc2.Add(std::string("hello"));
     EXPECT_EQ(hc1.ToHashCode(), hc2.ToHashCode());
 }
+
+#if defined(__linux__)
+namespace {
+
+constexpr const char* kHashSeedChildEnv = "SHARP_RUNTIME_HASHCODE_SEED_CHILD";
+constexpr const char* kProbeInput = "the same input in every process";
+
+/// The hash this process computes for a fixed input. Shared by the parent and the re-exec'd child
+/// so that the two are literally computing the same thing.
+uint32_t probeHash() {
+    HashCode hc;
+    hc.Add(std::string(kProbeInput));
+    return static_cast<uint32_t>(hc.ToHashCode());
+}
+
+/// Re-executes this binary so that only HashCodeSeedChildBody runs, and returns the hash it wrote
+/// to the pipe. Returns std::nullopt if the child could not report one.
+std::optional<uint32_t> hashFromAFreshProcess() {
+    int pipeFds[2] = {-1, -1};
+    if (::pipe(pipeFds) != 0) return std::nullopt;
+
+    const pid_t child = ::fork();
+    if (child < 0) { ::close(pipeFds[0]); ::close(pipeFds[1]); return std::nullopt; }
+    if (child == 0) {
+        ::close(pipeFds[0]);
+        // The child writes to fd 3, not stdout: gtest's own output would otherwise be
+        // indistinguishable from the payload.
+        ::dup2(pipeFds[1], 3);
+        ::close(pipeFds[1]);
+        ::setenv(kHashSeedChildEnv, "1", 1);
+        ::execl("/proc/self/exe", "SharpRuntimeTests_Core_Base",
+                "--gtest_filter=HashCodeSeedChildBody.Run", "--gtest_brief=1",
+                static_cast<char*>(nullptr));
+        ::_exit(90); // exec failed
+    }
+
+    ::close(pipeFds[1]);
+    std::string received;
+    char buffer[64];
+    ssize_t n = 0;
+    while ((n = ::read(pipeFds[0], buffer, sizeof(buffer))) > 0)
+        received.append(buffer, static_cast<size_t>(n));
+    ::close(pipeFds[0]);
+
+    int status = 0;
+    if (::waitpid(child, &status, 0) != child) return std::nullopt;
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) return std::nullopt;
+    if (received.empty()) return std::nullopt;
+    return static_cast<uint32_t>(std::stoul(received));
+}
+
+} // namespace
+
+// The child half. It is a test only because re-execing this binary is how a fresh process is
+// obtained; in an ordinary run the environment variable is absent and it does nothing.
+TEST(HashCodeSeedChildBody, Run) {
+    if (::getenv(kHashSeedChildEnv) == nullptr) {
+        // SUCCEED rather than GTEST_SKIP, deliberately and following #1979's
+        // PosixSignalChildBody: this driver runs in EVERY ordinary run, and a skip here would
+        // move the repository's gate off "0 skipped" permanently -- a documented property of the
+        // floor in CLAUDE.md rule 2, not an incidental one.
+        SUCCEED() << "child-body driver; runs only when re-executed by the #2402 parent case";
+        return;
+    }
+    const std::string payload = std::to_string(probeHash());
+    const ssize_t written = ::write(3, payload.data(), payload.size());
+    ASSERT_EQ(written, static_cast<ssize_t>(payload.size()));
+}
+
+TEST(HashCodeTests, Seed_DiffersAcrossProcesses) {
+    const uint32_t here = probeHash();
+
+    // Two fresh processes, not one: a single disagreement could in principle be the 1-in-2^32
+    // coincidence, and more usefully, two children make the failure mode legible -- a constant
+    // seed makes BOTH agree with the parent, where a flake would not.
+    const std::optional<uint32_t> first = hashFromAFreshProcess();
+    const std::optional<uint32_t> second = hashFromAFreshProcess();
+    ASSERT_TRUE(first.has_value()) << "the first child could not report its hash";
+    ASSERT_TRUE(second.has_value()) << "the second child could not report its hash";
+
+    EXPECT_FALSE(*first == here && *second == here)
+        << "two fresh processes both computed the parent's hash (" << here
+        << ") for the same input, so the global seed is not per-process";
+}
+#endif // __linux__

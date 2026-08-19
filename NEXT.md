@@ -3,8 +3,8 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-19 — 17,629 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,629 run: 17,629 passed, 0 failed, 0 skipped**, recounted from the
+> **Test-count floor, 2026-08-19 — 17,631 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,631 run: 17,631 passed, 0 failed, 0 skipped**, recounted from the
 > per-executable logs with every executable run separately and continuing past failures, zero build
 > warnings at `--parallel 2`. Every checkpoint below this one ends with *"the gate is not green"*;
 > this one does not. Two of the three historical failure sources were environmental and are simply
@@ -36,16 +36,26 @@
 > deterministic on MinGW-w64**, a supported target. RFC 6455 §5.3 requires the mask to come from a
 > strong source of entropy by name.
 >
-> **Three patterns worth carrying forward, in order of yield.** (1) **Ask a repaired subsystem's
-> question of its neighbours** — that alone found #2398 and #2401. (2) **A module with no test
-> sources** is where an undetected divergence survives. (3) **A test that cannot fail** is how it
-> survives there: every defect these tickets found sat under one. §4b has the remaining candidates.
+> **#2402 closed the entropy sweep by recording what is NOT a defect** — the half a sweep usually
+> leaves out. Five sites need random bytes; two were repaired and **two are parity and look exactly
+> like the defect**, because `HashCode::GlobalSeed` and unseeded `Random` both call
+> `std::random_device`. .NET has **two** entropy entry points and deliberately uses the
+> **non**-cryptographic one at both. `docs/EntropySourceSweep.md` records all five with citations,
+> so nobody re-opens them.
 >
-> **BOTH WORK QUEUES ARE EMPTY AGAIN.** Five tickets were filed and closed on 2026-08-19 by this
-> sweep — #2397, #2398, #2399, #2400 (downstream record) and #2401. `ticket` has **0 `todo`**;
-> `task` has **0** unclassified (14,979 ignored / 1,082 ported / 140 ignore). Ticket totals:
-> **2,384 done, 9 blocked, 1 needs_user, 5 wontfix**. Graph **41 / 94** (#2401 added one private
-> edge), negative fixtures **49 / 248** (#2399 added one). What remains *blocked* needs the user or an external event,
+> **Three patterns worth carrying forward, in order of yield.** (1) **Ask a repaired subsystem's
+> question of its neighbours** — that alone found #2398 and #2401, and #2402 closed it out. (2) **A
+> module with no test sources** is where an undetected divergence survives. (3) **A test that cannot
+> fail** is how it survives there: **every** defect this sweep found sat under one, three of them
+> literally — two `EXPECT_EQ(buffer.size(), N)` on a buffer sized before the call, and a case whose
+> name claimed "DiffersAcrossProcesses" while its body only checked within one. §4b has the
+> remaining candidates.
+>
+> **BOTH WORK QUEUES ARE EMPTY AGAIN.** Six tickets were filed and closed on 2026-08-19 by this
+> sweep — #2397, #2398, #2399, #2400 (downstream record), #2401 and #2402. `ticket` has **0
+> `todo`**; `task` has **0** unclassified (14,979 ignored / 1,082 ported / 140 ignore). Ticket
+> totals: **2,385 done, 9 blocked, 1 needs_user, 5 wontfix**. Graph **41 / 94** (#2401 added one
+> private edge), negative fixtures **49 / 248** (#2399 added one). What remains *blocked* needs the user or an external event,
 > and each is itemised in §2 below. **§4b says where to look next, and the method that found all
 > three of today's tickets.**
 

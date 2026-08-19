@@ -1,12 +1,13 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-19 — branch **`next`**, working tree clean. Gate **17,629 across 38
-executables: 17,629 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs
+*Last verified: 2026-08-19 — branch **`next`**, working tree clean. Gate **17,631 across 38
+executables: 17,631 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs
 with every executable run separately and continuing past failures, zero build warnings at
 `--parallel 2`. Graph **41 / 94** (#2401 added one private edge), seams **3 / 20**, negative
 fixtures **49 / 248** (#2399 added one; #2397, #2398 and #2401 outlawed no spelling). **BOTH WORK
 QUEUES ARE EMPTY**: `ticket` has 0 `todo` (2,384 done, 9 blocked, 1 needs_user, 5 wontfix) and
-`task` has 0 unclassified.*
+`task` has 0 unclassified. Six tickets were filed and closed by one sweep on 2026-08-19: #2397,
+#2398, #2399, #2400, #2401 and #2402.*
 
 ***The latest change is #2397, and what it demonstrates matters more than what it repaired.*** *The
 queues were already empty, so the work was **found by measurement**: the restored reference was
@@ -37,8 +38,11 @@ else needs unpredictable bytes? — found `ClientWebSocket` drawing **both** its
 nonce and its **per-frame masking key** from `std::random_device`, which the standard permits to be
 deterministic and which this repository's own `Random.cpp:69-70` records as deterministic on
 MinGW-w64, a supported target. RFC 6455 §5.3 requires a strong source of entropy by name. Both now
-use .NET's routes; graph 41/93 → 41/94 for one private edge. `NEXT.md` §4b records all three search
-patterns in order of yield.*
+use .NET's routes; graph 41/93 → 41/94 for one private edge. **#2402 then closed the sweep by
+recording what is NOT a defect** — `HashCode::GlobalSeed` and unseeded `Random` also call
+`std::random_device` and are **parity**, because .NET has two entropy entry points and deliberately
+uses the non-cryptographic one at both; `docs/EntropySourceSweep.md` has all five sites with
+citations. `NEXT.md` §4b records all three search patterns in order of yield.*
 
 *Prior snapshot, retained historically:*
 
