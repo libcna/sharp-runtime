@@ -7,6 +7,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/UnicodeCategory.hpp"
 #include "System/Globalization/detail/UnicodeCategoryLookup.hpp"
+#include "System/Globalization/detail/UnicodeNumericLookup.hpp"
 
 namespace System::Globalization {
 
@@ -67,8 +68,8 @@ public:
      *         character, whether or not it is a decimal digit in Unicode.
      */
     static intcs GetDecimalDigitValue(charcs ch) {
-        if (ch >= u'0' && ch <= u'9') return static_cast<intcs>(ch - u'0');
-        return -1;
+        // #2336: the whole code space, from the generated UCD 16.0 numeric table.
+        return detail::LookupDecimalDigitValue(static_cast<uint32_t>(ch));
     }
 
     /**
@@ -99,14 +100,12 @@ public:
      *         other character, whether or not it is a digit in Unicode.
      */
     static intcs GetDigitValue(charcs ch) {
-        intcs decimalValue = GetDecimalDigitValue(ch);
-        if (decimalValue != -1) return decimalValue;
-        switch (ch) {
-            case 0x00B9: return 1; // superscript 1
-            case 0x00B2: return 2; // superscript 2
-            case 0x00B3: return 3; // superscript 3
-            default: return -1;
-        }
+        // #2336. Note this is NOT "decimal value, else the digit-only cases": .NET reads a
+        // DIFFERENT NIBBLE of the same table byte (the low one, where GetDecimalDigitValue
+        // reads the high one), so the two are independent properties rather than one built on
+        // the other. The old fall-through happened to agree for the thirteen code points it
+        // covered and would not have for the rest.
+        return detail::LookupDigitValue(static_cast<uint32_t>(ch));
     }
 
     /**
@@ -135,14 +134,9 @@ public:
      *         character, whether or not it carries a Unicode numeric value.
      */
     static double GetNumericValue(charcs ch) {
-        if (ch >= u'0' && ch <= u'9') return static_cast<double>(ch - u'0');
-        if (ch == 0x00B2) return 2.0;  // superscript 2
-        if (ch == 0x00B3) return 3.0;  // superscript 3
-        if (ch == 0x00B9) return 1.0;  // superscript 1
-        if (ch == 0x00BC) return 0.25; // vulgar fraction 1/4
-        if (ch == 0x00BD) return 0.5;  // vulgar fraction 1/2
-        if (ch == 0x00BE) return 0.75; // vulgar fraction 3/4
-        return -1.0;
+        // #2336: the whole code space. The rationals are real rationals -- U+2153 is
+        // 0.333..., not a digit -- which is why the table is doubles.
+        return detail::LookupNumericValue(static_cast<uint32_t>(ch));
     }
 
     /**

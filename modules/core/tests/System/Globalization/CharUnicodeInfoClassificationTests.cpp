@@ -406,3 +406,106 @@ TEST(CharUnicodeInfoTableTests, Fix2315_TheCorporaDisagreementsAreExactlyTheOnes
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(0x2FFC), UnicodeCategory::OtherSymbol)
         << "U+2FFC was added in Unicode 15.1";
 }
+
+// ===========================================================================
+// #2336 — Numeric_Type / Numeric_Value, the second table SA-4 unlocks
+// ===========================================================================
+
+TEST(CharUnicodeInfoNumericTests, Fix2336_TheFindingsOwnRowsNowAgreeWithDotNet) {
+    // SR-AUD-173's own examples, which the header documented as answering -1 under the
+    // declared reduction. Each now answers what the finding said .NET answers.
+    EXPECT_EQ(CharUnicodeInfo::GetDecimalDigitValue(u'\u0665'), 5);   // ARABIC-INDIC DIGIT FIVE
+    EXPECT_DOUBLE_EQ(CharUnicodeInfo::GetNumericValue(u'\u216B'), 12.0);  // ROMAN NUMERAL TWELVE
+    EXPECT_NEAR(CharUnicodeInfo::GetNumericValue(u'\u2153'), 1.0 / 3.0, 1e-9);  // ONE THIRD
+
+    // The sixteen code points the reduction did cover are unchanged, which is what says this
+    // is a widening rather than a replacement.
+    for (char16_t c = u'0'; c <= u'9'; ++c) {
+        EXPECT_EQ(CharUnicodeInfo::GetDecimalDigitValue(c), c - u'0');
+        EXPECT_DOUBLE_EQ(CharUnicodeInfo::GetNumericValue(c), static_cast<double>(c - u'0'));
+    }
+    EXPECT_EQ(CharUnicodeInfo::GetDigitValue(u'\u00B9'), 1);
+    EXPECT_EQ(CharUnicodeInfo::GetDigitValue(u'\u00B2'), 2);
+    EXPECT_EQ(CharUnicodeInfo::GetDigitValue(u'\u00B3'), 3);
+    EXPECT_DOUBLE_EQ(CharUnicodeInfo::GetNumericValue(u'\u00BC'), 0.25);
+    EXPECT_DOUBLE_EQ(CharUnicodeInfo::GetNumericValue(u'\u00BD'), 0.5);
+    EXPECT_DOUBLE_EQ(CharUnicodeInfo::GetNumericValue(u'\u00BE'), 0.75);
+}
+
+TEST(CharUnicodeInfoNumericTests, Fix2336_DecimalAndDigitAreDifferentPropertiesNotOneBuiltOnTheOther) {
+    // They are two NIBBLES of the same table byte -- the high one and the low one
+    // (CharUnicodeInfo.cs:151, 185) -- so they are independent properties. The old code
+    // computed GetDigitValue as "decimal value, else three hard-coded superscripts", which
+    // happened to agree over the thirteen code points it covered and cannot in general.
+    //
+    // The superscripts are the discriminator: Numeric_Type is Digit, not Decimal.
+    for (char16_t c : {u'\u00B9', u'\u00B2', u'\u00B3'}) {
+        EXPECT_EQ(CharUnicodeInfo::GetDecimalDigitValue(c), -1) << "Numeric_Type is Digit";
+        EXPECT_NE(CharUnicodeInfo::GetDigitValue(c), -1);
+    }
+    // U+2460 CIRCLED DIGIT ONE is Numeric_Type=Digit in the same way, and was -1 for both
+    // before this ticket.
+    EXPECT_EQ(CharUnicodeInfo::GetDecimalDigitValue(u'\u2460'), -1);
+    EXPECT_EQ(CharUnicodeInfo::GetDigitValue(u'\u2460'), 1);
+    EXPECT_DOUBLE_EQ(CharUnicodeInfo::GetNumericValue(u'\u2460'), 1.0);
+
+    // ...and a Numeric_Type=Numeric character is neither: U+216B has a value but no digit.
+    EXPECT_EQ(CharUnicodeInfo::GetDecimalDigitValue(u'\u216B'), -1);
+    EXPECT_EQ(CharUnicodeInfo::GetDigitValue(u'\u216B'), -1);
+    EXPECT_DOUBLE_EQ(CharUnicodeInfo::GetNumericValue(u'\u216B'), 12.0);
+
+    // A decimal digit is all three, which is the row that fails if the nibbles are swapped.
+    EXPECT_EQ(CharUnicodeInfo::GetDecimalDigitValue(u'\u0665'), 5);
+    EXPECT_EQ(CharUnicodeInfo::GetDigitValue(u'\u0665'), 5);
+    EXPECT_DOUBLE_EQ(CharUnicodeInfo::GetNumericValue(u'\u0665'), 5.0);
+}
+
+TEST(CharUnicodeInfoNumericTests, Fix2336_TheRationalsAreRealRationals) {
+    // The reason the table is doubles and not a digit lookup, and the reason a "fraction
+    // table" of quarters and halves would not have done.
+    EXPECT_NEAR(CharUnicodeInfo::GetNumericValue(u'\u2153'), 1.0 / 3.0, 1e-9);   // 1/3
+    EXPECT_NEAR(CharUnicodeInfo::GetNumericValue(u'\u2154'), 2.0 / 3.0, 1e-9);   // 2/3
+    EXPECT_NEAR(CharUnicodeInfo::GetNumericValue(u'\u2159'), 1.0 / 6.0, 1e-9);   // 1/6
+    EXPECT_NEAR(CharUnicodeInfo::GetNumericValue(u'\u2150'), 1.0 / 7.0, 1e-9);   // 1/7
+    EXPECT_NEAR(CharUnicodeInfo::GetNumericValue(u'\u2151'), 1.0 / 9.0, 1e-9);   // 1/9
+    // The ONLY negative numeric value in the BMP, and the reason -1 cannot be the sentinel
+    // for "no value" in a naive reading: U+0F33 TIBETAN DIGIT HALF ZERO really is -0.5, so a
+    // caller must not test `value < 0`. It is -0.5 and not -1.0, so the sentinel survives --
+    // but only just, and that is worth an assertion rather than an assumption.
+    EXPECT_DOUBLE_EQ(CharUnicodeInfo::GetNumericValue(u'\u0F33'), -0.5);
+    // ...and U+2189 VULGAR FRACTION ZERO THIRDS is exactly 0.0, which a "nonzero means it has
+    // a value" test would get wrong in the other direction.
+    EXPECT_DOUBLE_EQ(CharUnicodeInfo::GetNumericValue(u'\u2189'), 0.0);
+    // Large values, where a byte-sized digit table would have been impossible.
+    EXPECT_DOUBLE_EQ(CharUnicodeInfo::GetNumericValue(u'\u4EBF'), -1.0)
+        << "CJK ideographs carry Unihan values .NET's table deliberately omits";
+    EXPECT_DOUBLE_EQ(CharUnicodeInfo::GetNumericValue(u'\u2188'), 100000.0);  // ROMAN 100000
+}
+
+TEST(CharUnicodeInfoNumericTests, Fix2336_TheCountsAndTheCorporaCrossCheck) {
+    // SA-4's cross-check for this table. Counts over the BMP, since these overloads take a
+    // charcs; the whole-code-space figures are in docs/Migration-UnicodeNumericTable.md.
+    int decimals = 0, digits = 0, numerics = 0;
+    for (int cp = 0; cp <= 0xFFFF; ++cp) {
+        const auto c = static_cast<SharpRuntime::charcs>(cp);
+        if (CharUnicodeInfo::GetDecimalDigitValue(c) != -1) ++decimals;
+        if (CharUnicodeInfo::GetDigitValue(c) != -1) ++digits;
+        if (CharUnicodeInfo::GetNumericValue(c) != -1.0) ++numerics;
+    }
+    // Decimal is a subset of Digit is a subset of Numeric -- a structural property of
+    // Numeric_Type that no single row can express, and one an off-by-one nibble breaks.
+    EXPECT_LE(decimals, digits);
+    EXPECT_LE(digits, numerics);
+    EXPECT_EQ(decimals, 370);
+    EXPECT_EQ(digits, 465);
+    EXPECT_EQ(numerics, 742);
+
+    // Every value is in range: a decimal digit is 0-9, a digit is 0-9.
+    for (int cp = 0; cp <= 0xFFFF; ++cp) {
+        const auto c = static_cast<SharpRuntime::charcs>(cp);
+        const auto d = CharUnicodeInfo::GetDecimalDigitValue(c);
+        const auto g = CharUnicodeInfo::GetDigitValue(c);
+        ASSERT_TRUE(d == -1 || (d >= 0 && d <= 9)) << "U+" << std::hex << cp << " decimal " << d;
+        ASSERT_TRUE(g == -1 || (g >= 0 && g <= 9)) << "U+" << std::hex << cp << " digit " << g;
+    }
+}

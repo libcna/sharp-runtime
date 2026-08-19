@@ -3,7 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 //
 // GENERATED FILE -- DO NOT EDIT BY HAND.
-// Regenerate with scripts/gen_unicode_category_table.py; verify with its --check.
+// Ticket #2315. Regenerate with scripts/gen_unicode_tables.py; verify with its --check.
 //
 // Unicode version: UCD 16.0, pinned by docs/StandingApprovals.md SA-4 until an
 // explicit bump ticket. Derived from .NET's own generated CharUnicodeInfoData.cs, which
@@ -18,7 +18,7 @@
 
 namespace System::Globalization::detail {
 
-/** @brief The UCD version this table was generated from. Pinned by SA-4. */
+/** @brief The UCD version these tables were generated from. Pinned by SA-4. */
 inline constexpr const char* kUnicodeVersion = "16.0";
 
 /** @brief .NET's `CategoryCasingLevel1Index`, transcribed. 2176 bytes. */
