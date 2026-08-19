@@ -897,11 +897,27 @@ TEST(StringNormalizationExtensionsTests, Normalize_EmptyString) {
     EXPECT_EQ(System::StringNormalizationExtensions::Normalize(""), "");
 }
 
-// --- SR-AUD-182 gated-behaviour pins (ticket #2337). Every test above uses ASCII or
-// the empty string, so all of them pass identically before and after real Unicode
-// normalization lands: the divergence had no pin at all. These four record it, so a
-// future normalization implementation cannot change it silently. They are statements
-// about the CURRENT stub, and each must be inverted by the repair (#2338).
+// --- SR-AUD-182 pins (ticket #2337), THREE OF THEM RE-FRAMED AND ONE INVERTED by #2386.
+//
+// #2337 wrote these as statements about "the CURRENT stub", each of which "must be inverted
+// by the repair (#2338)". Measured against /rv/tmp/runtime, that framing is wrong for three
+// of the four: returning true and returning the argument unchanged is exactly what .NET does
+// in invariant globalization mode, and says so in a comment --
+//
+//     // In Invariant mode we assume all characters are normalized because we don't
+//     // support any linguistic operations on strings.
+//     if (GlobalizationMode.Invariant || Ascii.IsValid(source)) { return true; }
+//                                                     Normalization.cs:11-20, 27-40
+//
+// -- so the three below are a DECLARED DEVIATION with the reference behind it, not a stub
+// awaiting repair. .NET has no normalization tables at all; it delegates to ICU or NLS, and
+// SA-4's source of record contains zero normalization data. Whether this port should acquire
+// a data source SA-4 does not grant, plus a UAX #15 implementation, is ticket #2338 and is a
+// user decision.
+//
+// The fourth pin IS inverted, because its half never depended on any of that:
+// CheckNormalizationForm runs BEFORE the invariant shortcut, so .NET rejects an undefined
+// form on every platform and in every mode.
 
 TEST(StringNormalizationExtensionsTests, Pin_DecomposedTextIsReportedNormalizedForFormC) {
     // "e" + U+0301 COMBINING ACUTE ACCENT, UTF-8 65 CC 81. .NET answers false for FormC
@@ -936,12 +952,75 @@ TEST(StringNormalizationExtensionsTests, Pin_CompatibilityFormsAreNoOpsToo) {
     }
 }
 
-TEST(StringNormalizationExtensionsTests, Pin_AnUndefinedNormalizationFormIsAccepted) {
-    // .NET reports an argument error for a form value that is not one of the four; the
-    // stub ignores the argument entirely, so an undefined value succeeds like any other.
+TEST(StringNormalizationExtensionsTests, Fix2386_AnUndefinedNormalizationFormIsRejected) {
+    // INVERTED by #2386. The form check is Normalization.cs:88-97 and runs before anything
+    // else, so it holds in invariant mode too -- which is why this half could land while the
+    // normalization itself stays open.
     const auto bogus = static_cast<System::Text::NormalizationForm>(0x1234);
-    EXPECT_TRUE(System::StringNormalizationExtensions::IsNormalized("abc", bogus));
-    EXPECT_EQ(System::StringNormalizationExtensions::Normalize("abc", bogus), "abc");
+    EXPECT_THROW((void)System::StringNormalizationExtensions::IsNormalized("abc", bogus),
+                 System::ArgumentException);
+    EXPECT_THROW((void)System::StringNormalizationExtensions::Normalize("abc", bogus),
+                 System::ArgumentException);
+
+    // THE VALUES 3 AND 4 ARE HOLES IN THE ENUM (FormC=1, FormD=2, FormKC=5, FormKD=6), so an
+    // undefined value is not merely one outside the range and a bounds check would accept two
+    // of them. This is the row that fails if the four-way test becomes `form >= 1 && form <= 6`.
+    for (int raw : {0, 3, 4, 7, -1, 0x7FFFFFFF}) {
+        const auto form = static_cast<System::Text::NormalizationForm>(raw);
+        EXPECT_THROW((void)System::StringNormalizationExtensions::IsNormalized("abc", form),
+                     System::ArgumentException) << "raw form value " << raw;
+        EXPECT_THROW((void)System::StringNormalizationExtensions::Normalize("abc", form),
+                     System::ArgumentException) << "raw form value " << raw;
+    }
+
+    // All four defined values are accepted, or the check above would be satisfied by a
+    // function that rejects everything.
+    for (auto form : {System::Text::NormalizationForm::FormC,
+                      System::Text::NormalizationForm::FormD,
+                      System::Text::NormalizationForm::FormKC,
+                      System::Text::NormalizationForm::FormKD}) {
+        EXPECT_NO_THROW((void)System::StringNormalizationExtensions::IsNormalized("abc", form));
+        EXPECT_NO_THROW((void)System::StringNormalizationExtensions::Normalize("abc", form));
+    }
+
+    // The message and parameter name are .NET's, transcribed rather than paraphrased.
+    try {
+        (void)System::StringNormalizationExtensions::Normalize("abc", bogus);
+        ADD_FAILURE() << "an undefined form was accepted";
+    } catch (const System::ArgumentException& e) {
+        const std::string what = e.what();
+        EXPECT_NE(what.find("Invalid or unsupported normalization form."), std::string::npos)
+            << what;
+        // nameof(normalizationForm), NOT this port's own parameter spelling "form".
+        EXPECT_NE(what.find("Parameter 'normalizationForm'"), std::string::npos) << what;
+    }
+}
+
+TEST(StringNormalizationExtensionsTests, Decl2386_TheNoOpBehaviourIsDotNetsInvariantModeNotAStub) {
+    // The declaration, asserted rather than left in prose. The default overloads must reach
+    // the same answers as the explicit FormC ones, which is what says the two-argument form is
+    // the whole implementation and the one-argument one adds nothing.
+    const std::string decomposed = "\x65\xCC\x81";   // "e" + U+0301
+    EXPECT_EQ(System::StringNormalizationExtensions::IsNormalized(decomposed),
+              System::StringNormalizationExtensions::IsNormalized(
+                  decomposed, System::Text::NormalizationForm::FormC));
+    EXPECT_EQ(System::StringNormalizationExtensions::Normalize(decomposed),
+              System::StringNormalizationExtensions::Normalize(
+                  decomposed, System::Text::NormalizationForm::FormC));
+
+    // Normalize is the IDENTITY, byte for byte, including for input that is not valid UTF-8 --
+    // .NET's invariant path is `return strInput;` with no inspection at all, so a decoder here
+    // would be inventing a failure mode the reference does not have.
+    for (const std::string& input : {std::string("hello"), std::string(""), decomposed,
+                                     std::string("\xFF\xFE"), std::string("\x00\x01", 2)}) {
+        for (auto form : {System::Text::NormalizationForm::FormC,
+                          System::Text::NormalizationForm::FormD,
+                          System::Text::NormalizationForm::FormKC,
+                          System::Text::NormalizationForm::FormKD}) {
+            EXPECT_EQ(System::StringNormalizationExtensions::Normalize(input, form), input);
+            EXPECT_TRUE(System::StringNormalizationExtensions::IsNormalized(input, form));
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
