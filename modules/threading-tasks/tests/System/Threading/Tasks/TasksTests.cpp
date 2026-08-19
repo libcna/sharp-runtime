@@ -1271,7 +1271,7 @@ TEST(ParallelTests, For_EmptyRange_IsCompleted) {
 TEST(ParallelTests, For_WithOptions_ExecutesAll) {
     std::atomic<int> count{0};
     ParallelOptions opts;
-    opts.MaxDegreeOfParallelism = 2;
+    opts.setMaxDegreeOfParallelismProperty(2);
     auto result = Parallel::For(0, 4, opts, [&count](int) { ++count; });
     EXPECT_EQ(count.load(), 4);
     EXPECT_TRUE(result.getIsCompletedProperty());

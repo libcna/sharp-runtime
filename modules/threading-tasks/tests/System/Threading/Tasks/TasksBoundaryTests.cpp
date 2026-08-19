@@ -382,11 +382,20 @@ namespace {
 
     ParallelLoopResult runForWithDegree(intcs degree, intcs iterations, std::atomic<intcs>& ran) {
         ParallelOptions opts;
-        opts.MaxDegreeOfParallelism = degree;
+        opts.setMaxDegreeOfParallelismProperty(degree);
         return Parallel::For(0, iterations, opts,
                              std::function<void(intcs)>([&](intcs) { ++ran; }));
     }
 
+    // #2388 MOVED THE POINT OF REJECTION, and this helper moved with it rather than being left
+    // to pass for the wrong reason. #1966 could only validate at the entry of Parallel::For,
+    // because the degree was a public data member with nowhere to put a check; the guard now
+    // lives in the setter, where .NET has it, so an invalid degree is refused at ASSIGNMENT and
+    // can never reach a loop at all.
+    //
+    // The "ran 0 iterations" half is kept and is now trivially true -- no loop is ever started.
+    // That is the stronger property, and it is .NET's: there, too, an invalid degree cannot be
+    // handed to Parallel.For, because ParallelOptions will not hold one.
     void expectDegreeRejected(intcs degree) {
         std::atomic<intcs> ran{0};
         bool threw = false;
@@ -399,7 +408,6 @@ namespace {
                 << "message was: " << e.getMessageProperty();
         }
         EXPECT_TRUE(threw) << "degree " << degree << " should have been rejected";
-        // No-partial-state: an invalid option runs NO body at all.
         EXPECT_EQ(ran.load(), 0) << "degree " << degree << " ran " << ran.load() << " iterations";
     }
 
@@ -436,7 +444,7 @@ TEST(ParallelDegreeBoundaryTests, DegreeOne_IsHonouredExactly) {
     std::atomic<intcs> peak{0};
     std::atomic<intcs> ran{0};
     ParallelOptions opts;
-    opts.MaxDegreeOfParallelism = 1;
+    opts.setMaxDegreeOfParallelismProperty(1);
     ParallelLoopResult result =
         Parallel::For(0, 12, opts, std::function<void(intcs)>([&](intcs) {
             ++ran;
@@ -458,13 +466,24 @@ TEST(ParallelDegreeBoundaryTests, DegreeAboveCoreCount_IsAcceptedAndRunsEveryIte
     EXPECT_EQ(ran.load(), 16);
 }
 
-// The degree error must win over #1965's body error: .NET rejects the invalid degree in the
-// ParallelOptions setter, which runs before Parallel.For is even called.
-TEST(ParallelDegreeBoundaryTests, InvalidDegreeAndEmptyBody_ReportsDegreeFirst) {
+// #1966 asserted that the degree error WINS OVER #1965's body error, because .NET rejects the
+// invalid degree in the ParallelOptions setter, which runs before Parallel.For is even called.
+// #2388 put the guard in the setter, so there is no longer an ordering to assert: the invalid
+// degree cannot reach Parallel::For at all, which is the situation .NET is actually in. Asserting
+// the old ordering here would now pass for the wrong reason -- the throw would come from the
+// assignment, outside the EXPECT_THROW, exactly the trap #2359 hit.
+TEST(ParallelDegreeBoundaryTests, Fix2388_AnInvalidDegreeCannotReachParallelForAtAll) {
     ParallelOptions opts;
-    opts.MaxDegreeOfParallelism = 0;
-    EXPECT_THROW((void)Parallel::For(0, 4, opts, kEmptyBody),
+    EXPECT_THROW(opts.setMaxDegreeOfParallelismProperty(0),
                  System::ArgumentOutOfRangeException);
+
+    // The rejected assignment left the previous value in place, so the options object is still
+    // usable and the loop runs -- there is no half-applied state to trip over.
+    EXPECT_EQ(opts.getMaxDegreeOfParallelismProperty(), -1);
+    std::atomic<intcs> ran{0};
+    EXPECT_TRUE(Parallel::For(0, 4, opts, std::function<void(intcs)>([&](intcs) { ++ran; }))
+                    .getIsCompletedProperty());
+    EXPECT_EQ(ran.load(), 4);
 }
 
 // The four overloads that take no options are untouched by this ticket.
@@ -488,12 +507,59 @@ TEST(ParallelDegreeBoundaryTests, OverloadsWithoutOptions_AreUnchanged) {
 }
 
 TEST(ParallelDegreeBoundaryTests, Rejection_IsCatchableAsArgumentException) {
+    // #2388: the rejection moved from Parallel::For to the setter, so the call under test moved
+    // with it.
     ParallelOptions opts;
-    opts.MaxDegreeOfParallelism = 0;
-    const auto call = [&] {
-        (void)Parallel::For(0, 4, opts, std::function<void(intcs)>([](intcs) { }));
-    };
+    const auto call = [&] { opts.setMaxDegreeOfParallelismProperty(0); };
     EXPECT_THROW(call(), System::ArgumentOutOfRangeException);
     EXPECT_THROW(call(), System::ArgumentException);
     EXPECT_THROW(call(), System::Exception);
+}
+
+// =============================================================================================
+// #2388 — the MaxDegreeOfParallelism guard moved into the setter, where .NET has it.
+//
+// #1966 landed the same validation at the entry of every Parallel method, because the degree was
+// a public mutable data member with nowhere to put a check, and recorded that as a forced choice
+// awaiting an approval. SA-8 granted it and #1969 landed the identical change for
+// BoundedChannelOptions::FullMode; this is the ParallelOptions half.
+// =============================================================================================
+
+TEST(ParallelOptionsSetterTests, Fix2388_TheDefaultIsMinusOne) {
+    EXPECT_EQ(ParallelOptions().getMaxDegreeOfParallelismProperty(), -1);
+}
+
+TEST(ParallelOptionsSetterTests, Fix2388_ZeroAndBelowMinusOneAreRejectedAtAssignment) {
+    for (intcs degree : {intcs{0}, intcs{-2}, intcs{-3}, SharpRuntime::INTCS_MIN}) {
+        ParallelOptions opts;
+        EXPECT_THROW(opts.setMaxDegreeOfParallelismProperty(degree),
+                     System::ArgumentOutOfRangeException)
+            << "degree " << degree;
+        EXPECT_EQ(opts.getMaxDegreeOfParallelismProperty(), -1)
+            << "a rejected assignment must not half-apply; degree " << degree;
+    }
+}
+
+TEST(ParallelOptionsSetterTests, Fix2388_MinusOneAndEveryPositiveAreAccepted) {
+    // -1 is the ONE valid negative, and the boundary either side of it is what a `< -1` guard
+    // written as `<= -1` or `< 0` would get wrong.
+    for (intcs degree : {intcs{-1}, intcs{1}, intcs{2}, intcs{64}, SharpRuntime::INTCS_MAX}) {
+        ParallelOptions opts;
+        ASSERT_NO_THROW(opts.setMaxDegreeOfParallelismProperty(degree)) << "degree " << degree;
+        EXPECT_EQ(opts.getMaxDegreeOfParallelismProperty(), degree);
+    }
+}
+
+TEST(ParallelOptionsSetterTests, Fix2388_TheParameterNameIsThePropertyNotValue) {
+    // .NET writes nameof(MaxDegreeOfParallelism) here (Parallel.cs:87-88) and nameof(value) in
+    // BoundedChannelOptions (ChannelOptions.cs:96). The reference is inconsistent between its two
+    // option types and both are transcribed as they are, so "harmonising" this onto #1969's
+    // "value" would be inventing a reference.
+    ParallelOptions opts;
+    try {
+        opts.setMaxDegreeOfParallelismProperty(0);
+        FAIL() << "0 must be rejected";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "MaxDegreeOfParallelism");
+    }
 }

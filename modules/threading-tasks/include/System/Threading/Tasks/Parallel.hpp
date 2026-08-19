@@ -29,34 +29,7 @@ namespace System::Threading::Tasks {
     /** @brief Stores options that configure the operation of methods on the Parallel class. */
     struct ParallelOptions {
         /**
-         * Maximum number of concurrent iterations; -1 (the default) means unlimited.
-         *
-         * @note **Valid values are -1 and every value greater than or equal to 1.** 0 and every
-         * value less than -1 are rejected with `System::ArgumentOutOfRangeException`
-         * (ticket #1966, SR-AUD-232).
-         *
-         * @note **Where the rejection happens differs from .NET, deliberately.** .NET validates
-         * in the `ParallelOptions.MaxDegreeOfParallelism` *setter*, so an invalid value can never
-         * be stored. This is a public mutable data member with nowhere to put a check, so the
-         * value is validated at the entry of every `Parallel` method that reads it, before any
-         * iteration is dispatched. The exception type and parameter name are .NET's; only the
-         * point of detection moves. Converting this field to a
-         * `getMaxDegreeOfParallelismProperty()`/`setMaxDegreeOfParallelismProperty()` pair would
-         * be a public source break for every consumer that writes `opts.MaxDegreeOfParallelism =
-         * …`, and is deliberately **not** done here.
-         *
-         * **That deferral is now the only thing left, and it has an approval.** The identical
-         * shape problem in `BoundedChannelOptions::FullMode` was approval-gated as ticket #1969,
-         * and #1969 **landed** on 2026-08-19 under `docs/StandingApprovals.md` SA-8, whose first
-         * bullet authorises exactly this conversion. Moving the guard here to a setter is ticket
-         * **#2388**.
-         *
-         * One detail #2388 must not "harmonise": this port's parameter name
-         * `"MaxDegreeOfParallelism"` is already correct — .NET writes
-         * `ArgumentOutOfRangeException.ThrowIfZero(value, nameof(MaxDegreeOfParallelism))`
-         * (`Parallel.cs:87-88`), where `BoundedChannelOptions` writes `nameof(value)`. The
-         * reference is inconsistent between its two option types, and both are transcribed as
-         * they are.
+         * @return The maximum number of concurrent iterations; -1 means unlimited.
          *
          * @note -1 keeps its documented "unlimited" meaning; this runtime realises it as
          * `std::thread::hardware_concurrency()`, which is what .NET's own default does. That is a
@@ -64,7 +37,48 @@ namespace System::Threading::Tasks {
          * build-resource-policy violation, which concerns build-job counts
          * (`docs/ThreadingTasksChannelsReviewPlan.md` §3.1 item 3).
          */
-        intcs MaxDegreeOfParallelism = -1;
+        [[nodiscard]] intcs getMaxDegreeOfParallelismProperty() const noexcept {
+            return maxDegreeOfParallelism_;
+        }
+
+        /**
+         * @brief Sets the maximum number of concurrent iterations.
+         * @param value -1 ("unlimited") or any value greater than or equal to 1.
+         * @throws System::ArgumentOutOfRangeException if @p value is 0 or less than -1
+         *         (parameter name `MaxDegreeOfParallelism`).
+         *
+         * Transcribed from .NET's setter (`Parallel.cs:85-90`), which is two guards in this
+         * order:
+         * @code
+         * ArgumentOutOfRangeException.ThrowIfZero(value, nameof(MaxDegreeOfParallelism));
+         * ArgumentOutOfRangeException.ThrowIfLessThan(value, -1, nameof(MaxDegreeOfParallelism));
+         * @endcode
+         *
+         * @note **The parameter name is the property, not "value"** — and that is .NET's own
+         * inconsistency rather than a slip here. `BoundedChannelOptions` writes `nameof(value)`
+         * in the same situation (`ChannelOptions.cs:96`). Both are transcribed as they are;
+         * harmonising them would be inventing a reference (#1969, #2388).
+         */
+        void setMaxDegreeOfParallelismProperty(intcs value) {
+            if (value == 0 || value < -1)
+                throw System::ArgumentOutOfRangeException("MaxDegreeOfParallelism");
+            maxDegreeOfParallelism_ = value;
+        }
+
+    private:
+        // PRIVATE, matching .NET's `private int _maxDegreeOfParallelism` (Parallel.cs:35).
+        //
+        // Ticket #1966 could not put the guard where .NET puts it, because this was a public
+        // mutable data member with nowhere to put a check; it validated at the entry of every
+        // Parallel method instead, and its doc-comment recorded that as a forced choice awaiting
+        // the approval #1969 was gated on. SA-8 granted it, #1969 landed the identical change for
+        // BoundedChannelOptions::FullMode on 2026-08-19, and this is #2388.
+        //
+        // The observable difference is real, not cosmetic: an invalid degree used to be STORED
+        // and survive until a loop ran, so a caller that assigned and never looped got no
+        // diagnostic at all, and one that assigned and read the value back read a number .NET
+        // would never have let it hold.
+        intcs maxDegreeOfParallelism_ = -1;
     };
 
     /**
@@ -211,6 +225,16 @@ namespace System::Threading::Tasks {
         // called and therefore before .NET's own `body` null check; putting the checks the other
         // way round would report the body error for a call .NET answers with the degree error.
         // Same shape as docs/ThreadingNamespaceReviewPlan.md 17.3's constraint on #1954.
+        // #2388 MOVED THE REAL GUARD INTO ParallelOptions::setMaxDegreeOfParallelismProperty,
+        // where .NET has it, so this one is now DEFENCE IN DEPTH and is UNREACHABLE through the
+        // public surface: the field is private, its only mutator validates, and the private
+        // member makes ParallelOptions a non-aggregate, so brace initialisation cannot reach it
+        // either. Its mutation is therefore an EQUIVALENCE and is recorded as one rather than
+        // counted as a caught mutation.
+        //
+        // It is kept rather than deleted because it costs one comparison per loop and is the
+        // only thing that would catch a future constructor or friend that sets the field without
+        // going through the setter.
         static void requireValidMaxDegreeOfParallelism(intcs maxDegree) {
             if (maxDegree == 0 || maxDegree < -1)
                 throw System::ArgumentOutOfRangeException("MaxDegreeOfParallelism");
@@ -234,7 +258,7 @@ namespace System::Threading::Tasks {
         /**
          * Executes a for loop in parallel, respecting MaxDegreeOfParallelism in @p opts.
          *
-         * @throws System::ArgumentOutOfRangeException if `opts.MaxDegreeOfParallelism` is 0 or
+         * @throws System::ArgumentOutOfRangeException if the degree is 0 or
          * less than -1 (parameter name `MaxDegreeOfParallelism`) — checked first, because .NET
          * rejects those values in the options setter, which runs before this call. No iteration
          * is dispatched when it throws.
@@ -242,13 +266,13 @@ namespace System::Threading::Tasks {
          */
         static ParallelLoopResult For(intcs fromInclusive, intcs toExclusive, const ParallelOptions& opts,
                                        std::function<void(intcs)> body) {
-            requireValidMaxDegreeOfParallelism(opts.MaxDegreeOfParallelism);
+            requireValidMaxDegreeOfParallelism(opts.getMaxDegreeOfParallelismProperty());
             requireNonEmptyBody(body);
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)fromInclusive; (void)toExclusive; (void)opts; (void)body;
             throw System::PlatformNotSupportedException("Parallel::For requires pthreads (not available in Emscripten single-threaded build)");
 #else
-            const intcs maxDeg = resolveMaxDegreeOfParallelism(opts.MaxDegreeOfParallelism);
+            const intcs maxDeg = resolveMaxDegreeOfParallelism(opts.getMaxDegreeOfParallelismProperty());
 
             std::vector<std::future<void>> futures;
             std::vector<std::exception_ptr> exceptions;
