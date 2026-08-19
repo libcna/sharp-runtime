@@ -19,4 +19,13 @@ sharp_runtime_register_module(
         Threading
         Threading.Tasks
         Uri
+    # Security.Cryptography.Random became a PRIVATE dependency with ticket #2401: the per-frame
+    # masking key must come from a CSPRNG (RFC 6455 section 5.3 -- "MUST be derived from a strong
+    # source of entropy"), and .NET spells that RandomNumberGenerator.Fill
+    # (ManagedWebSocket.cs:762-763). It is PRIVATE because the only caller is a file-local helper
+    # in ClientWebSocket.cpp, so no public header names the type and no consumer inherits the
+    # edge. The Sec-WebSocket-Key nonce needed no edge at all: .NET builds it from Guid.NewGuid()
+    # (WebSocketHandle.Managed.cs:490-494), and Core.Base is already public here.
+    PRIVATE_DEPENDENCIES
+        Security.Cryptography.Random
 )

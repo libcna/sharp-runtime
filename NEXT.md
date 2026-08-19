@@ -3,8 +3,8 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-19 — 17,627 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,627 run: 17,627 passed, 0 failed, 0 skipped**, recounted from the
+> **Test-count floor, 2026-08-19 — 17,629 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,629 run: 17,629 passed, 0 failed, 0 skipped**, recounted from the
 > per-executable logs with every executable run separately and continuing past failures, zero build
 > warnings at `--parallel 2`. Every checkpoint below this one ends with *"the gate is not green"*;
 > this one does not. Two of the three historical failure sources were environmental and are simply
@@ -28,15 +28,24 @@
 > could not have caught it** — two cases asserting `buffer.size()` after filling a buffer whose size
 > was fixed before the call, both of which pass against a generator that writes nothing.
 >
-> **That is the pattern worth carrying forward**: a module with no test sources is where an
-> undetected divergence survives, and a test that cannot fail is how it survives there. §4b lists
-> the two remaining candidates and says plainly which is and is not worth the measurement.
+> **#2401 — `ClientWebSocket`'s entropy.** Found by asking #2398's question **once more** rather
+> than by opening another module: *#2228 put a real CSPRNG behind `Guid::NewGuid` — what else needs
+> unpredictable bytes, and where does it get them?* `ClientWebSocket` drew **both** its
+> `Sec-WebSocket-Key` nonce and its **per-frame masking key** from `std::random_device`, which the
+> standard permits to be deterministic and which **`Random.cpp:69-70` already records as
+> deterministic on MinGW-w64**, a supported target. RFC 6455 §5.3 requires the mask to come from a
+> strong source of entropy by name.
 >
-> **BOTH WORK QUEUES ARE EMPTY AGAIN.** #2399 closed the same day it was filed (`RNGCryptoServiceProvider`
-> is now `final` and `[[deprecated]]`, with two of .NET's three missing constructors and the third
-> pinned as unreachable), and #2400 is its downstream record. `ticket` has **0 `todo`**; `task` has
-> **0** unclassified (14,979 ignored / 1,082 ported / 140 ignore). Ticket totals: **2,383 done, 9
-> blocked, 1 needs_user, 5 wontfix**. What remains *blocked* needs the user or an external event,
+> **Three patterns worth carrying forward, in order of yield.** (1) **Ask a repaired subsystem's
+> question of its neighbours** — that alone found #2398 and #2401. (2) **A module with no test
+> sources** is where an undetected divergence survives. (3) **A test that cannot fail** is how it
+> survives there: every defect these tickets found sat under one. §4b has the remaining candidates.
+>
+> **BOTH WORK QUEUES ARE EMPTY AGAIN.** Five tickets were filed and closed on 2026-08-19 by this
+> sweep — #2397, #2398, #2399, #2400 (downstream record) and #2401. `ticket` has **0 `todo`**;
+> `task` has **0** unclassified (14,979 ignored / 1,082 ported / 140 ignore). Ticket totals:
+> **2,384 done, 9 blocked, 1 needs_user, 5 wontfix**. Graph **41 / 94** (#2401 added one private
+> edge), negative fixtures **49 / 248** (#2399 added one). What remains *blocked* needs the user or an external event,
 > and each is itemised in §2 below. **§4b says where to look next, and the method that found all
 > three of today's tickets.**
 

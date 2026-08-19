@@ -116,6 +116,51 @@ std::pair<SharpRuntime::bytecs, std::string> readClientFrame(Socket& socket) {
     return {opcode, std::string(payload.begin(), payload.end())};
 }
 
+// #2401 needs the MASKING KEY itself, which readClientFrame() unmasks with and then discards.
+// This variant returns it. RFC 6455 section 5.3 requires a FRESH key per frame, and nothing in this
+// repository pinned that before.
+std::pair<std::array<SharpRuntime::bytecs, 4>, std::string> readClientFrameKeepingMask(Socket& socket) {
+    std::vector<SharpRuntime::bytecs> header(2);
+    EXPECT_EQ(socket.Receive(header), 2);
+    const bool masked = (header[1] & 0x80) != 0;
+    EXPECT_TRUE(masked) << "RFC 6455 section 5.1: a client MUST mask every frame it sends";
+    const uint64_t len = header[1] & 0x7F;
+    std::array<SharpRuntime::bytecs, 4> maskKey{};
+    std::vector<SharpRuntime::bytecs> maskBuf(4);
+    socket.Receive(maskBuf);
+    std::copy(maskBuf.begin(), maskBuf.end(), maskKey.begin());
+    std::vector<SharpRuntime::bytecs> payload(static_cast<size_t>(len));
+    size_t total = 0;
+    while (total < len) {
+        std::vector<SharpRuntime::bytecs> chunk(static_cast<size_t>(len) - total);
+        const SharpRuntime::intcs n = socket.Receive(chunk);
+        if (n <= 0) break;
+        std::memcpy(payload.data() + total, chunk.data(), static_cast<size_t>(n));
+        total += static_cast<size_t>(n);
+    }
+    for (size_t i = 0; i < payload.size(); ++i)
+        payload[i] = static_cast<SharpRuntime::bytecs>(payload[i] ^ maskKey[i % 4]);
+    return {maskKey, std::string(payload.begin(), payload.end())};
+}
+
+// Completes the handshake as a server would and returns the Sec-WebSocket-Key the client sent.
+std::string acceptHandshakeReturningClientKey(Socket& serverSocket) {
+    const std::string request = readUntilHeadersEnd(serverSocket);
+    const size_t keyPos = request.find("Sec-WebSocket-Key: ");
+    EXPECT_NE(keyPos, std::string::npos);
+    const size_t keyStart = keyPos + std::string("Sec-WebSocket-Key: ").size();
+    const size_t keyEnd = request.find("\r\n", keyStart);
+    const std::string key = request.substr(keyStart, keyEnd - keyStart);
+
+    const auto digest = testSha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+    const std::string accept =
+        System::Convert::ToBase64String(std::vector<SharpRuntime::bytecs>(digest.begin(), digest.end()));
+    serverSocket.Send(toBytes("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                              "Connection: Upgrade\r\nSec-WebSocket-Accept: " +
+                              accept + "\r\n\r\n"));
+    return key;
+}
+
 } // namespace
 
 TEST(ClientWebSocketTests, FullHandshakeSendReceiveClose) {
@@ -273,4 +318,124 @@ TEST(ClientWebSocketTests, AddSubProtocol_DuplicateDifferingOnlyByCase_Throws) {
     ClientWebSocket client;
     client.getOptionsProperty().AddSubProtocol("chat");
     EXPECT_THROW(client.getOptionsProperty().AddSubProtocol("Chat"), System::ArgumentException);
+}
+
+// ===========================================================================================
+// #2401 — the Sec-WebSocket-Key nonce and the per-frame masking key come from a CSPRNG
+//
+// Both used std::random_device, which the standard explicitly permits to be DETERMINISTIC and
+// which this repository has already measured to be so on a supported target: Random.cpp:69-70
+// records "on a platform whose random_device is deterministic (MinGW-w64's historically was)".
+// They now use .NET's own two routes -- Guid::NewGuid() for the nonce
+// (WebSocketHandle.Managed.cs:490-494) and RandomNumberGenerator::Fill for the mask
+// (ManagedWebSocket.cs:762-763), both of which reach the platform CSPRNG here.
+//
+// WHAT THESE CASES CAN AND CANNOT SEE, stated rather than implied. On glibc,
+// std::random_device reads /dev/urandom, so the SOURCE change is not behaviourally observable on
+// this platform; the evidence for it is the reference, RFC 6455 section 5.3, this repository's own
+// MinGW-w64 measurement, and symbol inspection showing std::random_device gone from the
+// translation unit. What these cases DO pin are the RFC properties themselves, which nothing
+// pinned before and which a plausible "optimisation" would break: a per-connection nonce and a
+// FRESH mask per frame.
+// ===========================================================================================
+
+TEST(ClientWebSocketTests, SecWebSocketKeyIsSixteenBytesAndDiffersPerConnection) {
+    auto oneConnection = [](std::string& keyOut) {
+        Socket listener(System::Net::Sockets::AddressFamily::InterNetwork,
+                         System::Net::Sockets::SocketType::Stream,
+                         System::Net::Sockets::ProtocolType::Tcp);
+        listener.Bind(IPEndPoint(IPAddress::Loopback, 0));
+        listener.Listen();
+        auto local = std::dynamic_pointer_cast<IPEndPoint>(listener.getLocalEndPointProperty());
+        ASSERT_NE(local, nullptr);
+        const SharpRuntime::intcs port = local->getPortProperty();
+
+        std::string captured;
+        std::thread serverThread([&]() {
+            auto serverSocket = listener.Accept();
+            captured = acceptHandshakeReturningClientKey(*serverSocket);
+            auto [closeOpcode, closePayload] = readClientFrame(*serverSocket);
+            EXPECT_EQ(closeOpcode, 0x8);
+            serverSocket->Send(buildServerFrame(0x8, closePayload));
+            serverSocket->Close();
+        });
+
+        ClientWebSocket client;
+        client.ConnectAsync(System::Uri("ws://127.0.0.1:" + std::to_string(port) + "/")).Wait();
+        client.CloseAsync(WebSocketCloseStatus::NormalClosure, "bye").Wait();
+        serverThread.join();
+        listener.Close();
+        keyOut = captured;
+    };
+
+    std::string first, second;
+    oneConnection(first);
+    oneConnection(second);
+
+    // RFC 6455 section 4.1: "a nonce consisting of a randomly selected 16-byte value that has been
+    // base64-encoded". 16 bytes base64-encode to exactly 24 characters.
+    ASSERT_EQ(first.size(), 24u) << "key=[" << first << "]";
+    ASSERT_EQ(second.size(), 24u) << "key=[" << second << "]";
+    EXPECT_EQ(System::Convert::FromBase64String(first).size(), 16u);
+    EXPECT_EQ(System::Convert::FromBase64String(second).size(), 16u);
+
+    // "The nonce MUST be selected randomly for each connection." A constant, a counter, or a
+    // process-lifetime cached key all satisfy every assertion above and fail this one.
+    EXPECT_NE(first, second)
+        << "two connections sent the SAME Sec-WebSocket-Key, so the nonce is not per-connection";
+}
+
+TEST(ClientWebSocketTests, EveryFrameGetsAFreshMaskingKey) {
+    Socket listener(System::Net::Sockets::AddressFamily::InterNetwork,
+                     System::Net::Sockets::SocketType::Stream,
+                     System::Net::Sockets::ProtocolType::Tcp);
+    listener.Bind(IPEndPoint(IPAddress::Loopback, 0));
+    listener.Listen();
+    auto local = std::dynamic_pointer_cast<IPEndPoint>(listener.getLocalEndPointProperty());
+    ASSERT_NE(local, nullptr);
+    const SharpRuntime::intcs port = local->getPortProperty();
+
+    constexpr int kFrames = 4;
+    std::vector<std::array<SharpRuntime::bytecs, 4>> masks;
+    std::thread serverThread([&]() {
+        auto serverSocket = listener.Accept();
+        acceptHandshakeReturningClientKey(*serverSocket);
+        for (int i = 0; i < kFrames; ++i) {
+            auto [mask, payload] = readClientFrameKeepingMask(*serverSocket);
+            EXPECT_EQ(payload, "hello") << "frame " << i << " did not unmask to its payload";
+            masks.push_back(mask);
+        }
+        auto [closeOpcode, closePayload] = readClientFrame(*serverSocket);
+        EXPECT_EQ(closeOpcode, 0x8);
+        serverSocket->Send(buildServerFrame(0x8, closePayload));
+        serverSocket->Close();
+    });
+
+    ClientWebSocket client;
+    client.ConnectAsync(System::Uri("ws://127.0.0.1:" + std::to_string(port) + "/")).Wait();
+    for (int i = 0; i < kFrames; ++i) {
+        std::vector<SharpRuntime::bytecs> buf = toBytes("hello");
+        client.SendAsync(buf, WebSocketMessageType::Text).Wait();
+    }
+    client.CloseAsync(WebSocketCloseStatus::NormalClosure, "bye").Wait();
+    serverThread.join();
+    listener.Close();
+
+    // RFC 6455 section 5.3: "the client MUST pick a fresh masking key from the set of allowed 32-bit
+    // values" for EVERY frame. Caching one key per connection is the plausible optimisation, and it
+    // passes every other assertion in this file -- the payloads still unmask correctly, because the
+    // client and the server agree on whatever key was sent.
+    ASSERT_EQ(masks.size(), static_cast<size_t>(kFrames));
+    for (size_t i = 0; i < masks.size(); ++i) {
+        for (size_t j = i + 1; j < masks.size(); ++j) {
+            EXPECT_NE(masks[i], masks[j])
+                << "frames " << i << " and " << j << " reused one masking key";
+        }
+    }
+
+    // A mask of all zeroes is a legal 32-bit value and an illegal source of entropy: it means
+    // masking was skipped while the frame still claims to be masked. Asserted separately because
+    // the freshness check above would still pass if only one frame were zeroed.
+    const std::array<SharpRuntime::bytecs, 4> zero{};
+    for (const auto& m : masks) EXPECT_NE(m, zero) << "a frame was masked with all zeroes";
 }

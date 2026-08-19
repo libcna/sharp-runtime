@@ -9,15 +9,16 @@
 #include <array>
 #include <cstring>
 #include <map>
-#include <random>
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Convert.hpp"
+#include "System/Guid.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/detail/ProtocolFieldValidation.hpp"
 #include "System/Net/WebSockets/WebSocketException.hpp"
 #include "System/PlatformNotSupportedException.hpp"
+#include "System/Security/Cryptography/RandomNumberGenerator.hpp"
 #include "System/Threading/Tasks/TaskCanceledException.hpp"
 #include <chrono>
 #include <condition_variable>
@@ -101,16 +102,41 @@ namespace {
 
     constexpr const char* kWebSocketGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-    std::array<bytecs, 16> randomBytes16() {
-        std::random_device rd;
-        std::array<bytecs, 16> bytes{};
-        for (auto& b : bytes) b = static_cast<bytecs>(rd() & 0xFF);
-        return bytes;
-    }
+    // BOTH OF THESE USED `std::random_device`, AND THAT IS A DEFECT RATHER THAN A STYLE POINT
+    // (#2401). The standard explicitly permits a deterministic `std::random_device`, and THIS
+    // REPOSITORY HAS ALREADY MEASURED ONE: `Random.cpp:69-70` records "on a platform whose
+    // random_device is deterministic (MinGW-w64's historically was)", and MinGW-w64 is a
+    // supported compile target of this project. On such a platform every connection would send
+    // the SAME Sec-WebSocket-Key and every frame's masking key would be predictable.
+    //
+    // RFC 6455 does not leave that to taste. Section 5.3: "The masking key needs to be
+    // unpredictable; thus, the masking key MUST be derived from a strong source of entropy, and
+    // the masking key for a given frame MUST NOT make it simple for a server/proxy to predict the
+    // masking key for a subsequent frame." Masking exists to stop cache-poisoning of
+    // intermediaries (RFC 6455 section 10.3), so a predictable key defeats the one attack it was
+    // introduced for.
+    //
+    // .NET USES A CSPRNG FOR BOTH, BY TWO DIFFERENT ROUTES, and each is transcribed as it stands
+    // rather than harmonised into one.
 
+    /// The Sec-WebSocket-Key nonce. `WebSocketHandle.Managed.cs:490-494` --
+    /// `Guid.NewGuid().TryWriteBytes(bytes)`, base64-encoded. Since #2228 this port's
+    /// `Guid::NewGuid()` draws from the platform CSPRNG, so this route costs no component edge:
+    /// `Core.Base` is already a public dependency. A v4 GUID fixes 6 of its 128 bits (version and
+    /// variant), so the nonce carries 122 bits of entropy rather than 128 -- which is .NET's own
+    /// arithmetic here, not a shortcut taken by this port.
+    std::array<bytecs, 16> randomBytes16() { return System::Guid::NewGuid().ToByteArray(); }
+
+    /// The per-frame masking key. `ManagedWebSocket.cs:762-763` -- `WriteRandomMask` is
+    /// `RandomNumberGenerator.Fill(buffer.AsSpan(offset, MaskLength))`. That is what the
+    /// `Security.Cryptography.Random` PRIVATE dependency buys; calling `getentropy()` directly from
+    /// here instead would be a third copy of the platform entropy call, which is the duplication
+    /// #2354 spent a ticket removing.
     uint32_t randomMaskingKey() {
-        std::random_device rd;
-        return rd();
+        std::vector<bytecs> key(4);
+        System::Security::Cryptography::RandomNumberGenerator::Fill(key);
+        return static_cast<uint32_t>(key[0]) | (static_cast<uint32_t>(key[1]) << 8) |
+               (static_cast<uint32_t>(key[2]) << 16) | (static_cast<uint32_t>(key[3]) << 24);
     }
 
 } // namespace

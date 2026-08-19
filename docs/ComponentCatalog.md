@@ -8,7 +8,7 @@ This file is generated from the CMake component registrations. Run
 `python3 scripts/generate_component_catalog.py` after changing module
 metadata, or use `--check` to verify that the committed catalogue is current.
 
-The graph contains **41 physical modules** and **93 direct production dependency edges**.
+The graph contains **41 physical modules** and **94 direct production dependency edges**.
 
 For each row, the component name and representative public header form a
 minimal consumer example using the template below:
@@ -63,7 +63,7 @@ for maintainers and are not part of the consumer include surface.
 | `Net.Mime` | `modules/net-mime` | static | `Collections.Core`, `Core.Base` | — | — | — | `System/Net/Mime/ContentType.hpp` |
 | `Net.NetworkInformation` | `modules/net-network-information` | static | `ComponentModel`, `Core.Base`, `Net`, `Threading.Tasks` | — | — | — | `System/Net/NetworkInformation/IPStatus.hpp` |
 | `Net.Security` | `modules/net-security` | interface | `Core.Base` | — | — | — | `System/Net/Security/AuthenticationLevel.hpp` |
-| `Net.WebSockets` | `modules/net-websockets` | static | `ComponentModel`, `Core.Base`, `Net`, `Net.Sockets`, `Threading`, `Threading.Tasks`, `Uri` | — | — | — | `System/Net/WebSockets/ClientWebSocket.hpp` |
+| `Net.WebSockets` | `modules/net-websockets` | static | `ComponentModel`, `Core.Base`, `Net`, `Net.Sockets`, `Threading`, `Threading.Tasks`, `Uri` | `Security.Cryptography.Random` | — | — | `System/Net/WebSockets/ClientWebSocket.hpp` |
 | `Security` | `modules/security` | interface | `Core.Base` | — | — | — | `System/Security/Authentication/AuthenticationException.hpp` |
 | `Security.Cryptography` | `modules/security-cryptography` | static | `Core.Base` | — | — | — | `System/Security/Cryptography/AuthenticationTagMismatchException.hpp` |
 | `Security.Cryptography.Random` | `modules/security-cryptography-random` | static | `Core.Base` | — | — | `bcrypt` on Windows (private) | `System/Security/Cryptography/RNGCryptoServiceProvider.hpp` |
