@@ -212,8 +212,28 @@ void Process::reapIfNeeded(Impl& impl) {
         impl.exitCode = WIFEXITED(status) ? WEXITSTATUS(status)
                        : WIFSIGNALED(status) ? (128 + WTERMSIG(status))
                        : -1;
-        if (impl.stdoutReader.joinable()) impl.stdoutReader.join();
-        if (impl.stderrReader.joinable()) impl.stderrReader.join();
+        // #2032: the reader join is GONE from here, and that is the whole repair.
+        //
+        // A reader cannot return until the pipe reaches EOF, and EOF needs EVERY holder of the
+        // write end to close it -- including a grandchild that inherited it. `dash -c 'sleep 30'`
+        // FORKS rather than exec's, so Kill() terminated only dash and this join then waited for
+        // the grandchild: measured, `WaitForExit(5000)` returned true after 29,951 ms, roughly
+        // 6x its own declared bound and unbounded in general. #2033 measured that the same join
+        // is reached from five public doors, six counting getExitCodeProperty().
+        //
+        // .NET waits for the streams in exactly ONE place and says why in a comment:
+        //
+        //     if (exited && milliseconds == Timeout.Infinite) // if we have a hard timeout, we
+        //     {                                               // cannot wait for the streams
+        //         _output?.EOF.GetAwaiter().GetResult();
+        //         _error?.EOF.GetAwaiter().GetResult();
+        //     }
+        //                                    Process.Unix.cs, WaitForExitCore
+        //
+        // -- so reaping the CHILD and waiting for its OUTPUT are two different things, and only
+        // the unbounded overload does both. `HasExited`, `ExitCode` and `Kill` wait for neither.
+        // The readers are still joined by ~Impl, bounded by `readersStopping` (#2029), so
+        // nothing is leaked or detached.
     }
 }
 #endif
@@ -518,6 +538,9 @@ void Process::WaitForExit() {
                          : WIFSIGNALED(status) ? (128 + WTERMSIG(status))
                          : -1;
     }
+    // #2032: THE one place .NET waits for the output streams, and this overload is
+    // `WaitForExit(Timeout.Infinite)` in .NET too (`Process.cs`). Having no deadline, it is the
+    // only one that CAN wait for a pipe whose write end an inherited grandchild may still hold.
     if (impl_->stdoutReader.joinable()) impl_->stdoutReader.join();
     if (impl_->stderrReader.joinable()) impl_->stderrReader.join();
 #else

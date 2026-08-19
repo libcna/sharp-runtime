@@ -4,12 +4,16 @@
 //
 // Ticket #2033 -- PINS for the reader-thread join, which is reached from FIVE public doors.
 //
-// Every test in this file asserts behaviour that is KNOWN TO BE WRONG and is deliberately left
-// unrepaired because repairing it means choosing what a pipe-reader thread that cannot finish
-// should do -- join it (today, unbounded), detach it, or abandon the descriptor. That choice is
-// the policy ticket #2029 gates (docs/SystemDiagnosticsNamespaceReviewPlan.md section 14.1), and
-// ticket #2032 records its most visible consequence: WaitForExit(milliseconds) exceeding its own
-// bound. NOTHING HERE IMPLEMENTS OR AUTHORISES EITHER.
+// #2032 LANDED 2026-08-19 and inverted three of the four pins below. The file's original text
+// follows, because the measurements in it are what made the repair checkable.
+//
+// The choice this file said had to be made -- join the reader, detach it, or abandon the
+// descriptor -- turned out to be a FALSE TRICHOTOMY, and the reference says so. Reaping the CHILD
+// and waiting for its OUTPUT are two different things, and .NET does the second in exactly one
+// place: `WaitForExitCore` waits for `_output.EOF` only when `milliseconds == Timeout.Infinite`,
+// with the comment "if we have a hard timeout, we cannot wait for the streams". So the readers are
+// neither detached nor abandoned -- they are simply not waited for by doors that have a deadline
+// or no stream contract, and ~Impl still joins them, bounded by #2029's stop flag.
 //
 // Why this file exists separately from ProcessGatedBehaviourPinTests.cpp: #2032 and the header
 // both named only WaitForExit(intcs). Measured 2026-08-04 against an 8 s grandchild holding the
@@ -83,9 +87,8 @@ long elapsedMsSince(std::chrono::steady_clock::time_point start) {
 
 } // namespace
 
-// PIN FOR BLOCKED TICKETS #2032 / #2029. WaitForExit(milliseconds) exceeds its own declared bound
-// because reaping the child joins the readers. This is #2032's own shape at a smaller scale.
-TEST(ProcessReaderJoinBlockingPinTests, Pin2032_WaitForExitTimeoutIsExceededBehindAGrandchild) {
+// INVERTED by #2032. WaitForExit(milliseconds) honours its own declared bound.
+TEST(ProcessReaderJoinBlockingPinTests, Fix2032_WaitForExitTimeoutIsHonouredBehindAGrandchild) {
     Process process = Process::Start(grandchildHoldsThePipe());
     killDirectChildAndSettle(process);
 
@@ -93,16 +96,17 @@ TEST(ProcessReaderJoinBlockingPinTests, Pin2032_WaitForExitTimeoutIsExceededBehi
     const bool exited = process.WaitForExit(200);
     const long blockedMs = elapsedMsSince(started);
 
+    // The child really has exited -- the bound is honoured by not waiting for its OUTPUT, not by
+    // failing to observe its exit.
     EXPECT_TRUE(exited);
-    EXPECT_GE(blockedMs, kBlockedFloorMs)
-        << "WaitForExit(200) honoured its bound -- #2032/#2029 appear to have landed; retire this pin";
+    EXPECT_LT(blockedMs, kBlockedFloorMs)
+        << "WaitForExit(200) blocked for " << blockedMs << " ms behind the grandchild";
 }
 
-// PIN FOR BLOCKED TICKETS #2032 / #2029, on a door #2032 does not name. getHasExitedProperty() is
-// documented as reading whether the process has terminated and takes no timeout at all, so unlike
-// WaitForExit(ms) it has no bound to exceed -- it simply blocks for as long as a descendant holds
-// the pipe.
-TEST(ProcessReaderJoinBlockingPinTests, Pin2033_HasExitedBlocksBehindAGrandchild) {
+// INVERTED by #2032, on a door #2032 did not name -- #2033 measured that the same join was
+// reached from five. .NET's HasExited waits for no stream at all, so this door had no business
+// blocking on one.
+TEST(ProcessReaderJoinBlockingPinTests, Fix2032_HasExitedDoesNotBlockBehindAGrandchild) {
     Process process = Process::Start(grandchildHoldsThePipe());
     killDirectChildAndSettle(process);
 
@@ -111,15 +115,13 @@ TEST(ProcessReaderJoinBlockingPinTests, Pin2033_HasExitedBlocksBehindAGrandchild
     const long blockedMs = elapsedMsSince(started);
 
     EXPECT_TRUE(exited);
-    EXPECT_GE(blockedMs, kBlockedFloorMs)
-        << "getHasExitedProperty() returned promptly -- the reader-join policy (#2029) appears to "
-           "have landed; retire this pin";
+    EXPECT_LT(blockedMs, kBlockedFloorMs)
+        << "getHasExitedProperty() blocked for " << blockedMs << " ms";
 }
 
-// PIN FOR BLOCKED TICKETS #2032 / #2029, second unnamed door. Kill() is documented as immediately
-// stopping the process; it first observes whether the child has already exited, which reaps it and
-// joins the readers.
-TEST(ProcessReaderJoinBlockingPinTests, Pin2033_KillBlocksBehindAGrandchild) {
+// INVERTED by #2032, second unnamed door. Kill() is documented as IMMEDIATELY stopping the
+// process, and .NET's waits for no stream either.
+TEST(ProcessReaderJoinBlockingPinTests, Fix2032_KillDoesNotBlockBehindAGrandchild) {
     Process process = Process::Start(grandchildHoldsThePipe());
     killDirectChildAndSettle(process);
 
@@ -127,14 +129,61 @@ TEST(ProcessReaderJoinBlockingPinTests, Pin2033_KillBlocksBehindAGrandchild) {
     process.Kill();
     const long blockedMs = elapsedMsSince(started);
 
-    EXPECT_GE(blockedMs, kBlockedFloorMs)
-        << "Kill() returned promptly -- the reader-join policy (#2029) appears to have landed; "
-           "retire this pin";
+    EXPECT_LT(blockedMs, kBlockedFloorMs) << "Kill() blocked for " << blockedMs << " ms";
 }
 
-// PIN FOR BLOCKED TICKETS #2032 / #2029, third unnamed door. #2025's restart preamble resolves the
-// previous child's readers before assigning over the std::thread, so a restart inherits the same
-// unbounded wait. The restart itself is correct and must keep working -- only its duration is pinned.
+// THE TIMEOUT-EXPIRY PATH, which the case above does NOT reach: when the child has already
+// exited, WaitForExit(ms) returns from its early `if (hasExited) return true`. The fall-through
+// after the deadline is a different statement, and a mutation that joins the readers THERE went
+// uncaught until this case existed. Here the child is still running, so the call must time out
+// and return false without waiting for anything.
+TEST(ProcessReaderJoinBlockingPinTests, Fix2032_AnExpiredTimeoutReturnsWithoutJoiningEither) {
+    Process process = Process::Start(grandchildHoldsThePipe());
+
+    const auto started = std::chrono::steady_clock::now();
+    const bool exited = process.WaitForExit(200);
+    const long blockedMs = elapsedMsSince(started);
+
+    EXPECT_FALSE(exited) << "the child should still be running";
+    EXPECT_LT(blockedMs, kBlockedFloorMs)
+        << "an expired WaitForExit(200) blocked for " << blockedMs << " ms";
+
+    process.Kill();
+    process.WaitForExit();
+}
+
+// THE OTHER HALF, and the reason this is a repair rather than a removal: the ONE door that has no
+// deadline still waits for the output, so a caller who wants the complete output can still get it.
+// That is .NET's rule exactly -- `WaitForExitCore` waits for `_output.EOF` only when
+// `milliseconds == Timeout.Infinite`, with the comment "if we have a hard timeout, we cannot wait
+// for the streams".
+TEST(ProcessReaderJoinBlockingPinTests, Fix2032_TheUnboundedOverloadStillWaitsForTheOutput) {
+    // HONEST NOTE ON WHAT THIS CASE DOES AND DOES NOT CATCH. It states the contract -- the
+    // unbounded overload waits for the output -- and it does NOT discriminate a mutation that
+    // removes that join: measured, the reader drains 16 KiB well before waitpid() reports the
+    // exit, so the output is complete either way. The mutation IS caught, by seven other tests
+    // including five `ZZZ_NoZombieChildrenRemain` checks and
+    // ProcessForkSafetyTests.StartsWithEnvironmentWhileReaderThreadsAreLive, which is the
+    // evidence that the join is load-bearing. This case is kept because it is the only place the
+    // CONTRACT is written down, not because it is the mutation's detector.
+    ProcessStartInfo startInfo("/bin/sh");
+    startInfo.getArgumentListProperty().push_back("-c");
+    startInfo.getArgumentListProperty().push_back(
+        "i=0; while [ $i -lt 400 ]; do printf '0123456789012345678901234567890123456789'; "
+        "i=$((i+1)); done");
+    startInfo.setRedirectStandardOutputProperty(true);
+
+    Process process = Process::Start(startInfo);
+    process.WaitForExit();
+    // Complete, because the unbounded overload joined the reader.
+    EXPECT_EQ(process.getStandardOutputTextProperty().size(), 400u * 40u);
+}
+
+// STILL PINNED, and deliberately: the restart is the one door whose join #2032 does NOT remove.
+// #2025's restart preamble resolves the previous child's readers before assigning over the
+// std::thread, and in C++ assigning to a JOINABLE std::thread calls std::terminate -- so this join
+// is structurally required by the language, not by a policy choice. .NET has no counterpart: its
+// Process.Start on a live object does not reuse the reader machinery this port must.
 TEST(ProcessReaderJoinBlockingPinTests, Pin2033_RestartBlocksBehindAGrandchild) {
     Process process = Process::Start(grandchildHoldsThePipe());
     killDirectChildAndSettle(process);
