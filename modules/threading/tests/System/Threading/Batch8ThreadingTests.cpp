@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <type_traits>
 #include <atomic>
 #include <stdexcept>
 #include "System/Threading/ApartmentState.hpp"
@@ -271,16 +272,38 @@ TEST(ThreadStartExceptionTests, DefaultCtor_WhatNotEmpty) {
     EXPECT_FALSE(std::string(ex.what()).empty());
 }
 
-TEST(ThreadStartExceptionTests, MessageCtor_WhatContainsMessage) {
-    ThreadStartException ex("start failed");
-    EXPECT_NE(std::string(ex.what()).find("start failed"), std::string::npos);
+// #1958/SR-AUD-196: the two message-taking constructors are GONE. .NET's type has exactly two
+// constructors and both pass the fixed SR.Arg_ThreadStartException, "Thread failed to start."
+// (ThreadStartException.cs:13-24) -- it has no message-taking constructor at all, so
+// ThreadStartException("anything") produced an exception .NET can never produce while still
+// claiming COR_E_THREADSTART. The two cases that asserted a caller-supplied message are replaced
+// by these, which assert the fixed message and the surviving reason-taking constructor.
+
+TEST(ThreadStartExceptionTests, Fix1958_TheMessageIsFixedAndNotSuppliable) {
+    ThreadStartException ex;
+    EXPECT_EQ(std::string(ex.what()), "Thread failed to start.");
+    static_assert(!std::is_constructible_v<ThreadStartException, std::string>,
+                  "#1958/SR-AUD-196: .NET has no message-taking ThreadStartException constructor");
+    static_assert(!std::is_constructible_v<ThreadStartException, const char*>,
+                  "#1958/SR-AUD-196: nor one reachable through a string literal");
+    static_assert(!std::is_constructible_v<ThreadStartException, std::string, std::exception_ptr>,
+                  "#1958/SR-AUD-196: nor a (message, inner) pair");
 }
 
-TEST(ThreadStartExceptionTests, InnerExceptionCtor_WhatContainsBoth) {
+TEST(ThreadStartExceptionTests, Fix1958_TheReasonCtorKeepsTheFixedMessage) {
+    // .NET's `internal ThreadStartException(Exception? reason)` takes the REASON ALONE and still
+    // uses the fixed message -- which is exactly why it replaces the old (message, inner) pair
+    // rather than sitting beside it.
     auto inner = std::make_exception_ptr(std::runtime_error("cause"));
-    ThreadStartException ex("outer", inner);
-    std::string w = ex.what();
-    EXPECT_NE(w.find("outer"), std::string::npos);
+    ThreadStartException ex(inner);
+    EXPECT_EQ(std::string(ex.what()), "Thread failed to start.");
+    EXPECT_NE(ex.getInnerExceptionProperty(), nullptr) << "the reason is retained";
+}
+
+TEST(ThreadStartExceptionTests, Decl1958_TheTypeIsSealed) {
+    // .NET: `public sealed class ThreadStartException`.
+    static_assert(std::is_final_v<ThreadStartException>,
+                  "#1958/SR-AUD-196: .NET's ThreadStartException is sealed");
 }
 
 TEST(ThreadStartExceptionTests, IsA_SystemException) {

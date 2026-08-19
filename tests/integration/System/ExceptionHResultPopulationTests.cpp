@@ -144,10 +144,13 @@ TEST(ExceptionHResultPopulationTests, ThreadInterruptedException_EveryRepresente
 }
 
 TEST(ExceptionHResultPopulationTests, ThreadStartException_EveryExposedConstructor) {
+    // #1958/SR-AUD-196 reduced this type to .NET's own two constructors: () and (reason). .NET
+    // has NO message-taking constructor -- both of its own pass the fixed
+    // SR.Arg_ThreadStartException (ThreadStartException.cs:13-24) -- so the two message-taking
+    // ones this port had invented are gone. The HResult must still be set by both survivors.
     constexpr intcs expected = static_cast<intcs>(0x80131525u); // COR_E_THREADSTART
     expectHResult(System::Threading::ThreadStartException(), expected);
-    expectHResult(System::Threading::ThreadStartException(std::string("m")), expected);
-    expectHResult(System::Threading::ThreadStartException(std::string("m"), innerException()), expected);
+    expectHResult(System::Threading::ThreadStartException(innerException()), expected);
 }
 
 TEST(ExceptionHResultPopulationTests, ThreadStateException_EveryRepresentedPublicConstructor) {
