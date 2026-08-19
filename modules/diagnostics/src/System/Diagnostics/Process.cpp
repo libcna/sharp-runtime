@@ -12,6 +12,7 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <fstream>
 #include <sstream>
 
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
@@ -22,6 +23,7 @@
 #  include <fcntl.h>
 #  include <cerrno>
 #  include <cstring>
+#  include <dirent.h>
 #  if defined(__APPLE__)
 #    include <crt_externs.h>
 #  endif
@@ -503,16 +505,139 @@ bool Process::Start() {
 #endif
 }
 
+
+#if defined(SHARP_RUNTIME_PROCESS_POSIX)
+namespace {
+
+    /**
+     * @brief The immediate children of @p pid, read from `/proc/<n>/stat`'s fourth field.
+     *
+     * Ticket #2031. Linux-specific by construction: `/proc` is where the parent link lives, and
+     * .NET's own `GetChildProcesses` is equally platform-bound (it goes through
+     * `Process.GetProcesses()`, whose Unix implementation reads `/proc`).
+     *
+     * `stat`'s second field is the executable name **in parentheses and unescaped**, so it may
+     * contain spaces and even `)`. Splitting on whitespace is therefore wrong; the parse scans to
+     * the LAST `)` and takes the fields after it, which is what every correct /proc reader does.
+     */
+    std::vector<pid_t> ChildrenOf(pid_t pid) {
+        std::vector<pid_t> children;
+        DIR* proc = ::opendir("/proc");
+        if (proc == nullptr) return children;
+        while (dirent* entry = ::readdir(proc)) {
+            char* end = nullptr;
+            const long candidate = std::strtol(entry->d_name, &end, 10);
+            if (end == entry->d_name || *end != '\0' || candidate <= 0) continue;
+
+            std::string path = std::string("/proc/") + entry->d_name + "/stat";
+            std::ifstream stat(path);
+            if (!stat) continue;
+            std::string line;
+            if (!std::getline(stat, line)) continue;
+            const size_t close = line.rfind(')');
+            if (close == std::string::npos) continue;
+            // After ")" come: state, ppid, ...
+            std::istringstream rest(line.substr(close + 1));
+            std::string state;
+            long ppid = 0;
+            if (!(rest >> state >> ppid)) continue;
+            if (static_cast<pid_t>(ppid) == pid) children.push_back(static_cast<pid_t>(candidate));
+        }
+        ::closedir(proc);
+        return children;
+    }
+
+    /** @brief True when @p pid is @p ancestor or any descendant of it. */
+    bool IsSelfOrDescendantOf(pid_t ancestor, pid_t pid) {
+        if (ancestor == pid) return true;
+        std::vector<pid_t> frontier{ancestor};
+        for (size_t i = 0; i < frontier.size(); ++i) {
+            for (pid_t child : ChildrenOf(frontier[i])) {
+                if (child == pid) return true;
+                frontier.push_back(child);
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @brief .NET's `Process.KillTree` (`Process.Unix.cs:97-137`), transcribed.
+     *
+     * The ORDER is the substance, and it is what #2031's own proposed option A was missing.
+     * .NET stops the process **before** enumerating its children -- the comment says why,
+     * verbatim: *"Stop the process, so it won't start additional children. This is best effort:
+     * kill can return before the process is stopped."* Option A enumerated and then killed, so a
+     * process that forked between those two steps left a survivor: precisely the defect the
+     * ticket exists to remove, reintroduced one level down.
+     *
+     * `ESRCH` is ignored throughout, because a process may legitimately exit between any two
+     * steps of the walk; every other errno is collected and reported together.
+     *
+     * HONEST NOTE ON THE EVIDENCE: a mutation removing the SIGSTOP is NOT caught, and it cannot
+     * be caught deterministically. What it removes is a RACE WINDOW -- the microseconds between
+     * `ChildrenOf` and the `SIGKILL`, during which the target could fork a child that is neither
+     * enumerated nor killed. A test could only observe it by forking in a tight loop and hoping
+     * to land inside that window, which is a FLAKY test; this repository has repaired two of
+     * those this session (#2352, #2105) on the ground that an intermittently green gate is not
+     * evidence. The SIGSTOP is here because .NET has it and states its purpose in a comment, not
+     * because a test distinguishes it.
+     */
+    void KillTree(pid_t pid, std::vector<std::string>& failures) {
+        if (::kill(pid, SIGSTOP) != 0) {
+            if (errno != ESRCH)
+                failures.push_back("SIGSTOP to pid " + std::to_string(pid) + ": " + std::strerror(errno));
+            return;
+        }
+        const std::vector<pid_t> children = ChildrenOf(pid);
+        if (::kill(pid, SIGKILL) != 0 && errno != ESRCH)
+            failures.push_back("SIGKILL to pid " + std::to_string(pid) + ": " + std::strerror(errno));
+        for (pid_t child : children) KillTree(child, failures);
+    }
+
+}  // namespace
+#endif
+
 void Process::Kill() { Kill(false); }
 
 void Process::Kill(bool entireProcessTree) {
     (void)entireProcessTree; // unused on non-POSIX platforms, where this throws below
 #if defined(SHARP_RUNTIME_PROCESS_POSIX)
-    if (!impl_->started || impl_->isCurrentProcess) return;
+    if (!impl_->started) return;
+    // #2031: the self-guard runs FIRST, before the current-process no-op and before the exit
+    // check, because that is where .NET has it -- `Kill(bool)` refuses immediately, ahead of
+    // `KillTree` (`Process.NonUap.cs:23-28`). Placing it after the `isCurrentProcess` early
+    // return would make `GetCurrentProcess().Kill(true)` a silent no-op where .NET throws, and
+    // would leave the guard unreachable through any ordinary Process object.
+    //
+    // `Kill(false)` is deliberately untouched: .NET delegates it straight to `Kill()`
+    // (`Process.NonUap.cs:17-20`), and this port's own no-op-on-the-current-process behaviour
+    // for that overload is a separate, pre-existing divergence that is not bundled here.
+    if (entireProcessTree
+        && (impl_->isCurrentProcess || IsSelfOrDescendantOf(impl_->pid, ::getpid())))
+        throw System::InvalidOperationException(
+            "Cannot be used to terminate a process tree containing the calling process.");
+    if (impl_->isCurrentProcess) return;
     reapIfNeeded(*impl_);
     if (impl_->hasExited) return;
-    if (entireProcessTree) ::killpg(impl_->pid, SIGKILL);
-    else ::kill(impl_->pid, SIGKILL);
+    if (!entireProcessTree) {
+        ::kill(impl_->pid, SIGKILL);
+        return;
+    }
+    // #2031 (SR-AUD-273, cause D-E). This was `::killpg(pid, SIGKILL)`, which reaches the
+    // child's process GROUP -- and a descendant that called setsid() has left it. Measured: the
+    // setsid grandchild was ALIVE afterwards and the probe had to kill it itself.
+    //
+    // .NET walks the tree instead (`Process.Unix.cs:97-137`), and the SELF-GUARD below is
+    // .NET's too (`Process.NonUap.cs:25-26`): killing a tree that contains the calling process
+    // would kill the caller, so it is refused rather than attempted.
+    std::vector<std::string> failures;
+    KillTree(impl_->pid, failures);
+    if (!failures.empty()) {
+        std::string detail;
+        for (const auto& f : failures) { if (!detail.empty()) detail += "; "; detail += f; }
+        throw System::InvalidOperationException(
+            "Not all processes in process tree could be terminated. (" + detail + ")");
+    }
 #else
     throw System::PlatformNotSupportedException("System::Diagnostics::Process is only supported on POSIX platforms.");
 #endif

@@ -48,6 +48,7 @@
 
 #include "System/Diagnostics/Process.hpp"
 #include "System/Diagnostics/ProcessStartInfo.hpp"
+#include "System/InvalidOperationException.hpp"
 
 using System::Diagnostics::Process;
 using System::Diagnostics::ProcessStartInfo;
@@ -278,22 +279,20 @@ TEST(ProcessGatedBehaviourPinTests, Fix2030_ConcurrentReadersSeeAConsistentBuffe
 // #2031 (SR-AUD-273) -- Kill(true) signals one process group.
 // ===========================================================================
 
-// PIN FOR BLOCKED TICKET #2031. Kill(entireProcessTree = true) is ::killpg, which reaches only
-// the child's process group; a descendant that called setsid() has left that group and
-// SURVIVES, despite the parameter's full-process-tree contract. Plan section 14.3 replaces the
-// killpg with a transitive /proc descendant walk on Linux, after which the survivor is killed
-// and this test fails.
+// INVERTED by #2031. Kill(entireProcessTree = true) was ::killpg, which reaches only the child's
+// process GROUP -- and a descendant that called setsid() has left it, so it SURVIVED despite the
+// parameter's full-process-tree contract. It is now .NET's recursive /proc descendant walk.
 //
-// The witness is a file rather than a pid: the surviving grandchild writes it after a delay,
-// so "the file exists" means "the grandchild was still alive after Kill(true)" without the
-// test having to track a pid through two setsid-ing layers.
-TEST(ProcessGatedBehaviourPinTests, Pin2031_SetsidDescendantSurvivesKillEntireProcessTree) {
+// The witness is a file rather than a pid: the grandchild writes it after a delay, so "the file
+// was never written" means "the grandchild was killed with the tree" without the test having to
+// track a pid through two setsid-ing layers.
+TEST(ProcessGatedBehaviourPinTests, Fix2031_ASetsidDescendantIsKilledWithTheTree) {
     const std::string witness = makeUniqueWitnessPath();
     ASSERT_FALSE(witness.empty());
 
-    // The direct child stays alive (exec sleep 5) so that Kill() does not short-circuit on an
-    // already-exited child, and spawns a grandchild in a NEW SESSION that writes the witness
-    // one second later.
+    // The direct child stays alive (exec sleep 5) so Kill() does not short-circuit on an
+    // already-exited child, and spawns a grandchild in a NEW SESSION that writes the witness one
+    // second later.
     const std::string script =
         "setsid /bin/sh -c 'sleep 1; printf alive > " + witness + "' >/dev/null 2>&1; "
         "exec sleep 5";
@@ -305,19 +304,77 @@ TEST(ProcessGatedBehaviourPinTests, Pin2031_SetsidDescendantSurvivesKillEntirePr
     process.Kill(true);
     ASSERT_TRUE(process.WaitForExit(5000)) << "the direct child was not killed";
 
-    // If the grandchild had been killed with the tree, it could never write the witness.
+    // Wait past the grandchild's own delay. If it had survived it would have written by now.
+    std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+    EXPECT_FALSE(witnessWasWritten(witness))
+        << "the setsid descendant survived Kill(true) -- the walk did not reach it";
+
+    ::unlink(witness.c_str());
+}
+
+// DEPTH. The case above is only two levels deep -- setsid changes the SESSION, not the parent,
+// so the "grandchild" is still an immediate child of the shell and a one-level walk kills it.
+// This one is three levels deep, so a mutation that kills only immediate children survives it.
+TEST(ProcessGatedBehaviourPinTests, Fix2031_TheWalkIsTransitiveNotOneLevel) {
+    const std::string witness = makeUniqueWitnessPath();
+    ASSERT_FALSE(witness.empty());
+
+    // shell -> setsid shell -> shell -> the writer. The witness is written by a
+    // great-grandchild, which only a transitive walk reaches.
+    const std::string script =
+        "setsid /bin/sh -c '/bin/sh -c \"sleep 1; printf alive > " + witness + "\" & sleep 5' "
+        ">/dev/null 2>&1; exec sleep 5";
+
+    Process process = Process::Start(shellStartInfo(script));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    process.Kill(true);
+    ASSERT_TRUE(process.WaitForExit(5000));
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+    EXPECT_FALSE(witnessWasWritten(witness))
+        << "a great-grandchild survived Kill(true) -- the walk stopped short";
+    ::unlink(witness.c_str());
+}
+
+// THE CONTROL: Kill(false) must NOT acquire the tree behaviour. .NET's Kill(bool) delegates
+// straight to Kill() for false (Process.NonUap.cs:17-20), so a mutation that routes both through
+// the walk is caught here rather than passing as an improvement.
+TEST(ProcessGatedBehaviourPinTests, Fix2031_KillFalseStillLeavesTheDescendantAlone) {
+    const std::string witness = makeUniqueWitnessPath();
+    ASSERT_FALSE(witness.empty());
+    const std::string script =
+        "setsid /bin/sh -c 'sleep 1; printf alive > " + witness + "' >/dev/null 2>&1; "
+        "exec sleep 5";
+
+    Process process = Process::Start(shellStartInfo(script));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    process.Kill(false);
+    ASSERT_TRUE(process.WaitForExit(5000));
+
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     bool written = false;
     while (!written && std::chrono::steady_clock::now() < deadline) {
         written = witnessWasWritten(witness);
         if (!written) std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
-
-    EXPECT_TRUE(written)
-        << "the setsid descendant did NOT survive Kill(true) -- #2031 appears to have landed; "
-           "retire this pin with it";
-
+    EXPECT_TRUE(written) << "Kill(false) killed a descendant it was never asked to touch";
     ::unlink(witness.c_str());
+}
+
+// .NET refuses to kill a tree containing the caller (Process.NonUap.cs:25-26) rather than
+// attempting it, because attempting it kills the caller. The current process is its own
+// ancestor, so a Process object naming it must be refused -- and the message is .NET's,
+// transcribed from Strings.resx:342-344.
+TEST(ProcessGatedBehaviourPinTests, Fix2031_ATreeContainingTheCallerIsRefused) {
+    Process self = Process::GetCurrentProcess();
+    try {
+        self.Kill(true);
+        ADD_FAILURE() << "Kill(true) on the calling process was attempted";
+    } catch (const System::InvalidOperationException& e) {
+        EXPECT_NE(std::string(e.what()).find(
+                      "Cannot be used to terminate a process tree containing the calling process."),
+                  std::string::npos) << e.what();
+    }
 }
 
 // ===========================================================================
