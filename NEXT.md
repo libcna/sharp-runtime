@@ -139,6 +139,36 @@
 > and each is itemised in §2 below. **§4b says where to look next, and the method that found all
 > three of today's tickets.**
 
+## 2026-08-20 — #2414: `DateTime` had no `ParseExact` at all
+
+**Gate: 17,683 / 38, 0 failed, 0 skipped** (+7, `Core_Base` 6,111 → 6,118).
+
+`DateTime`'s entire parse surface was `Parse(s)` and `TryParse(s, result)` — **there was no
+`ParseExact` overload of any kind**, so #1942's exact-parsing style contract had nowhere to land.
+Same cycle #2412 resolved for `DateOnly`/`TimeOnly`.
+
+**The obstacle was the scanner, not the type.** `MatchExactFormat` took a `bool forDate` and ran
+*one* of two blocks, each rejecting the other family's tokens outright. Now
+`ExactTokenSet { Date, Time, DateAndTime }`. Admitting both resolves no ambiguity — `M` is a month
+and `m` a minute, in two case-sensitive languages — so the change is that the other family's tokens
+**fall through** rather than being rejected. `DateOnly`/`TimeOnly` unchanged and pinned.
+
+**Deliberately not done, and it is a decision:** the `DateTimeStyles` overloads. `AssumeLocal` and
+`AssumeUniversal` only *stamp* a kind, but `AdjustToUniversal` must **convert** and needs a local
+zone — .NET reaches `TimeZoneInfo.Local`, `Core.Base` cannot, and #1941 phase 2 resolved exactly
+that by taking the zone as a parameter. `RoundtripKind` has nothing to preserve, since this port's
+exact grammar carries **no zone token at all**. .NET's three-rule `ValidateStyles`
+(`DateTimeFormatInfo.cs:1720-1743`) is transcribed into #2414's record for whoever takes it.
+
+Eight valid mutations, all caught. **M2 is a proven equivalence** (every date-token arm ends in
+`continue`, so a date token cannot reach the time block's rejection while the date block runs) and
+is recorded at the site. M7 invalid as first written (`-Werror=unused-parameter`), reformulated.
+**A first run of M4–M8 was invalid**: the restore after M3 used `git checkout` on a file whose
+change was still uncommitted, so five runs reported BUILD FAILED — the #2374 restore mistake in a
+new form. Five identical failures in a row are a harness state, not five findings.
+
+`docs/Migration-DateTimeParseExact.md`. Downstream: zero sites in both consumers.
+
 ## Handoff for a new context, 2026-08-19 (queue exhausted)
 
 ### 0. READ THIS FIRST — four environment facts every older block in this file gets WRONG

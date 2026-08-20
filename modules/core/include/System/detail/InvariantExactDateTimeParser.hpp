@@ -56,6 +56,17 @@ namespace System::detail {
      * "March" are a perfectly legal pair -- so with a provider the rule decides the answer, and
      * #2412 pins it with exactly that shape.
      */
+    /**
+     * @brief Which token families an exact format may use.
+     *
+     * Added by #2414. The scanner used to take a `bool forDate` and run one of two blocks, so a
+     * format could carry date tokens **or** time tokens and never both -- which is why
+     * `DateTime::ParseExact` could not exist at all. The two families are disjoint (`M` is a month
+     * and `m` a minute; C++ and .NET are both case-sensitive here), so admitting both is a matter
+     * of not rejecting the other family rather than of resolving an ambiguity.
+     */
+    enum class ExactTokenSet { Date, Time, DateAndTime };
+
     struct ExactParseOptions {
         std::array<std::string, 12> abbreviatedMonths{};
         std::array<std::string, 12> fullMonths{};
@@ -106,6 +117,33 @@ namespace System::detail {
         switch (format[0]) {
             case 'O': case 'o': return forDate ? "yyyy-MM-dd" : "HH:mm:ss.fffffff";
             case 'R': case 'r': return forDate ? "ddd, dd MMM yyyy" : "HH:mm:ss";
+            default:            return {};
+        }
+    }
+
+    /**
+     * @brief Expands a one-character standard format for `DateTime` (#2414).
+     *
+     * SEPARATE FROM `ExpandStandardFormat` BECAUSE THE PATTERNS ARE NOT THE DATE AND TIME HALVES
+     * CONCATENATED: .NET's `s` uses a `T` separator where `u` uses a space, and `R` ends in a
+     * literal `GMT` that the date-only `R` does not have.
+     *
+     * TWO OF .NET'S PATTERNS ARE TRANSCRIBED WITH A NAMED LOSS, AND THE LOSS IS THIS PORT'S
+     * NO-ZONE-TOKEN BOUNDARY RATHER THAN AN OVERSIGHT:
+     *   * `o`/`O` is `yyyy'-'MM'-'dd'T'HH':'mm':'ss'.'fffffffK` in .NET. `K` renders as the empty
+     *     string for a `DateTimeKind::Unspecified` value, so the pattern below is exactly .NET's
+     *     `o` for that kind and REFUSES the `Z` and `+hh:mm` forms .NET would accept.
+     *   * `u` is `yyyy'-'MM'-'dd HH':'mm':'ss'Z'`, whose `Z` is a LITERAL rather than a zone
+     *     token -- so it is transcribed in full and merely does not set a kind.
+     * Both are pinned, so a later ticket adding a zone token has to revisit them by name.
+     */
+    [[nodiscard]] inline std::string ExpandStandardDateTimeFormat(const std::string& format) {
+        if (format.size() != 1) return {};
+        switch (format[0]) {
+            case 'O': case 'o': return "yyyy-MM-ddTHH:mm:ss.fffffff";
+            case 'R': case 'r': return "ddd, dd MMM yyyy HH:mm:ss 'GMT'";
+            case 's':           return "yyyy-MM-ddTHH:mm:ss";
+            case 'u':           return "yyyy-MM-dd HH:mm:ss'Z'";
             default:            return {};
         }
     }
@@ -209,8 +247,10 @@ namespace System::detail {
      * extra inner whitespace". There is no `AllowLeadingWhite` here, because styles are 4C.
      */
     [[nodiscard]] inline bool MatchExactFormat(const std::string& input, const std::string& format,
-                                               bool forDate, ExactDateTimeFields& fields,
+                                               ExactTokenSet tokens, ExactDateTimeFields& fields,
                                                const ExactParseOptions& options) {
+        const bool allowDate = tokens != ExactTokenSet::Time;
+        const bool allowTime = tokens != ExactTokenSet::Date;
         if (format.empty()) return false;
 
         // #2412: the whitespace styles. `AllowLeadingWhite`/`AllowTrailingWhite` trim the INPUT
@@ -302,7 +342,7 @@ namespace System::detail {
             const std::size_t run = runLength(i);
             const int         n   = static_cast<int>(run);
 
-            if (forDate) {
+            if (allowDate) {
                 if (c == 'y') {
                     if (n > 4 || fields.year >= 0) return false;
                     int value = 0;
@@ -345,11 +385,17 @@ namespace System::detail {
                     i += run;
                     continue;
                 }
-                // Any time or zone token in a date format is unsupported, not a literal.
-                if (c == 'H' || c == 'h' || c == 'm' || c == 's' || c == 'f' || c == 'F' ||
-                    c == 't' || c == 'z' || c == 'K' || c == 'g')
+                // A ZONE token is unsupported in every mode: this port's exact grammar carries no
+                // zone, which is why RoundtripKind would have nothing to preserve.
+                if (c == 'z' || c == 'K' || c == 'g') return false;
+                // A time token is unsupported only when time tokens are not admitted at all --
+                // otherwise it must FALL THROUGH to the time block below rather than be rejected
+                // here, which is the whole of what DateAndTime changes.
+                if (!allowTime && (c == 'H' || c == 'h' || c == 'm' || c == 's' || c == 'f' ||
+                                   c == 'F' || c == 't'))
                     return false;
-            } else {
+            }
+            if (allowTime) {
                 if (c == 'H' || c == 'h') {
                     if (n > 2 || fields.hour >= 0) return false;
                     int value = 0;
@@ -403,9 +449,16 @@ namespace System::detail {
                     i += run;
                     continue;
                 }
-                // Any date or zone token in a time format is unsupported.
-                if (c == 'y' || c == 'M' || c == 'd' || c == 'z' || c == 'K' || c == 'g')
-                    return false;
+                if (c == 'z' || c == 'K' || c == 'g') return false;
+                // Mirror of the rule above -- but with an ASYMMETRY that is worth stating, because
+                // it was measured rather than assumed. `!allowDate` here is a PROVEN EQUIVALENCE
+                // rather than a load-bearing guard: every date-token arm above ends in `continue`,
+                // so a date token can never reach this line while the date block is running, and
+                // `!allowDate` is exactly "the date block did not run". #2414's mutation M2 drops
+                // the condition and no test can see it. The condition is kept for intent -- it
+                // says WHY the rejection is correct -- and it becomes load-bearing the day an arm
+                // above stops consuming its token.
+                if (!allowDate && (c == 'y' || c == 'M' || c == 'd')) return false;
             }
 
             // Everything else is a literal, matched exactly once per format character.

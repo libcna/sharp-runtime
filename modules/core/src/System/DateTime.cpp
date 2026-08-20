@@ -15,6 +15,8 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include "System/detail/InvariantExactDateTimeParser.hpp"
+#include "System/Globalization/DateTimeStyles.hpp"
 
 namespace System {
 
@@ -553,6 +555,93 @@ namespace System {
     bool DateTime::operator<=(const DateTime& o) const { return ticks() <= o.ticks(); }
     bool DateTime::operator> (const DateTime& o) const { return ticks() >  o.ticks(); }
     bool DateTime::operator>=(const DateTime& o) const { return ticks() >= o.ticks(); }
+
+
+// ---------------------------------------------------------------------------
+// ParseExact / TryParseExact -- ticket #2414
+// ---------------------------------------------------------------------------
+
+    bool DateTime::TryParseExact(const std::string& input, const std::string& format,
+                                 DateTime& result) {
+        return TryParseExact(input, format, nullptr, result);
+    }
+
+    bool DateTime::TryParseExact(const std::string& input, const std::string& format,
+                                 const System::IFormatProvider* provider, DateTime& result) {
+        const detail::ExactParseOptions options =
+            detail::ResolveExactParseOptions(provider, System::Globalization::DateTimeStyles::None);
+
+        result = DateTime::MinValue;
+
+        std::string pattern = detail::ExpandStandardDateTimeFormat(format);
+        if (pattern.empty()) {
+            // A ONE-CHARACTER format that is not standard is not silently custom either: .NET
+            // requires "%H" for a single-specifier custom format, because a bare "H" would
+            // otherwise be read as a standard pattern this port does not implement. The rule is
+            // #1939's and is repeated here rather than shared, because the two tables differ.
+            if (format.size() == 1) return false;
+            pattern = format;
+        }
+
+        detail::ExactDateTimeFields fields;
+        if (!detail::MatchExactFormat(input, pattern, detail::ExactTokenSet::DateAndTime, fields,
+                                      options))
+            return false;
+
+        // A DateTime format must bind a COMPLETE date. Time components default to midnight, which
+        // is .NET's rule and not a convenience: `DateTime.ParseExact("2024-06-15", "yyyy-MM-dd")`
+        // is a valid call returning midnight, whereas a format binding only a time has no date to
+        // attach it to and NoCurrentDateDefault -- the style that decides what happens then -- is
+        // #1942's, so a date-less format is refused here rather than given an invented default.
+        if (fields.year < 0 || fields.month < 0 || fields.day < 0) return false;
+        if (fields.year < 1 || fields.year > 9999) return false;
+        if (fields.month < 1 || fields.month > 12) return false;
+        if (fields.day < 1 || fields.day > DateTime::DaysInMonth(fields.year, fields.month))
+            return false;
+
+        int hour = fields.hour < 0 ? 0 : fields.hour;
+        const int minute = fields.minute < 0 ? 0 : fields.minute;
+        const int second = fields.second < 0 ? 0 : fields.second;
+
+        // The 12-hour rule is the scanner's, applied here because the fields are the scanner's
+        // output rather than its state: 12 AM is hour 0 and 12 PM is hour 12, so neither is
+        // `+ 12` and neither is a no-op.
+        if (fields.twelveHour) {
+            if (hour < 1 || hour > 12) return false;
+            if (fields.amPm == 1) hour = (hour == 12) ? 12 : hour + 12;
+            else if (fields.amPm == 0) hour = (hour == 12) ? 0 : hour;
+        }
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59)
+            return false;
+
+        DateTime candidate = DateTime::MinValue;
+        try {
+            candidate = DateTime(fields.year, fields.month, fields.day, hour, minute, second);
+        } catch (...) {
+            return false;
+        }
+        if (fields.fractionTicks != 0) candidate = candidate.AddTicks(fields.fractionTicks);
+
+        // Weekday AGREEMENT, which is what makes `R` a validating format rather than a shape.
+        if (fields.weekday >= 0 &&
+            static_cast<int>(candidate.getDayOfWeekProperty()) != fields.weekday)
+            return false;
+
+        result = candidate;
+        return true;
+    }
+
+    DateTime DateTime::ParseExact(const std::string& input, const std::string& format) {
+        return ParseExact(input, format, nullptr);
+    }
+
+    DateTime DateTime::ParseExact(const std::string& input, const std::string& format,
+                                  const System::IFormatProvider* provider) {
+        DateTime result = DateTime::MinValue;
+        if (!TryParseExact(input, format, provider, result))
+            throw FormatException("String was not recognized as a valid DateTime: " + input);
+        return result;
+    }
 
     GetTypeNameCPP(DateTime, "System::DateTime")
 

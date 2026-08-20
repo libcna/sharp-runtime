@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include "System/DateOnly.hpp"
+#include "System/TimeOnly.hpp"
 #include <gtest/gtest.h>
 #include "System/DateTimeOffset.hpp"
 #include "System/DateTimeKind.hpp"
@@ -1613,4 +1615,164 @@ TEST(DateTimeKindPhase2Tests, TheRealLocalZoneIsAUsableILocalTimeZone) {
     EXPECT_EQ(local.getKindProperty(), System::DateTimeKind::Local);
     // A round trip returns the instant, whatever this machine's offset is.
     EXPECT_EQ(local.ToUniversalTime(zone).getTicksProperty(), utc.getTicksProperty());
+}
+
+// ===========================================================================
+// #2414 -- DateTime::ParseExact, the grammar-and-provider half
+// ===========================================================================
+//
+// WHAT MADE THIS IMPOSSIBLE BEFORE, AND IT WAS THE SCANNER RATHER THAN THE TYPE.
+// `detail::MatchExactFormat` took a `bool forDate` and ran ONE of two blocks: the date block
+// handled `y`/`M`/`d` and REJECTED every time token as unsupported, and the time block did the
+// mirror. So a format naming both families could not be matched by any spelling, which is why
+// `DateTime` had no `ParseExact` at all -- not an omission but a consequence. The two families
+// are disjoint (`M` is a month and `m` a minute; both languages are case-sensitive here), so
+// admitting both is a matter of NOT REJECTING the other family, and the mutation that restores
+// either rejection is caught below.
+
+TEST(DateTimeParseExact2414Tests, DateAndTimeTokensMatchInOneFormat) {
+    // The property the whole ticket exists for: one format, both families.
+    const auto dt = System::DateTime::ParseExact("2024-06-15 13:45:30", "yyyy-MM-dd HH:mm:ss");
+    EXPECT_EQ(dt.getYearProperty(), 2024);
+    EXPECT_EQ(dt.getMonthProperty(), 6);
+    EXPECT_EQ(dt.getDayProperty(), 15);
+    EXPECT_EQ(dt.getHourProperty(), 13);
+    EXPECT_EQ(dt.getMinuteProperty(), 45);
+    EXPECT_EQ(dt.getSecondProperty(), 30);
+
+    // `M` and `m` in ONE format is the case a shared gate would get wrong, and it is the reason
+    // the two families can share a pass at all: the month is 06 and the minute 45, so a scanner
+    // that folded case -- or that let one block consume the other's token -- gives a DIFFERENT
+    // ANSWER here rather than merely failing, which is the shape that survives a careless repair.
+    System::DateTime again = System::DateTime::MinValue;
+    ASSERT_TRUE(System::DateTime::TryParseExact("06/15/2024 45", "MM/dd/yyyy mm", again));
+    EXPECT_EQ(again.getMonthProperty(), 6);
+    EXPECT_EQ(again.getMinuteProperty(), 45);
+    EXPECT_EQ(again.getHourProperty(), 0);
+}
+
+TEST(DateTimeParseExact2414Tests, TimeComponentsDefaultToMidnightButTheDateIsMandatory) {
+    // .NET's own rule: a date with no time is midnight, and this is a valid call rather than a
+    // convenience -- `DateTime.ParseExact("2024-06-15", "yyyy-MM-dd")` returns 00:00:00.
+    const auto dateOnly = System::DateTime::ParseExact("2024-06-15", "yyyy-MM-dd");
+    EXPECT_EQ(dateOnly.getHourProperty(), 0);
+    EXPECT_EQ(dateOnly.getMinuteProperty(), 0);
+    EXPECT_EQ(dateOnly.getSecondProperty(), 0);
+
+    // The reverse is NOT symmetric, and the asymmetry is deliberate: a format binding only a
+    // time has no date to attach it to, and `NoCurrentDateDefault` -- the style that decides what
+    // happens then -- is #1942's. Refusing it is what stops an invented default from shipping
+    // under a ticket that has not been asked about it.
+    System::DateTime unused = System::DateTime::MinValue;
+    EXPECT_FALSE(System::DateTime::TryParseExact("13:45:30", "HH:mm:ss", unused));
+    EXPECT_THROW(System::DateTime::ParseExact("13:45:30", "HH:mm:ss"), System::FormatException);
+}
+
+TEST(DateTimeParseExact2414Tests, ZoneTokensAreRejectedInEveryMode) {
+    // This port's exact grammar carries NO zone token, which is not an accident of the widening
+    // but the reason #1942's `RoundtripKind` has nothing to preserve. All three are refused in
+    // the new combined mode exactly as they were in each single-family mode.
+    System::DateTime unused = System::DateTime::MinValue;
+    EXPECT_FALSE(System::DateTime::TryParseExact("2024-06-15 13:45:30 +02:00",
+                                                 "yyyy-MM-dd HH:mm:ss zzz", unused));
+    EXPECT_FALSE(System::DateTime::TryParseExact("2024-06-15T13:45:30Z",
+                                                 "yyyy-MM-ddTHH:mm:ssK", unused));
+    EXPECT_FALSE(System::DateTime::TryParseExact("2024-06-15 A.D.", "yyyy-MM-dd g", unused));
+
+    // And the kind is therefore Unspecified for every input, which is the observable consequence
+    // a caller must not mistake for "the parser decided it was local".
+    const auto dt = System::DateTime::ParseExact("2024-06-15T13:45:30", "s");
+    EXPECT_EQ(dt.getKindProperty(), System::DateTimeKind::Unspecified);
+}
+
+TEST(DateTimeParseExact2414Tests, StandardFormatsAreTheDateTimeTableNotTheTwoHalvesConcatenated) {
+    // `s` uses a T separator and `u` a space, so the two cannot come from one rule -- which is
+    // why this table is separate from the date-only and time-only one rather than derived.
+    EXPECT_EQ(System::DateTime::ParseExact("2024-06-15T13:45:30", "s"),
+              System::DateTime(2024, 6, 15, 13, 45, 30));
+    EXPECT_EQ(System::DateTime::ParseExact("2024-06-15 13:45:30Z", "u"),
+              System::DateTime(2024, 6, 15, 13, 45, 30));
+    // `u`'s Z is a LITERAL, so it is required and it sets no kind.
+    System::DateTime unused = System::DateTime::MinValue;
+    EXPECT_FALSE(System::DateTime::TryParseExact("2024-06-15 13:45:30", "u", unused));
+
+    // `R` ends in a literal GMT the date-only `R` does not have, and it VALIDATES the weekday:
+    // 2024-06-15 is a Saturday, so naming Monday must fail rather than be ignored.
+    EXPECT_EQ(System::DateTime::ParseExact("Sat, 15 Jun 2024 13:45:30 GMT", "R"),
+              System::DateTime(2024, 6, 15, 13, 45, 30));
+    EXPECT_FALSE(System::DateTime::TryParseExact("Mon, 15 Jun 2024 13:45:30 GMT", "R", unused));
+
+    // `o` is .NET's roundtrip pattern for an UNSPECIFIED kind, its `K` rendering as the empty
+    // string there. The loss is named rather than hidden: the Z and +hh:mm forms .NET accepts
+    // are refused here, and a later ticket adding a zone token has to revisit this row.
+    EXPECT_EQ(System::DateTime::ParseExact("2024-06-15T13:45:30.1234567", "o").getTicksProperty(),
+              System::DateTime(2024, 6, 15, 13, 45, 30).getTicksProperty() + 1234567);
+    EXPECT_FALSE(System::DateTime::TryParseExact("2024-06-15T13:45:30.1234567Z", "o", unused));
+
+    // A one-character format that is NOT standard stays refused rather than being read as a
+    // custom single specifier -- .NET requires "%H" for that, and the rule is #1939's.
+    EXPECT_FALSE(System::DateTime::TryParseExact("13", "H", unused));
+    ASSERT_TRUE(System::DateTime::TryParseExact("2024-06-15", "yyyy-MM-dd", unused));
+}
+
+TEST(DateTimeParseExact2414Tests, TheProviderSuppliesTheNamesAndNullMeansInvariant) {
+    using System::Globalization::DateTimeFormatInfo;
+
+    // A null provider is the invariant culture, which is what .NET's own null means.
+    EXPECT_EQ(System::DateTime::ParseExact("15 June 2024 13:45", "dd MMMM yyyy HH:mm", nullptr),
+              System::DateTime(2024, 6, 15, 13, 45, 0));
+
+    // A provider's month names are REACHED, which is the half that could not have been tested
+    // before #2412 made the scanner take them: the invariant names must now fail and the
+    // provider's must succeed, so the assertion cannot pass by the provider being ignored.
+    DateTimeFormatInfo czech;
+    czech.setMonthNamesProperty({"leden", "unor", "brezen", "duben", "kveten", "cerven",
+                                 "cervenec", "srpen", "zari", "rijen", "listopad", "prosinec"});
+    System::DateTime result = System::DateTime::MinValue;
+    ASSERT_TRUE(System::DateTime::TryParseExact("15 cerven 2024 13:45", "dd MMMM yyyy HH:mm",
+                                                &czech, result));
+    EXPECT_EQ(result, System::DateTime(2024, 6, 15, 13, 45, 0));
+    EXPECT_FALSE(System::DateTime::TryParseExact("15 June 2024 13:45", "dd MMMM yyyy HH:mm",
+                                                 &czech, result));
+
+    // A provider that knows nothing about dates falls back to the current info rather than
+    // crashing -- #1940's rule, asserted here because this is a second door onto it.
+    struct KnowsNothing : System::IFormatProvider {
+        [[nodiscard]] void* GetFormat(const std::type_info&) const override { return nullptr; }
+    } knowsNothing;
+    EXPECT_EQ(System::DateTime::ParseExact("15 June 2024 13:45", "dd MMMM yyyy HH:mm",
+                                           &knowsNothing),
+              System::DateTime(2024, 6, 15, 13, 45, 0));
+}
+
+TEST(DateTimeParseExact2414Tests, TwelveHourClockIsNeitherPlusTwelveNorANoOp) {
+    // 12 AM is hour 0 and 12 PM is hour 12, so BOTH ends are special cases and a body written as
+    // a single `+ 12` gets one of them wrong while passing every ordinary row.
+    EXPECT_EQ(System::DateTime::ParseExact("2024-06-15 12:00:00 AM", "yyyy-MM-dd hh:mm:ss tt")
+                  .getHourProperty(), 0);
+    EXPECT_EQ(System::DateTime::ParseExact("2024-06-15 12:00:00 PM", "yyyy-MM-dd hh:mm:ss tt")
+                  .getHourProperty(), 12);
+    EXPECT_EQ(System::DateTime::ParseExact("2024-06-15 01:00:00 PM", "yyyy-MM-dd hh:mm:ss tt")
+                  .getHourProperty(), 13);
+    EXPECT_EQ(System::DateTime::ParseExact("2024-06-15 01:00:00 AM", "yyyy-MM-dd hh:mm:ss tt")
+                  .getHourProperty(), 1);
+
+    // And an hour outside 1..12 is refused on the twelve-hour clock rather than wrapped.
+    System::DateTime unused = System::DateTime::MinValue;
+    EXPECT_FALSE(System::DateTime::TryParseExact("2024-06-15 13:00:00 PM",
+                                                 "yyyy-MM-dd hh:mm:ss tt", unused));
+}
+
+// The single-family modes must be UNCHANGED by the widening, which is the regression the
+// parameterisation could most plausibly have caused: `DateOnly` must still reject a time token
+// and `TimeOnly` must still reject a date token, because for them the other family is not
+// admitted at all -- the `!allowTime` / `!allowDate` guards are what preserve that.
+TEST(DateTimeParseExact2414Tests, WideningDidNotOpenTheSingleFamilyModes) {
+    System::DateOnly d = System::DateOnly::MinValue;
+    EXPECT_FALSE(System::DateOnly::TryParseExact("2024-06-15 13:45", "yyyy-MM-dd HH:mm", d));
+    ASSERT_TRUE(System::DateOnly::TryParseExact("2024-06-15", "yyyy-MM-dd", d));
+
+    System::TimeOnly t(0, 0);
+    EXPECT_FALSE(System::TimeOnly::TryParseExact("2024-06-15 13:45", "yyyy-MM-dd HH:mm", t));
+    ASSERT_TRUE(System::TimeOnly::TryParseExact("13:45", "HH:mm", t));
 }

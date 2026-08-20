@@ -499,6 +499,46 @@ namespace System {
          */
         static bool TryParse(const std::string& s, DateTime& result);
 
+        /**
+         * @brief Parses @p input against exactly @p format, in the invariant culture.
+         *
+         * C++ counterpart of .NET `DateTime.ParseExact(string, string, IFormatProvider)`.
+         *
+         * ADDED BY #2414, AND ITS ABSENCE WAS THE REASON #1942 HAD NOWHERE TO LAND: this type's
+         * entire parse surface was `Parse` and `TryParse`, so there was no exact-parsing member
+         * for a format provider or a `DateTimeStyles` to reach -- the same cycle #2412 resolved
+         * for `DateOnly` and `TimeOnly` one type over.
+         *
+         * @note THE STYLE-TAKING OVERLOADS ARE DELIBERATELY ABSENT AND ARE PINNED AS SUCH.
+         *       `DateTimeStyles`'s kind-affecting members need a local time zone -- `AssumeLocal`
+         *       and `AdjustToUniversal` CONVERT, and .NET reaches `TimeZoneInfo.Local` internally
+         *       where `Core.Base` cannot. #1941 phase 2 resolved that one level down by TAKING THE
+         *       ZONE AS A PARAMETER, so the styles overload needs the same decision made about its
+         *       signature; it is #1942's, not this ticket's, and is recorded there rather than
+         *       guessed at here. `RoundtripKind` additionally has nothing to preserve, because
+         *       this port's exact grammar carries NO ZONE TOKEN at all (`z`, `K` and `g` are
+         *       rejected in every mode), so an input can never state its own kind.
+         *
+         * @throws System::FormatException if @p input does not match @p format.
+         */
+        [[nodiscard]] static DateTime ParseExact(const std::string& input, const std::string& format);
+
+        /**
+         * @brief Parses @p input against exactly @p format, using @p provider's names.
+         *
+         * A null @p provider means the invariant culture, which is what .NET's own null means.
+         */
+        [[nodiscard]] static DateTime ParseExact(const std::string& input, const std::string& format,
+                                                 const System::IFormatProvider* provider);
+
+        /** @brief Non-throwing counterpart of ParseExact(input, format). */
+        static bool TryParseExact(const std::string& input, const std::string& format,
+                                  DateTime& result);
+
+        /** @brief Non-throwing counterpart of ParseExact(input, format, provider). */
+        static bool TryParseExact(const std::string& input, const std::string& format,
+                                  const System::IFormatProvider* provider, DateTime& result);
+
         using Object::Equals;
 
         /**

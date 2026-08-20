@@ -185,7 +185,7 @@ namespace System {
         }
 
         detail::ExactDateTimeFields fields;
-        if (!detail::MatchExactFormat(input, pattern, /*forDate=*/false, fields, options)) return false;
+        if (!detail::MatchExactFormat(input, pattern, detail::ExactTokenSet::Time, fields, options)) return false;
 
         // One hour and one minute are required; seconds are optional and default to zero.
         if (fields.hour < 0 || fields.minute < 0) return false;

@@ -292,7 +292,7 @@ namespace System {
         }
 
         detail::ExactDateTimeFields fields;
-        if (!detail::MatchExactFormat(input, pattern, /*forDate=*/true, fields, options)) return false;
+        if (!detail::MatchExactFormat(input, pattern, detail::ExactTokenSet::Date, fields, options)) return false;
 
         // The approval requires ONE COMPLETE year/month/day. There is no current-date default
         // here -- that is NoCurrentDateDefault, a style, and styles are 4C.
