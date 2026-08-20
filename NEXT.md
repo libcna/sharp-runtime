@@ -3,8 +3,8 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-20 — 17,651 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,651 run: 17,651 passed, 0 failed, 0 skipped**, recounted from the
+> **Test-count floor, 2026-08-20 — 17,657 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,657 run: 17,657 passed, 0 failed, 0 skipped**, recounted from the
 > per-executable logs with every executable run separately and continuing past failures, zero build
 > warnings at `--parallel 2`. Every checkpoint below this one ends with *"the gate is not green"*;
 > this one does not. Two of the three historical failure sources were environmental and are simply
@@ -89,10 +89,24 @@
 > syntactic BCP-47 check) differ enormously in blast radius, so the choice was put to the user and
 > **not made unilaterally**. **#1940 does not depend on it** and can proceed.
 >
-> `ticket` has **0 `todo`**; `task` has **0** unclassified (14,979 ignored / 1,082 ported / 140
-> ignore). Ticket totals: **2,393 done, 9 blocked, 2 needs_user, 5 wontfix**. Graph **41 / 94**,
-> negative fixtures **52 / 264**. Fifteen tickets were filed and closed by this sweep: #2397–#2402 on
-> 2026-08-19, #2403–#2409 and #2411 on 2026-08-20.
+> **#1940 IS CLOSED AND THE DATE/TIME CHAIN IS OPEN.** It was the root: **#1942, #1943 and #1945
+> are now `todo`**, and **#1944** follows through #1943. The blocker turned out to be **two** things
+> where the ticket recorded one — the component cycle *and* the fact that **nothing in this runtime
+> implemented `IFormatProvider` at all**, so there was nobody for `DateTime` to ask. Shape C's
+> measured claim held exactly: two renames, **zero changed include lines**, graph still 41/94.
+>
+> `ticket` has **3 `todo`** (#1942, #1943, #1945 — the newly unblocked chain); `task` has **0**
+> unclassified (14,979 ignored / 1,082 ported / 140 ignore). Ticket totals: **2,394 done, 3 todo, 6
+> blocked, 2 needs_user, 5 wontfix**. Graph **41 / 94**, negative fixtures **52 / 264**. Seventeen
+> tickets were filed or closed by this sweep: #2397–#2402 on 2026-08-19, #2403–#2409, #2411 and
+> #1940 on 2026-08-20.
+>
+> **What a new context should pick up first**: #1942 (exact-parsing style validation), which is what
+> makes the *parser* culture-aware. #1940 deliberately added **no** provider overload on
+> `Parse`/`TryParse`, because this port's general date parser reads no culture-driven token and such
+> an overload could only accept and ignore one — #1940's own criterion forbids that. #1940 also
+> records a deviation #1942 must revisit: `GetInstance(nullptr)` resolves to the **invariant** info
+> rather than the current culture's.
 >
 > **One thing #2406 deliberately did NOT do, so it is not mistaken for parity**: `DisplayAttribute`'s
 > eight fields stay public data members (correct — .NET's are `{ get; set; }`), but their

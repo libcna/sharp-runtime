@@ -7,11 +7,13 @@
 #include <cctype>
 #include <stdexcept>
 #include <string>
+#include <typeinfo>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DayOfWeek.hpp"
+#include "System/IFormatProvider.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Globalization/CalendarWeekRule.hpp"
 
@@ -37,7 +39,7 @@ using SharpRuntime::intcs;
  * references a `DateTimeFormatInfo::getCalendarProperty()`, so this is a documented gap, not a
  * silently-broken call site.
  */
-class DateTimeFormatInfo {
+class DateTimeFormatInfo : public System::IFormatProvider {
 public:
     /**
      * @brief Constructs an invariant-culture DateTimeFormatInfo.
@@ -66,6 +68,70 @@ public:
      */
     static const DateTimeFormatInfo& getCurrentInfoProperty() {
         return getInvariantInfoProperty();
+    }
+
+    /**
+     * @brief `IFormatProvider` implementation. `DateTimeFormatInfo.cs:325-328`.
+     *
+     * Added by #1940 (SA-14 decision 1). Before it, **nothing in this runtime implemented
+     * `IFormatProvider` at all** -- not this type, not `NumberFormatInfo`, not `CultureInfo` --
+     * so `GetFormat` had zero implementations and a caller could not construct a provider from a
+     * culture even in principle. That, rather than the component cycle alone, is why the
+     * provider-taking overloads could not exist.
+     *
+     * .NET returns `this` for its own type and `null` for anything else, and so does this. The
+     * `const_cast` is forced by this port's `GetFormat` signature, which returns a non-const
+     * `void*` from a `const` member -- a pre-existing shape, not a decision taken here.
+     */
+    [[nodiscard]] void* GetFormat(const std::type_info& formatType) const override {
+        if (formatType == typeid(DateTimeFormatInfo)) {
+            return const_cast<DateTimeFormatInfo*>(this);
+        }
+        return nullptr;
+    }
+
+    /**
+     * @brief Resolves the `DateTimeFormatInfo` a provider stands for.
+     * `DateTimeFormatInfo.cs:307-323`, transcribed with one deviation named below.
+     *
+     * The chain is .NET's: a null provider means "current"; a provider that **is** a
+     * `DateTimeFormatInfo` is itself; otherwise ask it through `GetFormat`; otherwise fall back
+     * to "current".
+     *
+     * @note **One deviation, and it is this port's component boundary rather than a choice.**
+     * .NET's `CurrentInfo` is `CultureInfo.CurrentCulture.DateTimeFormat` (`:290-305`), and
+     * `CultureInfo` lives in `Globalization`, which depends on `Core.Base` -- so naming it from
+     * here would be the very cycle #1940 exists to avoid. `getCurrentInfoProperty()` is used
+     * instead, and it returns the **invariant** info. **That is not a new divergence**: this port
+     * has answered `CurrentInfo` with the invariant info since the type was ported, and since
+     * #2409 `CultureInfo::CurrentCulture` is itself the invariant culture until something sets
+     * it -- so the two agree in the default state and differ only once a culture is set. A caller
+     * who wants the current culture's info passes that culture as the provider, which
+     * `CultureInfo`'s own `GetFormat` answers. The ticket that makes the parsers culture-aware
+     * (#1942) has to revisit this, and a pin says so.
+     *
+     * @note .NET additionally short-circuits on `provider.GetType() == typeof(CultureInfo)`
+     * (`:313-316`) to reach a cached `_dateTimeInfo` field. That is a lookup optimisation for a
+     * cache this port does not have, and the general path below reaches the same object through
+     * `GetFormat`, so it is deliberately not reproduced.
+     */
+    [[nodiscard]] static const DateTimeFormatInfo& GetInstance(const System::IFormatProvider* provider) {
+        if (provider == nullptr) return getCurrentInfoProperty();
+        // `provider as DateTimeFormatInfo` (`:320`). THIS LINE IS A PROVEN EQUIVALENCE for every
+        // shape .NET permits, and is kept for being .NET's rather than for being load-bearing:
+        // without it the next line asks `GetFormat(typeid(DateTimeFormatInfo))`, which returns
+        // `this` for exactly this type, so both paths yield the same object. Mutation M4 removes
+        // it and is NOT CAUGHT, and that is the honest result.
+        //
+        // It becomes observable only for a DERIVED class whose `GetFormat` answers with a
+        // different object -- and .NET forbids that shape outright, because its
+        // `DateTimeFormatInfo` is `sealed` while this port's is not. That asymmetry is real and is
+        // NOT closed here: sealing the type is a public source break with its own machinery.
+        if (const auto* asInfo = dynamic_cast<const DateTimeFormatInfo*>(provider)) return *asInfo;
+        if (void* fromProvider = provider->GetFormat(typeid(DateTimeFormatInfo))) {
+            return *static_cast<const DateTimeFormatInfo*>(fromProvider);
+        }
+        return getCurrentInfoProperty();
     }
 
     /**

@@ -7,6 +7,7 @@
 #include "System/DateTimeKind.hpp"
 
 #include "System/Object.hpp"
+#include "System/IFormatProvider.hpp"
 #include "System/TimeSpan.hpp"
 #include "System/DayOfWeek.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -29,8 +30,12 @@ namespace System {
      *   `RoundtripKind` styles. A phase-2 approval must name a date-sensitive timezone provider
      *   before any of those can exist. OLE Automation date, FILETIME, and binary-serialization conversions
      *   (ToOADate/FromOADate, ToFileTime/FromFileTime, ToBinary/FromBinary) are out of
-     *   scope. Culture-aware ToString/Parse overloads (IFormatProvider) are not provided;
-     *   ToString(format)/Parse/TryParse use invariant numeric tokens only.
+     *   scope. **Since #1940 a culture-aware `ToString(format, IFormatProvider*)` exists** and
+     *   honours the resolved `DateTimeFormatInfo`'s month and day names; `Parse`/`TryParse` still
+     *   take no provider, deliberately, because this port's general date parser reads no
+     *   culture-driven token, so a provider overload there could only accept and ignore one --
+     *   which #1940's own acceptance criterion forbids. Widening the parser is #1942.
+     *   `ToString(format)` and the parsers use invariant numeric tokens only.
      */
     class DateTime : public Object {
     public:
@@ -410,6 +415,31 @@ namespace System {
          * @param format The format string.
          */
         [[nodiscard]] std::string ToString(const std::string& format) const;
+
+        /**
+         * @brief Formats using the month and day names the provider supplies.
+         *
+         * C++ counterpart of .NET `DateTime.ToString(string, IFormatProvider)`. Added by #1940
+         * (SA-14 decision 1), which is the ticket that made a provider REACHABLE from here:
+         * `DateTimeFormatInfo` moved into `Core.Base`, and it and `CultureInfo` gained the
+         * `IFormatProvider` implementations this runtime had none of.
+         *
+         * The provider is resolved by `DateTimeFormatInfo::GetInstance` -- null means the current
+         * info, a `DateTimeFormatInfo` is itself, anything else is asked through `GetFormat` --
+         * and the resolved info's `MonthNames`, `AbbreviatedMonthNames`, `DayNames` and
+         * `AbbreviatedDayNames` are what `MMMM`, `MMM`, `dddd` and `ddd` emit.
+         *
+         * @note **The provider is honoured, not accepted and ignored**, which is #1940's own
+         * acceptance criterion: hand it an info with different month names and the output moves.
+         * @note **And no existing result changes.** The one-argument overload delegates here with
+         * a null provider, which resolves to the invariant info, whose names are byte-for-byte
+         * the tables this method used to hard-code -- so `ToString(format)` is unchanged, which is
+         * the other half of the criterion ("keep all parsers semantically unchanged").
+         * @note Numeric tokens, separators and quoting are untouched: they are not culture-driven
+         * in this port, and widening them is #1942's subject rather than this ticket's.
+         */
+        [[nodiscard]] std::string ToString(const std::string& format,
+                                            const System::IFormatProvider* provider) const;
 
         /**
          * @brief Parses a date/time string in ISO-8601 style.

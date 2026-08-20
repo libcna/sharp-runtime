@@ -7,6 +7,11 @@
 
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
+#include <typeinfo>
+#include "System/IFormatProvider.hpp"
+#include "System/Globalization/DateTimeFormatInfo.hpp"
+#include "System/Globalization/NumberFormatInfo.hpp"
+#include "System/Globalization/CultureInfo.hpp"
 #include "System/FormatException.hpp"
 #include "System/TimeSpan.hpp"
 
@@ -1329,4 +1334,137 @@ TEST(DateTimeKindStorageTests, Decl1941_TheConversionSurfaceIsStillAbsent) {
     // The control: a member that IS present, so the idiom is known to discriminate rather than
     // always answering false.
     EXPECT_TRUE((requires(DateTime d) { d.getKindProperty(); }));
+}
+
+// ===========================================================================================
+// #1940 (SA-14 decision 1) -- a provider can now REACH the parser, and it is honoured
+//
+// The blocker was two things, and #1940's own record named only the first.
+//   1. A COMPONENT CYCLE: DateTime is in Core.Base, DateTimeFormatInfo was in Globalization, and
+//      Globalization already depends on Core.Base -- so naming it from here would have been a
+//      cycle the boundary validator rejects. Shape C moved the two header files into Core.Base;
+//      ownership is by logical path uniqueness, so NOT ONE INCLUDE LINE ANYWHERE CHANGED.
+//   2. NOTHING IN THIS RUNTIME IMPLEMENTED IFormatProvider AT ALL -- not DateTimeFormatInfo, not
+//      NumberFormatInfo, not CultureInfo. GetFormat had zero implementations, so a caller could
+//      not construct a provider from a culture even in principle. That is why "shape A is
+//      feasible today" was true and still not enough on its own.
+// ===========================================================================================
+
+TEST(DateTimeProvider1940Tests, TheProviderIsHonouredRatherThanAcceptedAndIgnored) {
+    System::Globalization::DateTimeFormatInfo custom;
+    custom.setMonthNamesProperty({"Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet",
+                                   "Aout", "Septembre", "Octobre", "Novembre", "Decembre", ""});
+    custom.setAbbreviatedMonthNamesProperty(
+        {"jan", "fev", "mar", "avr", "mai", "jun", "jul", "aou", "sep", "oct", "nov", "dec", ""});
+
+    const DateTime march(2024, 3, 15);
+    EXPECT_EQ(march.ToString("MMMM", &custom), "Mars")
+        << "the resolved DateTimeFormatInfo's month names must be what MMMM emits";
+    EXPECT_EQ(march.ToString("MMM", &custom), "mar");
+
+    // ...and the invariant answer is unchanged, which is the other half of the criterion.
+    EXPECT_EQ(march.ToString("MMMM"), "March");
+    EXPECT_EQ(march.ToString("MMM"), "Mar");
+}
+
+// The index base differs between the old hard-coded tables (1-based, empty slot 0) and
+// DateTimeFormatInfo's arrays (0-based, empty slot 12, which is .NET's MonthNames convention).
+// December and January are the two months an off-by-one gets wrong in opposite directions, and a
+// mid-year spot check would miss both.
+TEST(DateTimeProvider1940Tests, EveryMonthNameIndexesCorrectly) {
+    for (int month = 1; month <= 12; ++month) {
+        const DateTime date(2024, month, 1);
+        EXPECT_EQ(date.ToString("MMMM"),
+                  System::Globalization::DateTimeFormatInfo::getInvariantInfoProperty()
+                      .getMonthNamesProperty()[static_cast<size_t>(month) - 1])
+            << "month " << month;
+        EXPECT_EQ(date.ToString("MMM"),
+                  System::Globalization::DateTimeFormatInfo::getInvariantInfoProperty()
+                      .getAbbreviatedMonthNamesProperty()[static_cast<size_t>(month) - 1])
+            << "month " << month;
+    }
+    EXPECT_EQ(DateTime(2024, 1, 1).ToString("MMMM"), "January");
+    EXPECT_EQ(DateTime(2024, 12, 1).ToString("MMMM"), "December");
+}
+
+// Day names are 0-based on BOTH sides, so the index did not move -- asserted so that a later
+// "consistency" edit cannot shift them to match the month arithmetic.
+TEST(DateTimeProvider1940Tests, EveryDayNameIndexesCorrectly) {
+    // 2024-03-10 is a Sunday, so this walks the whole week from index 0.
+    for (int offset = 0; offset < 7; ++offset) {
+        const DateTime date(2024, 3, 10 + offset);
+        const auto index = static_cast<size_t>(date.getDayOfWeekProperty());
+        EXPECT_EQ(date.ToString("dddd"),
+                  System::Globalization::DateTimeFormatInfo::getInvariantInfoProperty()
+                      .getDayNamesProperty()[index]);
+        EXPECT_EQ(date.ToString("ddd"),
+                  System::Globalization::DateTimeFormatInfo::getInvariantInfoProperty()
+                      .getAbbreviatedDayNamesProperty()[index]);
+    }
+    EXPECT_EQ(DateTime(2024, 3, 10).ToString("dddd"), "Sunday");
+    EXPECT_EQ(DateTime(2024, 3, 16).ToString("dddd"), "Saturday");
+}
+
+// DateTimeFormatInfo.cs:307-323 -- the whole resolution chain, one row per branch.
+TEST(DateTimeProvider1940Tests, TheResolutionChainIsDotNets) {
+    using System::Globalization::DateTimeFormatInfo;
+    const DateTime march(2024, 3, 15);
+
+    // null -> current, which in this port is the invariant info.
+    EXPECT_EQ(march.ToString("MMMM", nullptr), "March");
+    EXPECT_EQ(&DateTimeFormatInfo::GetInstance(nullptr),
+              &DateTimeFormatInfo::getCurrentInfoProperty());
+
+    // a DateTimeFormatInfo IS the answer, without going through GetFormat.
+    DateTimeFormatInfo itself;
+    EXPECT_EQ(&DateTimeFormatInfo::GetInstance(&itself), &itself);
+
+    // a provider that knows nothing about dates falls back to current rather than crashing.
+    struct KnowsNothing : System::IFormatProvider {
+        [[nodiscard]] void* GetFormat(const std::type_info&) const override { return nullptr; }
+    } knowsNothing;
+    EXPECT_EQ(&DateTimeFormatInfo::GetInstance(&knowsNothing),
+              &DateTimeFormatInfo::getCurrentInfoProperty());
+    EXPECT_EQ(march.ToString("MMMM", &knowsNothing), "March");
+}
+
+// DateTimeFormatInfo.cs:325-328 -- `formatType == typeof(DateTimeFormatInfo) ? this : null`. The
+// NULL half needs its own row: a GetFormat that answers for ANYTHING satisfies every case above,
+// because they only ever ask for the one type it is supposed to answer for.
+TEST(DateTimeProvider1940Tests, GetFormatAnswersForItsOwnTypeAndNothingElse) {
+    System::Globalization::DateTimeFormatInfo info;
+    EXPECT_EQ(info.GetFormat(typeid(System::Globalization::DateTimeFormatInfo)), &info);
+    EXPECT_EQ(info.GetFormat(typeid(int)), nullptr);
+    EXPECT_EQ(info.GetFormat(typeid(std::string)), nullptr);
+    EXPECT_EQ(info.GetFormat(typeid(System::DateTime)), nullptr);
+}
+
+// A CULTURE IS THE PROVIDER THIS WHOLE TICKET EXISTS FOR, and nothing above passed one -- so a
+// CultureInfo::GetFormat that answered nullptr for dates went undetected. This is the route a
+// caller uses to reach "the current culture's format info" from Core.Base without the component
+// cycle: they pass the culture, and the culture answers.
+TEST(DateTimeProvider1940Tests, ACultureInfoIsAUsableProvider) {
+    System::Globalization::CultureInfo culture("de-DE");
+    const void* fromCulture = culture.GetFormat(typeid(System::Globalization::DateTimeFormatInfo));
+    ASSERT_NE(fromCulture, nullptr)
+        << "a culture must answer for DateTimeFormatInfo, or it is not a provider at all";
+    EXPECT_EQ(&System::Globalization::DateTimeFormatInfo::GetInstance(&culture), fromCulture);
+
+    // ...and it really drives the output. The object is reached through the non-const `void*`
+    // GetFormat hands back -- which is this interface's own contract -- so what is mutated here is
+    // the culture's OWN member, not a copy. Identity alone would not show that the formatter reads
+    // it; the changed output does.
+    EXPECT_EQ(fromCulture, &culture.getDateTimeFormatProperty());
+    auto* writable = static_cast<System::Globalization::DateTimeFormatInfo*>(
+        culture.GetFormat(typeid(System::Globalization::DateTimeFormatInfo)));
+    ASSERT_NE(writable, nullptr);
+    writable->setMonthNamesProperty(
+        {"Januar", "Februar", "Maerz", "April", "Mai", "Juni", "Juli", "August", "September",
+         "Oktober", "November", "Dezember", ""});
+    EXPECT_EQ(DateTime(2024, 3, 15).ToString("MMMM", &culture), "Maerz");
+
+    // The number half of the same switch is asserted too, so a repair cannot satisfy one and
+    // silently drop the other.
+    EXPECT_NE(culture.GetFormat(typeid(System::Globalization::NumberFormatInfo)), nullptr);
+    EXPECT_EQ(culture.GetFormat(typeid(int)), nullptr);
 }

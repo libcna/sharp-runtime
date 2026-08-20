@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 
 #include "System/DateTime.hpp"
+#include "System/Globalization/DateTimeFormatInfo.hpp"
+#include <array>
 #include "System/detail/DateTimeTextScanner.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
@@ -342,6 +344,24 @@ namespace System {
 
     std::string DateTime::ToString(const std::string& format) const
     {
+        // #1940: one body, and the one-argument overload is now the null-provider case of it.
+        // That delegation is what makes "no existing result changes" a fact rather than a claim --
+        // there is no second formatter left to drift.
+        return ToString(format, nullptr);
+    }
+
+    std::string DateTime::ToString(const std::string& format,
+                                    const System::IFormatProvider* provider) const
+    {
+        // DateTimeFormatInfo.cs:307-323 -- null means current, a DateTimeFormatInfo is itself,
+        // anything else is asked through GetFormat.
+        const System::Globalization::DateTimeFormatInfo& info =
+            System::Globalization::DateTimeFormatInfo::GetInstance(provider);
+        const std::array<std::string, 13> abbreviatedMonths = info.getAbbreviatedMonthNamesProperty();
+        const std::array<std::string, 13> fullMonths = info.getMonthNamesProperty();
+        const std::array<std::string, 7> abbreviatedDays = info.getAbbreviatedDayNamesProperty();
+        const std::array<std::string, 7> fullDays = info.getDayNamesProperty();
+
         std::string result;
         result.reserve(format.size() + 8);
         int yr  = getYearProperty(),   mo  = getMonthProperty(),  dy  = getDayProperty();
@@ -368,24 +388,20 @@ namespace System {
                 i += n;
             } else if (c == 'M') {
                 int n = run('M');
-                static constexpr const char* abbrevMonths[13] = {
-                    "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-                static constexpr const char* fullMonths[13] = {
-                    "", "January", "February", "March", "April", "May", "June",
-                    "July", "August", "September", "October", "November", "December"};
-                if (n >= 4) result += fullMonths[mo];
-                else if (n == 3) result += abbrevMonths[mo];
+                // THE INDEX BASE DIFFERS AND IT IS .NET'S, NOT AN OVERSIGHT. The tables this
+                // replaced were 1-based with an empty slot 0; DateTimeFormatInfo's arrays are
+                // 0-BASED with an empty THIRTEENTH slot, which is .NET's MonthNames convention.
+                // `mo` is 1..12, so it indexes at `mo - 1`.
+                if (n >= 4) result += fullMonths[static_cast<size_t>(mo) - 1];
+                else if (n == 3) result += abbreviatedMonths[static_cast<size_t>(mo) - 1];
                 else result += (n >= 2) ? pad(mo, 2) : std::to_string(mo);
                 i += n;
             } else if (c == 'd') {
                 int n = run('d');
-                static constexpr const char* abbrevDays[7] = {
-                    "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-                static constexpr const char* fullDays[7] = {
-                    "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-                if (n >= 4) result += fullDays[static_cast<int>(getDayOfWeekProperty())];
-                else if (n == 3) result += abbrevDays[static_cast<int>(getDayOfWeekProperty())];
+                // Day names ARE 0-based on both sides, Sunday first, so this index is unchanged.
+                const auto dayIndex = static_cast<size_t>(getDayOfWeekProperty());
+                if (n >= 4) result += fullDays[dayIndex];
+                else if (n == 3) result += abbreviatedDays[dayIndex];
                 else result += (n >= 2) ? pad(dy, 2) : std::to_string(dy);
                 i += n;
             } else if (c == 'H') {

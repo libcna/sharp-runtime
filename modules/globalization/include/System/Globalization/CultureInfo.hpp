@@ -8,7 +8,9 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <typeinfo>
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/IFormatProvider.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Globalization/CultureNotFoundException.hpp"
 #include "System/Globalization/DateTimeFormatInfo.hpp"
@@ -32,7 +34,7 @@ namespace System::Globalization {
  * concurrent get/set was a data race -- while this very comment and the accessors' own
  * doc-comments already said *thread*.
  */
-class CultureInfo {
+class CultureInfo : public System::IFormatProvider {
     std::string name_;
     bool isNeutral_;
     bool isReadOnly_;
@@ -275,6 +277,28 @@ public:
      * @return The culture name string.
      */
     [[nodiscard]] const std::string& ToString() const { return name_; }
+
+    /**
+     * @brief `IFormatProvider` implementation. `CultureInfo.cs:659-671`, transcribed.
+     *
+     * Added by #1940 (SA-14 decision 1). **This is what makes a provider exist at all in this
+     * runtime**: before it, nothing implemented `IFormatProvider`, so `GetFormat` had zero
+     * implementations and a caller could not hand a culture to a parser even in principle. It is
+     * also how a caller reaches "the current culture's format info" from `Core.Base` without the
+     * component cycle -- they pass the culture, and this answers.
+     *
+     * The `const_cast`s are forced by this port's `GetFormat` signature, which returns a non-const
+     * `void*` from a `const` member; that is a pre-existing shape rather than a decision here.
+     */
+    [[nodiscard]] void* GetFormat(const std::type_info& formatType) const override {
+        if (formatType == typeid(NumberFormatInfo)) {
+            return const_cast<NumberFormatInfo*>(&numberFormat_);
+        }
+        if (formatType == typeid(DateTimeFormatInfo)) {
+            return const_cast<DateTimeFormatInfo*>(&dateTimeFormat_);
+        }
+        return nullptr;
+    }
 
     /**
      * @brief Gets the culture-independent (invariant) CultureInfo instance.
