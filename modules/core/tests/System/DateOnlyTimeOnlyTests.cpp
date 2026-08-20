@@ -6,6 +6,9 @@
 #include <limits>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateOnly.hpp"
+#include "System/Globalization/DateTimeFormatInfo.hpp"
+#include "System/Globalization/DateTimeStyles.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/DateTime.hpp"
 #include "System/FormatException.hpp"
 #include "System/TimeOnly.hpp"
@@ -774,4 +777,140 @@ TEST(TimeOnlyTests, Fix1939_TimeOnlyExactContract) {
     EXPECT_FALSE(System::TimeOnly::TryParseExact("24:00", "HH:mm", out));
     EXPECT_FALSE(System::TimeOnly::TryParseExact("10:60", "HH:mm", out));
     EXPECT_THROW((void)System::TimeOnly::ParseExact("nope", "HH:mm"), System::FormatException);
+}
+
+// ===========================================================================================
+// #2412 -- DateOnly/TimeOnly ParseExact take a provider and a DateTimeStyles
+//
+// This is the half of #1942 and #1943 that needs NO timezone contract, and it exists because
+// their recorded dependencies formed a CYCLE: #1942 waited for "the relevant exact overload"
+// (an overload taking a DateTimeStyles -- measured, nothing in modules/ accepted one), and
+// #1943 waited for "#1940-#1942", which includes #1942.
+//
+// What separates cleanly is that DateOnly and TimeOnly HAVE NO DateTimeKind, so every
+// kind-affecting style has nothing to act on and .NET rejects them outright. The styles that
+// would need a timezone contract are exactly the styles that are illegal here.
+// ===========================================================================================
+
+TEST(DateOnlyStyles2412Tests, OnlyTheWhitespaceStylesAreLegal) {
+    using System::Globalization::DateTimeStyles;
+    // DateOnly.cs:317-320 -- the whole contract, and the message is .NET's own.
+    for (const auto illegal : {DateTimeStyles::AdjustToUniversal, DateTimeStyles::AssumeLocal,
+                               DateTimeStyles::AssumeUniversal, DateTimeStyles::RoundtripKind,
+                               DateTimeStyles::NoCurrentDateDefault}) {
+        EXPECT_THROW((void)DateOnly::ParseExact("2024-06-15", "yyyy-MM-dd", nullptr, illegal),
+                     System::ArgumentException)
+            << "style bit " << static_cast<int>(illegal);
+    }
+    try {
+        (void)DateOnly::ParseExact("2024-06-15", "yyyy-MM-dd", nullptr,
+                                    DateTimeStyles::AssumeUniversal);
+        FAIL() << "an illegal style was accepted";
+    } catch (const System::ArgumentException& e) {
+        // ArgumentException appends " (Parameter 'style')", which is .NET's own shape, so the
+        // assertion is on the text this port actually produces rather than on the raw resource.
+        EXPECT_EQ(std::string(e.getMessageProperty()),
+                  "The only allowed values for the styles are AllowWhiteSpaces, "
+                  "AllowTrailingWhite, AllowLeadingWhite, and AllowInnerWhite. "
+                  "(Parameter 'style')");
+        EXPECT_EQ(e.getParamNameProperty(), "style");
+    }
+
+    // ...and all four whitespace bits, alone and combined, are accepted.
+    for (const auto legal : {DateTimeStyles::None, DateTimeStyles::AllowLeadingWhite,
+                             DateTimeStyles::AllowTrailingWhite, DateTimeStyles::AllowInnerWhite,
+                             DateTimeStyles::AllowWhiteSpaces}) {
+        EXPECT_NO_THROW((void)DateOnly::ParseExact("2024-06-15", "yyyy-MM-dd", nullptr, legal));
+    }
+}
+
+// A Try* METHOD THAT THROWS. DateOnly.cs:519-522 raises for an illegal style rather than
+// returning false, which is exactly what a reader assumes away. A parse failure still returns
+// false -- both halves in one case, so neither can be satisfied alone.
+TEST(DateOnlyStyles2412Tests, TryParseExactThrowsForAnIllegalStyleButNotForABadParse) {
+    using System::Globalization::DateTimeStyles;
+    DateOnly result = DateOnly::MaxValue;
+    EXPECT_THROW((void)DateOnly::TryParseExact("2024-06-15", "yyyy-MM-dd", nullptr,
+                                                DateTimeStyles::AssumeLocal, result),
+                 System::ArgumentException);
+    EXPECT_EQ(result, DateOnly::MaxValue)
+        << "a rejected style must leave the caller's variable untouched";
+
+    EXPECT_FALSE(DateOnly::TryParseExact("not a date", "yyyy-MM-dd", nullptr,
+                                          DateTimeStyles::None, result));
+}
+
+TEST(DateOnlyStyles2412Tests, TheWhitespaceStylesHaveTheirEffect) {
+    using System::Globalization::DateTimeStyles;
+    DateOnly result = DateOnly::MinValue;
+
+    // Without the style the surrounding space is a mismatch; with it, it is ignored.
+    EXPECT_FALSE(DateOnly::TryParseExact("  2024-06-15", "yyyy-MM-dd", result));
+    EXPECT_TRUE(DateOnly::TryParseExact("  2024-06-15", "yyyy-MM-dd", nullptr,
+                                         DateTimeStyles::AllowLeadingWhite, result));
+    EXPECT_EQ(result, DateOnly(2024, 6, 15));
+
+    EXPECT_FALSE(DateOnly::TryParseExact("2024-06-15  ", "yyyy-MM-dd", result));
+    EXPECT_TRUE(DateOnly::TryParseExact("2024-06-15  ", "yyyy-MM-dd", nullptr,
+                                         DateTimeStyles::AllowTrailingWhite, result));
+    EXPECT_EQ(result, DateOnly(2024, 6, 15));
+
+    // Inner whitespace is permitted only where the format expects a separator -- not between the
+    // digits of one field, which is the row that separates "skip whitespace anywhere" from .NET's
+    // rule.
+    EXPECT_TRUE(DateOnly::TryParseExact("2024- 06- 15", "yyyy-MM-dd", nullptr,
+                                         DateTimeStyles::AllowInnerWhite, result));
+    EXPECT_EQ(result, DateOnly(2024, 6, 15));
+    EXPECT_FALSE(DateOnly::TryParseExact("20 24-06-15", "yyyy-MM-dd", nullptr,
+                                          DateTimeStyles::AllowInnerWhite, result))
+        << "AllowInnerWhite must not split a numeric field";
+
+    // Each bit is separate: leading does not buy trailing.
+    EXPECT_FALSE(DateOnly::TryParseExact("2024-06-15 ", "yyyy-MM-dd", nullptr,
+                                          DateTimeStyles::AllowLeadingWhite, result));
+    EXPECT_TRUE(DateOnly::TryParseExact(" 2024-06-15 ", "yyyy-MM-dd", nullptr,
+                                         DateTimeStyles::AllowWhiteSpaces, result));
+}
+
+// The provider is HONOURED rather than accepted and ignored -- #1942's own criterion, and the
+// reason #1940 refused to add an overload it could only ignore.
+TEST(DateOnlyStyles2412Tests, TheProviderSuppliesTheMonthAndDayNames) {
+    using System::Globalization::DateTimeStyles;
+    System::Globalization::DateTimeFormatInfo custom;
+    custom.setAbbreviatedMonthNamesProperty(
+        {"jan", "fev", "mar", "avr", "mai", "jun", "jul", "aou", "sep", "oct", "nov", "dec", ""});
+
+    DateOnly result = DateOnly::MinValue;
+    EXPECT_TRUE(DateOnly::TryParseExact("15 jun 2024", "dd MMM yyyy", &custom,
+                                         DateTimeStyles::None, result));
+    EXPECT_EQ(result, DateOnly(2024, 6, 15));
+
+    // The invariant answer is unchanged, and the custom name is NOT accepted by it.
+    EXPECT_TRUE(DateOnly::TryParseExact("15 Jun 2024", "dd MMM yyyy", result));
+    EXPECT_EQ(result, DateOnly(2024, 6, 15));
+    EXPECT_FALSE(DateOnly::TryParseExact("15 fev 2024", "dd MMM yyyy", result))
+        << "a provider's names must not leak into the invariant parse";
+}
+
+// #1939 recorded that the scanner's longest-first name matching was "defensive rather than
+// load-bearing", because no INVARIANT name is a prefix of another and a first-match mutation went
+// uncaught. A provider's names carry no such guarantee, so #2412 makes the rule decide the answer
+// -- and pins it with exactly that shape.
+TEST(DateOnlyStyles2412Tests, LongestFirstNameMatchingIsNowLoadBearing) {
+    using System::Globalization::DateTimeStyles;
+    System::Globalization::DateTimeFormatInfo prefixes;
+    // "Ma" is a prefix of "March": first-match would take "Ma" (month 1) and then choke on "rch".
+    prefixes.setMonthNamesProperty({"Ma", "Feb", "March", "April", "May", "June", "July", "August",
+                                     "September", "October", "November", "December", ""});
+
+    DateOnly result = DateOnly::MinValue;
+    ASSERT_TRUE(DateOnly::TryParseExact("15 March 2024", "dd MMMM yyyy", &prefixes,
+                                         DateTimeStyles::None, result));
+    EXPECT_EQ(result.getMonthProperty(), 3)
+        << "the longer name must win, or 'March' is read as the month named 'Ma'";
+
+    // ...and the shorter one still resolves to its own month.
+    ASSERT_TRUE(DateOnly::TryParseExact("15 Ma 2024", "dd MMMM yyyy", &prefixes,
+                                         DateTimeStyles::None, result));
+    EXPECT_EQ(result.getMonthProperty(), 1);
 }

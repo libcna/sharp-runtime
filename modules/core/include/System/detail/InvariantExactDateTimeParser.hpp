@@ -2,9 +2,15 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "System/ArgumentException.hpp"
+#include "System/IFormatProvider.hpp"
+#include "System/Globalization/DateTimeStyles.hpp"
+#include "System/Globalization/DateTimeFormatInfo.hpp"
 #include <array>
+#include <cctype>
 #include <cstddef>
 #include <string>
+#include <string_view>
 
 /**
  * @file
@@ -35,6 +41,31 @@ namespace System::detail {
     };
 
     /** @brief Invariant English month names, abbreviated and full, in calendar order. */
+    /**
+     * @brief The month and day names an exact parse matches against, plus the whitespace policy.
+     *
+     * Added by #2412. The four `k*` tables below stay as the INVARIANT defaults -- they are what a
+     * null provider resolves to -- and a caller with a `DateTimeFormatInfo` supplies its names
+     * instead. Before this, the scanner could only ever match the invariant names, so a provider
+     * handed to `ParseExact` could not have been anything but accepted and ignored.
+     *
+     * @note **This makes `matchName`'s longest-first rule load-bearing.** #1939 recorded honestly
+     * that the rule was *"defensive rather than load-bearing"* for the four invariant tables,
+     * because no invariant month or day name is a prefix of another and a mutation taking the
+     * first match instead went uncaught. **A caller's names carry no such guarantee** -- "Ma" and
+     * "March" are a perfectly legal pair -- so with a provider the rule decides the answer, and
+     * #2412 pins it with exactly that shape.
+     */
+    struct ExactParseOptions {
+        std::array<std::string, 12> abbreviatedMonths{};
+        std::array<std::string, 12> fullMonths{};
+        std::array<std::string, 7>  abbreviatedDays{};
+        std::array<std::string, 7>  fullDays{};
+        bool allowLeadingWhite = false;
+        bool allowTrailingWhite = false;
+        bool allowInnerWhite = false;
+    };
+
     inline constexpr std::array<const char*, 12> kAbbreviatedMonths = {
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
     inline constexpr std::array<const char*, 12> kFullMonths = {
@@ -55,6 +86,20 @@ namespace System::detail {
      *
      * @return The expanded custom pattern, or an empty string when @p format is not standard.
      */
+    /** @brief The options a null provider and `DateTimeStyles::None` resolve to. */
+    [[nodiscard]] inline ExactParseOptions InvariantExactParseOptions() {
+        ExactParseOptions options;
+        for (std::size_t i = 0; i < 12; ++i) {
+            options.abbreviatedMonths[i] = kAbbreviatedMonths[i];
+            options.fullMonths[i] = kFullMonths[i];
+        }
+        for (std::size_t i = 0; i < 7; ++i) {
+            options.abbreviatedDays[i] = kAbbreviatedDays[i];
+            options.fullDays[i] = kFullDays[i];
+        }
+        return options;
+    }
+
     [[nodiscard]] inline std::string ExpandStandardFormat(const std::string& format,
                                                           bool forDate) {
         if (format.size() != 1) return {};
@@ -71,6 +116,14 @@ namespace System::detail {
         explicit ExactInputCursor(const std::string& text) noexcept : text_(text) {}
         [[nodiscard]] bool        atEnd() const noexcept { return index_ >= text_.size(); }
         [[nodiscard]] std::size_t position() const noexcept { return index_; }
+
+        /** @brief Consumes any run of whitespace; `DateTimeStyles::AllowInnerWhite` (#2412). */
+        void skipWhitespace() noexcept {
+            while (index_ < text_.size() &&
+                   std::isspace(static_cast<unsigned char>(text_[index_])) != 0) {
+                ++index_;
+            }
+        }
 
         bool take(char c) noexcept {
             if (index_ < text_.size() && text_[index_] == c) { ++index_; return true; }
@@ -128,10 +181,12 @@ namespace System::detail {
         }
 
         /** @brief Consumes @p word if the input continues with it, case-sensitively. */
-        bool takeWord(const char* word) noexcept {
-            const std::size_t len = std::char_traits<char>::length(word);
-            if (text_.compare(index_, len, word) != 0) return false;
-            index_ += len;
+        /** @brief #2412 widened this from `const char*`: a provider supplies these names now. */
+        bool takeWord(std::string_view word) noexcept {
+            if (word.empty()) return false;
+            if (index_ + word.size() > text_.size()) return false;
+            if (text_.compare(index_, word.size(), word) != 0) return false;
+            index_ += word.size();
             return true;
         }
 
@@ -154,9 +209,27 @@ namespace System::detail {
      * extra inner whitespace". There is no `AllowLeadingWhite` here, because styles are 4C.
      */
     [[nodiscard]] inline bool MatchExactFormat(const std::string& input, const std::string& format,
-                                               bool forDate, ExactDateTimeFields& fields) {
+                                               bool forDate, ExactDateTimeFields& fields,
+                                               const ExactParseOptions& options) {
         if (format.empty()) return false;
-        ExactInputCursor cursor(input);
+
+        // #2412: the whitespace styles. `AllowLeadingWhite`/`AllowTrailingWhite` trim the INPUT
+        // before and after matching; `AllowInnerWhite` is handled at each literal, because it
+        // permits extra whitespace only where the format already expects a separator -- it does
+        // not license whitespace between digits of one field.
+        std::string trimmed = input;
+        if (options.allowLeadingWhite) {
+            const std::size_t first = trimmed.find_first_not_of(" \t\n\v\f\r");
+            trimmed = (first == std::string::npos) ? std::string{} : trimmed.substr(first);
+        }
+        if (options.allowTrailingWhite) {
+            const std::size_t last = trimmed.find_last_not_of(" \t\n\v\f\r");
+            trimmed = (last == std::string::npos) ? std::string{} : trimmed.substr(0, last + 1);
+        }
+        ExactInputCursor cursor(trimmed);
+        const auto skipInnerWhite = [&cursor, &options] {
+            if (options.allowInnerWhite) cursor.skipWhitespace();
+        };
 
         const auto runLength = [&format](std::size_t at) {
             std::size_t n = 1;
@@ -166,26 +239,42 @@ namespace System::detail {
         const auto matchName = [&cursor](const auto& names, int& out) {
             // Longest first, so a name that is a prefix of another cannot win.
             //
-            // HONEST NOTE ON THE EVIDENCE: for the four INVARIANT tables this is defensive rather
-            // than load-bearing, and a mutation taking the first match instead is NOT caught --
-            // measured. No invariant month or day name is a prefix of another, and the abbreviated
-            // and full tables are never consulted in the same call. It is kept because the rule is
-            // what makes the loop correct for any table, not because a test distinguishes it.
+            // #1939 recorded honestly that for the four INVARIANT tables this is DEFENSIVE rather
+            // than load-bearing -- no invariant month or day name is a prefix of another, and a
+            // mutation taking the first match instead went uncaught. #2412 CHANGED THAT: a caller's
+            // provider supplies these names now, and a caller's names carry no such guarantee
+            // ("Ma" and "March" are a legal pair), so the rule decides the answer and is pinned.
+            //
+            // The empty-name guards -- this one and `takeWord`'s -- are DEFENCE IN DEPTH and are
+            // recorded as such rather than claimed to be tested. DateTimeFormatInfo's month arrays
+            // carry an empty thirteenth slot, so the concern is real; but `len <= bestLen` with
+            // `bestLen` starting at 0 ALREADY excludes a zero-length name arithmetically, so
+            // mutations M7 and M8 remove either guard and neither is caught. Both are kept because
+            // the intent should be visible at the point a future reader adds a table.
             int  best = -1;
             std::size_t bestLen = 0;
             for (std::size_t i = 0; i < names.size(); ++i) {
-                const std::size_t len = std::char_traits<char>::length(names[i]);
-                if (len <= bestLen) continue;
+                // #2412 widened `names` from `const char*` tables to std::string, because a
+                // provider supplies them; std::string_view spans both without a conversion.
+                const std::string_view candidate{names[i]};
+                const std::size_t len = candidate.size();
+                if (len == 0 || len <= bestLen) continue;
                 ExactInputCursor probe = cursor;
-                if (probe.takeWord(names[i])) { best = static_cast<int>(i); bestLen = len; }
+                if (probe.takeWord(candidate)) { best = static_cast<int>(i); bestLen = len; }
             }
             if (best < 0) return false;
-            (void)cursor.takeWord(names[static_cast<std::size_t>(best)]);
+            (void)cursor.takeWord(std::string_view{names[static_cast<std::size_t>(best)]});
             out = best;
             return true;
         };
 
         for (std::size_t i = 0; i < format.size();) {
+            // #2412: `AllowInnerWhite` skips whitespace AT A TOKEN BOUNDARY -- before each literal
+            // and before each field. It is deliberately not "skip whitespace anywhere": a field
+            // reader consumes its own digits without ever calling this, so "20 24-06-15" against
+            // "yyyy-MM-dd" still fails on the four-digit year, which is the row that separates
+            // .NET's rule from a blanket skip.
+            skipInnerWhite();
             const char c = format[i];
 
             // The literal mechanisms, shared by both token sets.
@@ -235,7 +324,7 @@ namespace System::detail {
                         fields.month = value;
                     } else {
                         int index = 0;
-                        if (!matchName(n == 3 ? kAbbreviatedMonths : kFullMonths, index)) return false;
+                        if (!matchName(n == 3 ? options.abbreviatedMonths : options.fullMonths, index)) return false;
                         fields.month = index + 1;
                     }
                     i += run;
@@ -250,7 +339,7 @@ namespace System::detail {
                     } else {
                         if (n > 4 || fields.weekday >= 0) return false;
                         int index = 0;
-                        if (!matchName(n == 3 ? kAbbreviatedDays : kFullDays, index)) return false;
+                        if (!matchName(n == 3 ? options.abbreviatedDays : options.fullDays, index)) return false;
                         fields.weekday = index;
                     }
                     i += run;
@@ -336,6 +425,64 @@ namespace System::detail {
         }
 
         return cursor.atEnd();
+    }
+
+} // namespace System::detail
+
+namespace System::detail {
+
+    /**
+     * @brief `DateOnly`/`TimeOnly`'s whole style contract, which is one line in .NET.
+     *
+     * `DateOnly.cs:317-320` and `TimeOnly.cs:458,486,520`:
+     * `if ((style & ~DateTimeStyles.AllowWhiteSpaces) != 0) throw new ArgumentException(...)`.
+     *
+     * **Neither type has a `DateTimeKind`**, so every kind-affecting style -- `AdjustToUniversal`,
+     * `AssumeLocal`, `AssumeUniversal`, `RoundtripKind` -- and `NoCurrentDateDefault` have nothing
+     * to act on, and .NET rejects them rather than ignoring them. That is why this half of #1942
+     * needs **no timezone contract**: the styles that would need one are exactly the styles that
+     * are illegal here.
+     */
+    inline void ValidateDateTimeOnlyStyles(System::Globalization::DateTimeStyles style) {
+        using System::Globalization::DateTimeStyles;
+        const auto outsideWhitespace = static_cast<int>(style) &
+                                       ~static_cast<int>(DateTimeStyles::AllowWhiteSpaces);
+        if (outsideWhitespace != 0) {
+            throw System::ArgumentException(
+                "The only allowed values for the styles are AllowWhiteSpaces, AllowTrailingWhite, "
+                "AllowLeadingWhite, and AllowInnerWhite.",
+                "style");
+        }
+    }
+
+    /** @brief Builds the scanner's options from a resolved provider and a validated style. */
+    inline ExactParseOptions ResolveExactParseOptions(const System::IFormatProvider* provider,
+                                                      System::Globalization::DateTimeStyles style) {
+        using System::Globalization::DateTimeStyles;
+        const auto& info = System::Globalization::DateTimeFormatInfo::GetInstance(provider);
+        ExactParseOptions options;
+        const auto abbreviatedMonths = info.getAbbreviatedMonthNamesProperty();
+        const auto fullMonths = info.getMonthNamesProperty();
+        const auto abbreviatedDays = info.getAbbreviatedDayNamesProperty();
+        const auto fullDays = info.getDayNamesProperty();
+        // DateTimeFormatInfo's month arrays are 0-based with an empty THIRTEENTH slot (.NET's
+        // MonthNames convention); the scanner's are twelve, so the empty slot is dropped rather
+        // than carried -- a matchName that could match "" would match at every position.
+        for (std::size_t i = 0; i < 12; ++i) {
+            options.abbreviatedMonths[i] = abbreviatedMonths[i];
+            options.fullMonths[i] = fullMonths[i];
+        }
+        for (std::size_t i = 0; i < 7; ++i) {
+            options.abbreviatedDays[i] = abbreviatedDays[i];
+            options.fullDays[i] = fullDays[i];
+        }
+        const auto has = [style](DateTimeStyles bit) {
+            return (static_cast<int>(style) & static_cast<int>(bit)) != 0;
+        };
+        options.allowLeadingWhite = has(DateTimeStyles::AllowLeadingWhite);
+        options.allowTrailingWhite = has(DateTimeStyles::AllowTrailingWhite);
+        options.allowInnerWhite = has(DateTimeStyles::AllowInnerWhite);
+        return options;
     }
 
 } // namespace System::detail

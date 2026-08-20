@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "System/Globalization/DateTimeStyles.hpp"
+#include "System/IFormatProvider.hpp"
 #include <string>
 #include <sstream>
 #include <iomanip>
@@ -198,6 +200,29 @@ namespace System {
          */
         [[nodiscard]] static DateOnly ParseExact(const std::string& input,
                                                  const std::string& format);
+        /**
+         * @brief `ParseExact` with a format provider and parse styles.
+         *
+         * C++ counterpart of .NET `DateOnly.ParseExact(string, string, IFormatProvider, DateTimeStyles)`
+         * (DateOnly.cs). Added by #2412; **purely additive**, because both new parameters are defaulted,
+         * so every existing call site compiles and behaves exactly as before.
+         *
+         * @param provider Resolved by `DateTimeFormatInfo::GetInstance` (#1940) -- null means the
+         *        current info, a `DateTimeFormatInfo` is itself, anything else is asked through
+         *        `GetFormat`. Its month and day names are what `MMM`/`MMMM`/`ddd`/`dddd` match, so
+         *        the provider is **honoured rather than accepted and ignored**.
+         * @param style Only the whitespace styles are legal here, and that is .NET's rule rather
+         *        than a limitation of this port: `DateOnly` has **no `DateTimeKind`**, so
+         *        `AdjustToUniversal`, `AssumeLocal`, `AssumeUniversal`, `RoundtripKind` and
+         *        `NoCurrentDateDefault` have nothing to act on and .NET rejects them outright.
+         *
+         * @throws System::ArgumentException with parameter name `style` when @p style has any bit
+         *         outside `AllowWhiteSpaces`, carrying .NET's own text.
+         */
+        [[nodiscard]] static DateOnly ParseExact(const std::string& input, const std::string& format,
+                                            const System::IFormatProvider* provider,
+                                            System::Globalization::DateTimeStyles style =
+                                                System::Globalization::DateTimeStyles::None);
 
         /**
          * @brief Non-throwing `ParseExact`; writes `MinValue` on every failure.
@@ -205,6 +230,18 @@ namespace System {
          */
         static bool TryParseExact(const std::string& input, const std::string& format,
                                   DateOnly& result);
+
+        /**
+         * @brief `TryParseExact` with a format provider and parse styles.
+         *
+         * @note **This overload THROWS for an invalid @p style, and that is .NET's behaviour**
+         *       (DateOnly.cs) rather than an oversight here: a `Try*` method that raises is exactly what
+         *       a reader assumes away, so it carries its own pin. A *parse* failure still returns
+         *       false; only an illegal style argument raises.
+         */
+        static bool TryParseExact(const std::string& input, const std::string& format,
+                                  const System::IFormatProvider* provider,
+                                  System::Globalization::DateTimeStyles style, DateOnly& result);
 
         /** @brief Returns true if this date equals the specified date. */
         bool operator==(const DateOnly& o) const { return year_==o.year_ && month_==o.month_ && day_==o.day_; }

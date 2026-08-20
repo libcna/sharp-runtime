@@ -3,8 +3,8 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-20 — 17,657 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,657 run: 17,657 passed, 0 failed, 0 skipped**, recounted from the
+> **Test-count floor, 2026-08-20 — 17,662 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,662 run: 17,662 passed, 0 failed, 0 skipped**, recounted from the
 > per-executable logs with every executable run separately and continuing past failures, zero build
 > warnings at `--parallel 2`. Every checkpoint below this one ends with *"the gate is not green"*;
 > this one does not. Two of the three historical failure sources were environmental and are simply
@@ -101,12 +101,17 @@
 > tickets were filed or closed by this sweep: #2397–#2402 on 2026-08-19, #2403–#2409, #2411 and
 > #1940 on 2026-08-20.
 >
-> **What a new context should pick up first**: #1942 (exact-parsing style validation), which is what
-> makes the *parser* culture-aware. #1940 deliberately added **no** provider overload on
-> `Parse`/`TryParse`, because this port's general date parser reads no culture-driven token and such
-> an overload could only accept and ignore one — #1940's own criterion forbids that. #1940 also
-> records a deviation #1942 must revisit: `GetInstance(nullptr)` resolves to the **invariant** info
-> rather than the current culture's.
+> **#1942 AND #1943 LISTED EACH OTHER, AND #2412 TOOK THE HALF THAT SEPARATES.** #1942 waited for
+> an overload taking a `DateTimeStyles` (there was none, measured) and #1943 waited for #1942.
+> `DateOnly`/`TimeOnly` **have no `DateTimeKind`**, so .NET rejects every kind-affecting style
+> outright — **the styles that would need a timezone contract are exactly the styles that are
+> illegal there** — and that half needed no approval. It is landed as **#2412**.
+>
+> **Both tickets are back to `blocked`, on their `DateTime` halves alone**, which need **#1941 phase
+> 2** and its unapproved timezone provider. That is a *user decision*, not a measurement: #1941's
+> record says a phase-2 approval must name a date-sensitive timezone provider.
+>
+> **What a new context should pick up first**: **#1945** is the one `todo` left in the chain.
 >
 > **One thing #2406 deliberately did NOT do, so it is not mistaken for parity**: `DisplayAttribute`'s
 > eight fields stay public data members (correct — .NET's are `{ get; set; }`), but their

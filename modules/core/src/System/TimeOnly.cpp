@@ -160,6 +160,22 @@ namespace System {
 
     bool TimeOnly::TryParseExact(const std::string& input, const std::string& format,
                                  TimeOnly& result) {
+        // #2412: the two-argument form is the null-provider, no-style case of the four-argument
+        // one. Delegating rather than duplicating is what makes "no existing result changes" a
+        // fact -- there is no second scanner path left to drift.
+        return TryParseExact(input, format, nullptr,
+                             System::Globalization::DateTimeStyles::None, result);
+    }
+
+    bool TimeOnly::TryParseExact(const std::string& input, const std::string& format,
+                                 const System::IFormatProvider* provider,
+                                 System::Globalization::DateTimeStyles style, TimeOnly& result) {
+        // .NET raises here rather than returning false -- a Try* method that throws
+        // (TimeOnly.cs). Validation happens BEFORE the result is written, so a rejected style
+        // leaves the caller's variable untouched.
+        detail::ValidateDateTimeOnlyStyles(style);
+        const detail::ExactParseOptions options = detail::ResolveExactParseOptions(provider, style);
+
         result = TimeOnly::getMinValueProperty();
 
         std::string pattern = detail::ExpandStandardFormat(format, /*forDate=*/false);
@@ -169,7 +185,7 @@ namespace System {
         }
 
         detail::ExactDateTimeFields fields;
-        if (!detail::MatchExactFormat(input, pattern, /*forDate=*/false, fields)) return false;
+        if (!detail::MatchExactFormat(input, pattern, /*forDate=*/false, fields, options)) return false;
 
         // One hour and one minute are required; seconds are optional and default to zero.
         if (fields.hour < 0 || fields.minute < 0) return false;
@@ -205,6 +221,17 @@ namespace System {
     TimeOnly TimeOnly::ParseExact(const std::string& input, const std::string& format) {
         TimeOnly result;
         if (!TryParseExact(input, format, result))
+            throw FormatException("String was not recognized as a valid TimeOnly: " + input);
+        return result;
+    }
+
+    TimeOnly TimeOnly::ParseExact(const std::string& input, const std::string& format,
+                                 const System::IFormatProvider* provider,
+                                 System::Globalization::DateTimeStyles style) {
+        TimeOnly result = TimeOnly::getMinValueProperty();
+        // The style is validated by TryParseExact below, which raises for an illegal one exactly
+        // as .NET's does; a PARSE failure is what becomes the FormatException here.
+        if (!TryParseExact(input, format, provider, style, result))
             throw FormatException("String was not recognized as a valid TimeOnly: " + input);
         return result;
     }
