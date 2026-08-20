@@ -81,7 +81,23 @@ commit hash. Tagging is therefore worth doing before a downstream release, not a
 2. **Write the changelog entry.** Move what is under `## [Unreleased]` into a new
    `## [x.y.z] — YYYY-MM-DD` section in `CHANGELOG.md` and add the two link definitions at the
    bottom of the file.
-3. **Build and test** in the existing build directory — never a fresh one, and never more than
+3. **Record the build environment** in that entry. Everything the library needs is pinned by this
+   repository — the `vendor/googletest` submodule gitlink and the vendored `nlohmann`, `tinyxml2`
+   and `miniz` sources — but **zlib is a system dependency** (`find_package(ZLIB REQUIRED)` in
+   `modules/io-compression`) and **tzdata decides two `TimeZoneInfo` test expectations**, so the tag
+   alone does not select either:
+
+   ```bash
+   printf '%s\n' "$(lsb_release -ds)" "$(g++ --version | head -1)" \
+       "glibc $(ldd --version | head -1 | grep -oE '[0-9.]+$')" \
+       "$(cmake --version | head -1)" \
+       "tzdata $(dpkg-query -W -f='${Version}' tzdata)" \
+       "zlib $(dpkg-query -W -f='${Version}' zlib1g)"
+   ```
+
+   This is a stopgap that documents the environment without enforcing it; a configure-time check is
+   the intended replacement.
+4. **Build and test** in the existing build directory — never a fresh one, and never more than
    two parallel jobs (`CLAUDE.md` § *Build-resource policy*, which is binding here too):
 
    ```bash
@@ -94,21 +110,21 @@ commit hash. Tagging is therefore worth doing before a downstream release, not a
    must be **zero warnings, zero errors** and show no test-count regression against the baseline
    recorded in `CLAUDE.md`; `scripts/local_ci_check.sh` runs the same checks plus the module
    boundary, seam and negative-fixture validators.
-4. **Commit** the version-bearing files by explicit name (`CMakeLists.txt`, `Doxyfile`,
+5. **Commit** the version-bearing files by explicit name (`CMakeLists.txt`, `Doxyfile`,
    `CHANGELOG.md`), never `git add -A`.
-5. **Tag** with a `v` prefix and an annotated tag:
+6. **Tag** with a `v` prefix and an annotated tag:
 
    ```bash
    git tag -a v0.1.0-alpha.1 -m "Sharp Runtime 0.1.0-alpha.1"
    ```
 
    The tag string carries the `v`; `SHARP_RUNTIME_VERSION_STRING` never does.
-6. **Push only with the project owner's explicit per-action approval** — `CLAUDE.md` rules 3 and 9
+7. **Push only with the project owner's explicit per-action approval** — `CLAUDE.md` rules 3 and 9
    cover both the branch and the tag — and push the tag explicitly:
 
    ```bash
    git push origin <branch>
    git push origin v0.1.0-alpha.1
    ```
-7. **Open the next cycle** by adding an empty `## [Unreleased]` section back to `CHANGELOG.md` if
+8. **Open the next cycle** by adding an empty `## [Unreleased]` section back to `CHANGELOG.md` if
    step 2 consumed it.

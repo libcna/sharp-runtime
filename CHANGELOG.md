@@ -36,6 +36,37 @@ the release contains, not what changed since a previous tag.
 - **`SharpRuntime/Version.hpp`** — the release identity generated from the build's single source
   of truth, exposing `SharpRuntime::getVersionString()` and the `SHARP_RUNTIME_VERSION_*` macros.
 
+### Dependency pins
+
+Every dependency of the **library** is pinned by this repository, so checking out this tag selects
+them: `vendor/googletest` through its submodule gitlink
+(`7e2c425db2c2e024b2807bfe6d386f4ff068d0d6`, `v1.14.0-223-g7e2c425d`, 2025-06-05), and
+`vendor/nlohmann` (JSON for Modern C++ **3.10.4**), `vendor/tinyxml2` (**11.0.0**) and
+`vendor/miniz` (**11.3.1**) by being checked in as source rather than fetched.
+
+**Two things the tag does not select**, and they are named here rather than left to be discovered:
+
+- **zlib** is a *system* dependency. `modules/io-compression` calls `find_package(ZLIB REQUIRED)`,
+  so the `All` and `IO.Compression` builds take whatever the host provides (on Emscripten it is the
+  `-sUSE_ZLIB=1` port instead). Verified against **zlib 1.3.1**.
+- **tzdata** decides test *expectations*, not just behaviour. `TimeZoneInfo`'s negative-DST
+  expectations are derived from the installed database precisely because a literal would go stale —
+  see the 2026-08-17 note in `CLAUDE.md` — so the environment below is part of what "the gate is
+  green" means.
+
+This release was built and verified on:
+
+    Debian GNU/Linux 13 (trixie)
+    GCC 14.2.0, glibc 2.41, CMake 3.31.6, tzdata 2026b, zlib 1.3.1
+
+Recording these is a stopgap: it documents the environment without enforcing it. A configure-time
+check, or vendoring the remaining system dependency, is the intended replacement.
+
+**Downstream** consumers have the mirror-image problem: CNA and mobile-eggbert consume this
+repository as a sibling checkout with `add_subdirectory`, so their builds take whatever revision
+this checkout is on. CNA's own changelog records that revision; with this tag it can name a tag
+instead. See [`docs/releasing.md`](docs/releasing.md).
+
 ### Known limitations
 
 - Pre-release quality: interfaces are expected to change before 1.0.
