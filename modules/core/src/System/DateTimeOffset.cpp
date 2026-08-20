@@ -3,6 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 
 #include "System/DateTimeOffset.hpp"
+#include "System/ArgumentNullException.hpp"
+#include "System/ILocalTimeZone.hpp"
+#include "System/detail/InvariantExactDateTimeParser.hpp"
 #include "System/detail/DateTimeTextScanner.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -503,5 +506,132 @@ namespace System {
     TimeSpan DateTimeOffset::operator-(const DateTimeOffset& other) const { return Subtract(other); }
 
     GetTypeNameCPP(DateTimeOffset, "System::DateTimeOffset")
+
+// ---------------------------------------------------------------------------
+// ParseExact / TryParseExact -- ticket #1943 (SA-16.2)
+// ---------------------------------------------------------------------------
+
+    bool DateTimeOffset::TryParseExact(const std::string& input, const std::string& format,
+                                       DateTimeOffset& result) {
+        return TryParseExact(input, format, nullptr,
+                             System::Globalization::DateTimeStyles::None, result, nullptr);
+    }
+
+    bool DateTimeOffset::TryParseExact(const std::string& input, const std::string& format,
+                                       const System::IFormatProvider* provider,
+                                       System::Globalization::DateTimeStyles styles,
+                                       DateTimeOffset& result,
+                                       const System::ILocalTimeZone* zone) {
+        using System::Globalization::DateTimeStyles;
+        // Validation runs BEFORE the result is written, so a rejected style leaves the caller's
+        // variable untouched -- two claims, each asserted.
+        detail::ValidateDateTimeStyles(styles, "styles");
+
+        result = DateTimeOffset();
+
+        detail::ExactParseOptions options = detail::ResolveExactParseOptions(provider, styles);
+        // THE OFFSET TOKEN IS THE WHOLE REASON THIS TYPE CAN HAVE AN EXACT PARSE: an offset is not
+        // a time zone, so a format carrying one needs no zone database at all.
+        options.allowZoneToken = true;
+
+        std::string pattern = detail::ExpandStandardDateTimeFormat(format);
+        if (pattern.empty()) {
+            if (format.size() == 1) return false;
+            pattern = format;
+        }
+
+        detail::ExactDateTimeFields fields;
+        if (!detail::MatchExactFormat(input, pattern, detail::ExactTokenSet::DateAndTime, fields,
+                                      options))
+            return false;
+
+        if (fields.year < 0 || fields.month < 0 || fields.day < 0) return false;
+        if (fields.year < 1 || fields.year > 9999) return false;
+        if (fields.month < 1 || fields.month > 12) return false;
+        if (fields.day < 1 || fields.day > DateTime::DaysInMonth(fields.year, fields.month))
+            return false;
+
+        int hour = fields.hour < 0 ? 0 : fields.hour;
+        const int minute = fields.minute < 0 ? 0 : fields.minute;
+        const int second = fields.second < 0 ? 0 : fields.second;
+        if (fields.twelveHour) {
+            if (hour < 1 || hour > 12) return false;
+            if (fields.amPm == 1) hour = (hour == 12) ? 12 : hour + 12;
+            else if (fields.amPm == 0) hour = (hour == 12) ? 0 : hour;
+        }
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59)
+            return false;
+
+        DateTime candidate = DateTime::MinValue;
+        try {
+            candidate = DateTime(fields.year, fields.month, fields.day, hour, minute, second);
+        } catch (...) {
+            return false;
+        }
+        if (fields.fractionTicks != 0) candidate = candidate.AddTicks(fields.fractionTicks);
+        if (fields.weekday >= 0 &&
+            static_cast<int>(candidate.getDayOfWeekProperty()) != fields.weekday)
+            return false;
+
+        // -------------------------------------------------------------------------------
+        // .NET's DateTimeOffsetTimeZonePostProcessing (DateTimeParse.cs:2841-2880).
+        // -------------------------------------------------------------------------------
+        // THIS IS NOT THE `DateTime` MATRIX WITH A DIFFERENT RESULT TYPE. A DateTimeOffset
+        // CAPTURES the offset rather than adjusting the value by it, so nothing here converts:
+        // the parsed wall-clock time is kept exactly as written and only the offset is chosen.
+        TimeSpan offset(static_cast<longcs>(0));
+        if (fields.hasOffset) {
+            if (fields.offsetMinutes < -14 * 60 || fields.offsetMinutes > 14 * 60) return false;
+            offset = TimeSpan::FromMinutes(static_cast<double>(fields.offsetMinutes));
+        } else if ((static_cast<int>(styles) &
+                    static_cast<int>(DateTimeStyles::AssumeUniversal)) != 0) {
+            // AssumeUniversal makes the offset ZERO -- .NET says so in its own comment, and it is
+            // the one route to a defaulted offset that needs no zone.
+            offset = TimeSpan(static_cast<longcs>(0));
+        } else {
+            // .NET's comment: "AssumeLocal causes the offset to default to Local. This flag is on
+            // by default for DateTimeOffset." So the DEFAULT needs a zone, which is why this
+            // type's zone-less overloads raise where DateTime's mostly do not (SA-16.6).
+            if (zone == nullptr) {
+                throw System::ArgumentNullException(
+                    "zone",
+                    "A local time zone is required because the format carries no offset token, so "
+                    "the offset defaults to local. Pass System::TimeZone::CurrentTimeZone(), use a "
+                    "format with `zzz` or `K`, or use DateTimeStyles::AssumeUniversal.");
+            }
+            offset = zone->GetUtcOffset(candidate);
+        }
+
+        // Both the parsed time AND its UTC equivalent must fit a DateTime (.NET's Format_UTCOutOfRange).
+        const longcs utcTicks = candidate.getTicksProperty() - offset.getTicksProperty();
+        if (utcTicks < DateTime::MinValue.getTicksProperty() ||
+            utcTicks > DateTime::MaxValue.getTicksProperty())
+            return false;
+
+        result = DateTimeOffset(candidate, offset);
+        return true;
+    }
+
+    DateTimeOffset DateTimeOffset::ParseExact(const std::string& input,
+                                              const std::string& format) {
+        return ParseExact(input, format, nullptr);
+    }
+
+    DateTimeOffset DateTimeOffset::ParseExact(const std::string& input, const std::string& format,
+                                              const System::IFormatProvider* provider) {
+        return ParseExact(input, format, provider,
+                          System::Globalization::DateTimeStyles::None, nullptr);
+    }
+
+    DateTimeOffset DateTimeOffset::ParseExact(const std::string& input, const std::string& format,
+                                              const System::IFormatProvider* provider,
+                                              System::Globalization::DateTimeStyles styles,
+                                              const System::ILocalTimeZone* zone) {
+        DateTimeOffset result;
+        if (!TryParseExact(input, format, provider, styles, result, zone))
+            throw FormatException("String was not recognized as a valid DateTimeOffset: " + input);
+        return result;
+    }
+
 
 } // namespace System

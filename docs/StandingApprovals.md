@@ -587,6 +587,36 @@ note, and #1945's declaration pin is expected to fail and be inverted rather tha
 Closing only the parse half was declined for a stated reason: with nothing writing a marker there
 is nothing to read, so it would close half a round trip and leave the pin standing.
 
+### SA-16.4 — the general `DateTime::Parse` is left alone
+
+SA-16.3's *"the parse side sets the kind from a zone token"* reaches **`ParseExact` only**.
+`DateTime::Parse(s)` and `TryParse(s, result)` keep #1929's behaviour: they parse an offset and
+**discard** it, and return an `Unspecified` value.
+
+**Granted deliberately, knowing it leaves a divergence**: .NET's `Parse` converts a zone-qualified
+input to local time under the default styles. Those members have no zone and no style parameter, and
+changing a widely used one was declined against the benefit. **The divergence is declared rather
+than repaired**, and a caller who wants the .NET behaviour uses `ParseExact` with a style and a zone.
+
+### SA-16.5 — `XmlConvert::ToString` adopts the **full** `XsdDateTime` form
+
+Not merely a kind marker appended to today's rendering: **the `T` separator too**. Today's
+`2024-06-15 12:00:00` becomes `2024-06-15T12:00:00Z`.
+
+**Two changes rather than one, and that is the point of asking.** Appending only the marker would
+repair the round trip and still leave the document wrong, because an XSD `dateTime` literal requires
+the `T`. Both overloads are affected, including the one that takes no mode.
+
+### SA-16.6 — `DateTimeOffset::ParseExact` publishes .NET's zone-less overloads
+
+They exist, and a format with no offset token raises `ArgumentNullException` naming `zone` with a
+message saying what to pass — **consistent with #1942** rather than a second answer.
+
+**The cost is accepted and is larger here than for `DateTime`**: there, only a few styles need a
+zone; here, **every format without an offset token does**, so the most ordinary call raises unless
+the caller supplies one. Requiring the zone in the signature was declined for diverging further from
+.NET, and refusing the no-offset format was declined as a narrowing .NET does not have.
+
 ---
 
 ## 5. Environment facts, measured 2026-08-17

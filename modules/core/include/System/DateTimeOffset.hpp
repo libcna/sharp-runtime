@@ -6,6 +6,8 @@
 //
 
 #pragma once
+#include "System/IFormatProvider.hpp"
+#include "System/Globalization/DateTimeStyles.hpp"
 
 #include <string>
 
@@ -16,6 +18,10 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System {
+
+    // #1943: a pointer to an incomplete type is all the declarations below need, and a full
+    // include here would be circular -- ILocalTimeZone names DateTime.
+    class ILocalTimeZone;
 
     using SharpRuntime::intcs;
     using SharpRuntime::longcs;
@@ -37,9 +43,11 @@ namespace System {
      *     UTC offset for every instant (no historical/future DST or timezone-rule
      *     lookup), consistent with System::TimeZoneInfo's own documented limitations.
      *   - Calendar-based constructors, leap-second handling, culture-aware
-     *     ToString/Parse (IFormatProvider), ParseExact/TryParseExact, span-based
-     *     TryFormat, Deconstruct, and FromFileTime/ToFileTime (OLE/FILETIME
-     *     conversions) are out of scope.
+     *     ToString/Parse (IFormatProvider), span-based TryFormat, Deconstruct, and
+     *     FromFileTime/ToFileTime (OLE/FILETIME conversions) are out of scope.
+     *   - **`ParseExact`/`TryParseExact` LANDED in #1943 (SA-16.2)** and are no longer part of
+     *     that list. Leaving a header describing an absence it no longer has is the SR-AUD-168
+     *     defect, so the line is corrected rather than left standing.
      */
     class DateTimeOffset : public Object {
     private:
@@ -248,6 +256,61 @@ namespace System {
         [[nodiscard]] static DateTimeOffset Parse(const std::string& s);
         /** @brief Attempts to parse @p s into @p result. @return false if @p s is not a valid date/time. */
         static bool TryParse(const std::string& s, DateTimeOffset& result);
+
+        /**
+         * @brief Parses @p input against exactly @p format.
+         *
+         * C++ counterpart of .NET `DateTimeOffset.ParseExact(string, string, IFormatProvider,
+         * DateTimeStyles)`, added by #1943 under **SA-16.2**.
+         *
+         * @note **AN OFFSET IS NOT A TIME ZONE, AND THAT IS WHY THIS COULD LAND AT ALL.** A format
+         *       carrying an explicit offset token (`zzz` or `K`) needs no zone database whatever:
+         *       the offset is read from the input and stored, `DateTimeOffset` being a `DateTime`
+         *       plus a `TimeSpan`. Only the **no-offset** case needs a zone, because .NET gives
+         *       such a result the **local** offset (`DateTimeOffsetTimeZonePostProcessing`).
+         *
+         * @note **THE ZONE-LESS OVERLOADS EXIST, AND THE COST IS LARGER HERE THAN FOR `DateTime`.**
+         *       There, only a few styles convert; here **every format without an offset token**
+         *       needs a zone, so the most ordinary call raises `ArgumentNullException` naming
+         *       `zone` unless one is supplied or `AssumeUniversal` is used. SA-16.6 accepted that
+         *       knowingly: requiring the zone in the signature would diverge further from .NET,
+         *       and refusing a no-offset format would be a narrowing .NET does not have.
+         *
+         * @throws System::ArgumentException if @p styles is not a legal combination.
+         * @throws System::ArgumentNullException if the offset had to be defaulted and @p zone is
+         *         null.
+         * @throws System::FormatException if @p input does not match @p format.
+         */
+        [[nodiscard]] static DateTimeOffset ParseExact(const std::string& input,
+                                                       const std::string& format);
+
+        /** @brief Parses @p input against exactly @p format, using @p provider's names. */
+        [[nodiscard]] static DateTimeOffset ParseExact(const std::string& input,
+                                                       const std::string& format,
+                                                       const System::IFormatProvider* provider);
+
+        /** @brief Parses @p input against exactly @p format, honouring @p styles. */
+        [[nodiscard]] static DateTimeOffset ParseExact(
+            const std::string& input, const std::string& format,
+            const System::IFormatProvider* provider,
+            System::Globalization::DateTimeStyles styles,
+            const System::ILocalTimeZone* zone = nullptr);
+
+        /** @brief Non-throwing counterpart of ParseExact(input, format). */
+        static bool TryParseExact(const std::string& input, const std::string& format,
+                                  DateTimeOffset& result);
+
+        /**
+         * @brief Non-throwing counterpart of the style-taking ParseExact.
+         *
+         * @note **A `Try*` METHOD THAT THROWS** for an illegal style or a missing zone, which is
+         *       .NET's own shape: a parse *failure* returns false, a programming error is raised.
+         */
+        static bool TryParseExact(const std::string& input, const std::string& format,
+                                  const System::IFormatProvider* provider,
+                                  System::Globalization::DateTimeStyles styles,
+                                  DateTimeOffset& result,
+                                  const System::ILocalTimeZone* zone = nullptr);
         /** @brief Returns a string representation using the default round-trip format. */
         [[nodiscard]] std::string ToString() const override;
         /** @brief Returns a string representation using the given .NET custom/standard format string. */

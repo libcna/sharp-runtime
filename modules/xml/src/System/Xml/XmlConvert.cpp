@@ -522,6 +522,104 @@ namespace {
     }
 
     /**
+     * @brief .NET's `XsdDateTime` rendering for `XmlDateTimeFlags.DateTime` (#1945, SA-16.5).
+     *
+     * TWO CHANGES FROM WHAT THIS FILE USED TO EMIT, NOT ONE, and that is why SA-16.5 had to be
+     * asked rather than assumed. `value.ToString()` renders `2024-06-15 12:00:00` -- a SPACE
+     * separator and no kind marker. An XSD `dateTime` literal requires the `T`, so appending only
+     * the marker would have repaired the round trip and still left the document wrong.
+     *
+     * THE MARKER IS WHAT MAKES `RoundtripKind` REAL. #1945 measured that a kind could not cross a
+     * string in this port, because nothing wrote one and nothing read one; SA-16.3 closed both
+     * halves, and this is the writing half.
+     */
+    std::string renderXsdDateTime(const System::DateTime& value) {
+        char buffer[64];
+        const long fractionTicks = static_cast<long>(value.getTicksProperty() % 10000000LL);
+        int written = std::snprintf(
+            buffer, sizeof(buffer), "%04d-%02d-%02dT%02d:%02d:%02d",
+            static_cast<int>(value.getYearProperty()), static_cast<int>(value.getMonthProperty()),
+            static_cast<int>(value.getDayProperty()), static_cast<int>(value.getHourProperty()),
+            static_cast<int>(value.getMinuteProperty()),
+            static_cast<int>(value.getSecondProperty()));
+        std::string out(buffer, static_cast<std::size_t>(written));
+
+        // .NET emits the fraction only when it is non-zero and TRIMS trailing zeroes -- `.5`
+        // rather than `.5000000`. Always writing seven digits would be a different literal for
+        // the same instant.
+        if (fractionTicks != 0) {
+            written = std::snprintf(buffer, sizeof(buffer), "%07ld", fractionTicks);
+            std::string frac(buffer, static_cast<std::size_t>(written));
+            while (!frac.empty() && frac.back() == '0') frac.pop_back();
+            out += '.';
+            out += frac;
+        }
+
+        // The kind marker. `Unspecified` writes NOTHING, which is what lets an unspecified value
+        // round-trip as unspecified rather than acquiring a kind it never had.
+        switch (value.getKindProperty()) {
+            case System::DateTimeKind::Utc:   out += 'Z'; break;
+            case System::DateTimeKind::Local: {
+                const System::TimeSpan offset =
+                    System::TimeZone::CurrentTimeZone().GetUtcOffset(value);
+                const SharpRuntime::longcs totalMinutes = offset.getTicksProperty() / 600000000LL;
+                const char sign = totalMinutes < 0 ? '-' : '+';
+                const SharpRuntime::longcs magnitude =
+                    totalMinutes < 0 ? -totalMinutes : totalMinutes;
+                written = std::snprintf(buffer, sizeof(buffer), "%c%02d:%02d", sign,
+                                        static_cast<int>(magnitude / 60),
+                                        static_cast<int>(magnitude % 60));
+                out.append(buffer, static_cast<std::size_t>(written));
+                break;
+            }
+            case System::DateTimeKind::Unspecified: break;
+        }
+        return out;
+    }
+
+    /**
+     * @brief Splits a trailing XSD kind marker off @p text (#1945, SA-16.3's reading half).
+     *
+     * **THIS DOES NOT GO THROUGH `DateTime::Parse`, AND THAT IS DELIBERATE RATHER THAN A
+     * WORKAROUND.** SA-16.4 left the general `Parse` alone -- it still parses a zone and
+     * **discards** it, which is #1929's recorded behaviour -- so a round trip built on it could
+     * never carry a kind however the writing half rendered. **.NET does not use `DateTime.Parse`
+     * here either**: `XmlConvert.ToDateTime` builds an `XsdDateTime`, which parses the zone
+     * itself. This is that split, in the smallest form that expresses it.
+     *
+     * @param text The rendered value; the marker is removed in place.
+     * @param kind Receives `Utc` for `Z`, `Local` for a numeric offset, `Unspecified` for neither.
+     * @param offsetMinutes Receives the numeric offset in minutes; 0 otherwise.
+     */
+    void splitXsdKindMarker(std::string& text, System::DateTimeKind& kind, int& offsetMinutes) {
+        kind = System::DateTimeKind::Unspecified;
+        offsetMinutes = 0;
+        if (text.empty()) return;
+
+        if (text.back() == 'Z') {
+            text.pop_back();
+            kind = System::DateTimeKind::Utc;
+            return;
+        }
+        // A numeric offset is exactly six characters, `+hh:mm` or `-hh:mm`. Matching a SHAPE
+        // rather than scanning backwards for a sign is what stops a date's own `-` separator
+        // from being read as one -- `2024-06-15` ends in `06-15`, which a looser rule accepts.
+        if (text.size() < 6) return;
+        const std::string tail = text.substr(text.size() - 6);
+        if ((tail[0] != '+' && tail[0] != '-') || tail[3] != ':') return;
+        auto isDigit = [](char c) { return c >= '0' && c <= '9'; };
+        if (!isDigit(tail[1]) || !isDigit(tail[2]) || !isDigit(tail[4]) || !isDigit(tail[5]))
+            return;
+
+        const int hours = (tail[1] - '0') * 10 + (tail[2] - '0');
+        const int minutes = (tail[4] - '0') * 10 + (tail[5] - '0');
+        if (hours > 14 || minutes > 59) return;
+        offsetMinutes = (tail[0] == '-' ? -1 : 1) * (hours * 60 + minutes);
+        kind = System::DateTimeKind::Local;
+        text.erase(text.size() - 6);
+    }
+
+    /**
      * @brief The four-way mode switch shared by `ToString(value, mode)` and `ToDateTime(s, mode)`.
      *
      * ONE DEFINITION, because .NET writes the same switch twice and two copies of one matrix is
@@ -559,12 +657,14 @@ namespace {
 
 } // namespace
 
-    std::string XmlConvert::ToString(const System::DateTime& value) { return value.ToString(); }
+    std::string XmlConvert::ToString(const System::DateTime& value) {
+        return renderXsdDateTime(value);
+    }
     std::string XmlConvert::ToString(const System::DateTime& value, const std::string& format) { return value.ToString(format); }
 
     std::string XmlConvert::ToString(const System::DateTime& value,
                                      XmlDateTimeSerializationMode mode) {
-        return applyDateTimeMode(value, mode).ToString();
+        return renderXsdDateTime(applyDateTimeMode(value, mode));
     }
 
     std::string XmlConvert::ToString(const System::DateTimeOffset& value) { return value.ToString(); }
@@ -654,14 +754,36 @@ namespace {
         }
         return System::TimeSpan::FromTicks(ticks);
     }
-    System::DateTime XmlConvert::ToDateTime(const std::string& s) { return System::DateTime::Parse(s); }
+    System::DateTime XmlConvert::ToDateTime(const std::string& s) {
+        std::string body = s;
+        System::DateTimeKind kind = System::DateTimeKind::Unspecified;
+        int offsetMinutes = 0;
+        splitXsdKindMarker(body, kind, offsetMinutes);
+        System::DateTime parsed = System::DateTime::Parse(body);
+        if (kind == System::DateTimeKind::Local) {
+            // A numeric offset names an INSTANT, so the value is converted to this process's zone
+            // rather than merely stamped -- otherwise `+05:00` and `+02:00` would produce the same
+            // local wall-clock time and the offset would have been read and thrown away again.
+            parsed = System::DateTime::SpecifyKind(
+                         parsed.AddMinutes(-static_cast<double>(offsetMinutes)),
+                         System::DateTimeKind::Utc)
+                         .ToLocalTime(System::TimeZone::CurrentTimeZone());
+        } else if (kind == System::DateTimeKind::Utc) {
+            parsed = System::DateTime::SpecifyKind(parsed, System::DateTimeKind::Utc);
+        }
+        return parsed;
+    }
     System::DateTime XmlConvert::ToDateTime(const std::string& s, const std::string& format) {
         // .NET is `DateTime.ParseExact(s, format, CultureInfo.InvariantCulture)`. The overload it
         // needs did not exist on this port's DateTime at all until #2414.
         return System::DateTime::ParseExact(s, format);
     }
     System::DateTime XmlConvert::ToDateTime(const std::string& s, XmlDateTimeSerializationMode mode) {
-        return applyDateTimeMode(System::DateTime::Parse(s), mode);
+        // THROUGH THE ONE-ARGUMENT DOOR, not DateTime::Parse: the marker must be split off before
+        // the mode is applied, or every parsed value would still arrive Unspecified and the mode
+        // would stamp rather than convert. Two doors reading one grammar two ways is the #2393
+        // shape, and it is the exact defect this ticket exists to end.
+        return applyDateTimeMode(ToDateTime(s), mode);
     }
     System::DateTimeOffset XmlConvert::ToDateTimeOffset(const std::string& s) { return System::DateTimeOffset::Parse(s); }
     System::DateTimeOffset XmlConvert::ToDateTimeOffset(const std::string& s,

@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
+#include "System/Globalization/DateTimeStyles.hpp"
+#include "System/ArgumentNullException.hpp"
+#include "System/ILocalTimeZone.hpp"
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <stdexcept>
@@ -670,4 +673,124 @@ TEST(DateTimeOffsetTests2, Ticket1880_TryParseFailureAlwaysAssignsMinValue) {
         EXPECT_EQ(std::string(e.what()),
                   "String was not recognized as a valid DateTimeOffset.");
     }
+}
+
+// ===========================================================================
+// #1943 (SA-16.2) -- DateTimeOffset::ParseExact
+// ===========================================================================
+
+namespace {
+
+/// Reused shape rather than a third zone double: a fixed whole-hour offset, so every assertion is
+/// about this type's rules rather than about the container's tzdata (#2351's lesson).
+class Dto1943FixedZone final : public System::ILocalTimeZone {
+public:
+    explicit Dto1943FixedZone(SharpRuntime::longcs hours) : hours_(hours) {}
+    [[nodiscard]] System::TimeSpan GetUtcOffset(const System::DateTime&) const override {
+        return System::TimeSpan::FromHours(static_cast<double>(hours_));
+    }
+    [[nodiscard]] bool IsDaylightSavingTime(const System::DateTime&) const override {
+        return false;
+    }
+private:
+    SharpRuntime::longcs hours_;
+};
+
+} // namespace
+
+// AN OFFSET IS NOT A TIME ZONE, which is the measurement that let this land at all: a format
+// carrying an explicit offset needs no zone database whatever.
+TEST(DateTimeOffsetParseExact1943Tests, AnExplicitOffsetNeedsNoZoneAtAll) {
+    using System::DateTimeOffset;
+
+    const auto parsed = DateTimeOffset::ParseExact("2024-06-15T12:00:00+05:30",
+                                                   "yyyy-MM-ddTHH:mm:sszzz");
+    EXPECT_EQ(parsed.getDateTimeProperty(), System::DateTime(2024, 6, 15, 12, 0, 0));
+    EXPECT_EQ(parsed.getOffsetProperty(), System::TimeSpan::FromMinutes(330));
+
+    // THE VALUE IS CAPTURED, NOT ADJUSTED -- this is not the DateTime matrix with a different
+    // result type. The wall-clock time stays exactly as written and only the offset is chosen,
+    // which is what makes a DateTimeOffset a DateTimeOffset.
+    EXPECT_EQ(parsed.getDateTimeProperty().getHourProperty(), 12);
+
+    // `K` carries an offset too, and a literal `Z` through it is offset zero.
+    const auto z = DateTimeOffset::ParseExact("2024-06-15T12:00:00Z", "yyyy-MM-ddTHH:mm:ssK");
+    EXPECT_EQ(z.getOffsetProperty(), System::TimeSpan(static_cast<SharpRuntime::longcs>(0)));
+    EXPECT_EQ(z.getDateTimeProperty(), System::DateTime(2024, 6, 15, 12, 0, 0));
+}
+
+// THE COST SA-16.6 ACCEPTED KNOWINGLY, and it is larger here than for DateTime: there only a few
+// styles convert, here EVERY format without an offset token needs a zone, so the most ordinary
+// call raises unless one is supplied.
+TEST(DateTimeOffsetParseExact1943Tests, ANoOffsetFormatNamesTheMissingZoneAndSaysWhatToPass) {
+    using System::DateTimeOffset;
+    using System::Globalization::DateTimeStyles;
+    const Dto1943FixedZone plusTwo(2);
+
+    EXPECT_THROW(DateTimeOffset::ParseExact("2024-06-15", "yyyy-MM-dd"),
+                 System::ArgumentNullException);
+    try {
+        DateTimeOffset::ParseExact("2024-06-15", "yyyy-MM-dd");
+        FAIL() << "expected ArgumentNullException";
+    } catch (const System::ArgumentNullException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "zone");
+        const std::string what = e.what();
+        // The message must name ALL THREE routes out, because a caller hitting this has three
+        // genuinely different fixes and no way to guess them from "zone was null".
+        EXPECT_NE(what.find("CurrentTimeZone"), std::string::npos) << what;
+        EXPECT_NE(what.find("zzz"), std::string::npos) << what;
+        EXPECT_NE(what.find("AssumeUniversal"), std::string::npos) << what;
+    }
+
+    // Route 1: supply the zone. The offset becomes the zone's, and the value is still not adjusted.
+    const auto withZone = DateTimeOffset::ParseExact("2024-06-15", "yyyy-MM-dd", nullptr,
+                                                     DateTimeStyles::None, &plusTwo);
+    EXPECT_EQ(withZone.getOffsetProperty(), System::TimeSpan::FromHours(2));
+    EXPECT_EQ(withZone.getDateTimeProperty(), System::DateTime(2024, 6, 15, 0, 0, 0));
+
+    // Route 2: AssumeUniversal makes the offset ZERO and needs no zone -- .NET says so in its own
+    // comment, and it is the one defaulted-offset route that is zone-free.
+    const auto assumed = DateTimeOffset::ParseExact("2024-06-15", "yyyy-MM-dd", nullptr,
+                                                    DateTimeStyles::AssumeUniversal);
+    EXPECT_EQ(assumed.getOffsetProperty(), System::TimeSpan(static_cast<SharpRuntime::longcs>(0)));
+
+    // Route 3 is the offset token, asserted in the case above.
+}
+
+TEST(DateTimeOffsetParseExact1943Tests, StylesAreValidatedAndTheOutParameterIsLeftAlone) {
+    using System::DateTimeOffset;
+    using System::Globalization::DateTimeStyles;
+
+    DateTimeOffset sentinel = DateTimeOffset::ParseExact("2001-02-03T04:05:06Z",
+                                                         "yyyy-MM-ddTHH:mm:ssK");
+    EXPECT_THROW(DateTimeOffset::TryParseExact("2024-06-15", "yyyy-MM-dd", nullptr,
+                                               static_cast<DateTimeStyles>(0x4000), sentinel),
+                 System::ArgumentException);
+    EXPECT_EQ(sentinel.getDateTimeProperty(), System::DateTime(2001, 2, 3, 4, 5, 6));
+
+    // The parameter name is `styles` here where DateTime's is `style`. .NET VARIES IT BY OVERLOAD
+    // rather than using one name, and both are transcribed as they are rather than harmonised.
+    try {
+        DateTimeOffset::ParseExact("2024-06-15", "yyyy-MM-dd", nullptr,
+                                   static_cast<DateTimeStyles>(0x4000));
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "styles");
+    }
+}
+
+TEST(DateTimeOffsetParseExact1943Tests, TheOffsetBoundAndTheUtcRangeAreBothEnforced) {
+    using System::DateTimeOffset;
+    DateTimeOffset out;
+
+    EXPECT_TRUE(DateTimeOffset::TryParseExact("2024-06-15 +14:00", "yyyy-MM-dd zzz", out));
+    EXPECT_FALSE(DateTimeOffset::TryParseExact("2024-06-15 +14:59", "yyyy-MM-dd zzz", out));
+
+    // .NET requires BOTH the parsed time and its UTC equivalent to fit a DateTime. A value at the
+    // very start of the range with a positive offset has a UTC equivalent BEFORE MinValue, so
+    // only the second check can refuse it -- the first passes.
+    EXPECT_FALSE(DateTimeOffset::TryParseExact("0001-01-01T00:00:00+05:00",
+                                               "yyyy-MM-ddTHH:mm:sszzz", out));
+    EXPECT_TRUE(DateTimeOffset::TryParseExact("0001-01-01T00:00:00-05:00",
+                                              "yyyy-MM-ddTHH:mm:sszzz", out));
 }

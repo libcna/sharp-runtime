@@ -411,22 +411,16 @@ TEST(XmlConvertDateTimeMode1945Tests, UtcAndLocalConvertAgainstThisProcessZone) 
     EXPECT_EQ(XmlConvert::ToString(local, XmlDateTimeSerializationMode::Utc), identity);
 }
 
-// A LIMITATION FOUND BY THE TEST ABOVE FAILING, AND DECLARED RATHER THAN HIDDEN.
+// INVERTED BY SA-16.3, NOT DELETED. #1945 measured that a kind could not cross a string here and
+// DECLARED it, writing that the pin "fails the day #1942 teaches Parse to read a Z". The decision
+// went further than that sentence: the reading half does not go through `DateTime::Parse` at all.
 //
-// `RoundtripKind` exists to carry a kind THROUGH A STRING, and in this port it cannot: this
-// runtime's `DateTime::ToString()` emits no kind marker -- no trailing `Z`, no offset -- where
-// .NET's `XsdDateTime` does, and `DateTime::Parse` sets no kind from one either. So every value
-// that comes back from `ToDateTime` is `Unspecified`, whatever it was when it was written.
-//
-// The consequence is precise and worth stating: through the PARSE door, `Local` and `Utc` always
-// STAMP and never CONVERT, because a parsed value is always unspecified. Through the FORMAT door
-// -- where the caller hands over a `DateTime` that still has its kind -- they convert, which is
-// what the case above asserts.
-//
-// This is the same no-zone-token boundary #2414 recorded one level down, surfacing here. Closing
-// it means making `DateTime::Parse` set a kind from a `Z`, which is #1942's `RoundtripKind` work
-// and needs the zone decision that ticket is waiting on. Pinned so the day it lands, this fails.
-TEST(XmlConvertDateTimeMode1945Tests, Decl1945_RoundtripKindCannotRoundtripThroughAString) {
+// SA-16.4 left the general `Parse` alone -- it still parses a zone and DISCARDS it -- so a round
+// trip built on it could never carry a kind however the writing half rendered. **.NET does not use
+// `DateTime.Parse` here either**: `XmlConvert.ToDateTime` builds an `XsdDateTime`, which parses the
+// zone itself. So the marker is split off before `Parse` ever sees the text, and the two halves
+// now meet.
+TEST(XmlConvertDateTimeMode1945Tests, RoundtripKindNowRoundtripsThroughAString) {
     using System::Xml::XmlConvert;
     using System::Xml::XmlDateTimeSerializationMode;
     using System::DateTimeKind;
@@ -434,39 +428,67 @@ TEST(XmlConvertDateTimeMode1945Tests, Decl1945_RoundtripKindCannotRoundtripThrou
     const System::DateTime base(2024, 6, 15, 12, 0, 0);
     const auto utc = System::DateTime::SpecifyKind(base, DateTimeKind::Utc);
 
-    const std::string written = XmlConvert::ToString(utc, XmlDateTimeSerializationMode::RoundtripKind);
-    EXPECT_EQ(written.find('Z'), std::string::npos) << "no kind marker is emitted: " << written;
+    // THE WRITING HALF (SA-16.5): the full XsdDateTime form -- `T` AND the marker, two changes
+    // rather than one, because an XSD `dateTime` literal requires the `T` and appending only the
+    // marker would have repaired the round trip while leaving the document wrong.
+    const std::string written =
+        XmlConvert::ToString(utc, XmlDateTimeSerializationMode::RoundtripKind);
+    EXPECT_EQ(written, "2024-06-15T12:00:00Z");
 
-    const auto readBack = XmlConvert::ToDateTime(written, XmlDateTimeSerializationMode::RoundtripKind);
-    EXPECT_EQ(readBack.getKindProperty(), DateTimeKind::Unspecified);
+    // THE READING HALF: the kind comes back.
+    const auto readBack =
+        XmlConvert::ToDateTime(written, XmlDateTimeSerializationMode::RoundtripKind);
+    EXPECT_EQ(readBack.getKindProperty(), DateTimeKind::Utc);
+    EXPECT_EQ(readBack, utc);
 
-    // ...and therefore the parse door STAMPS where the format door CONVERTS. Both halves in one
-    // case, so the asymmetry reads as a stated consequence rather than two unrelated facts.
-    EXPECT_EQ(XmlConvert::ToDateTime(written, XmlDateTimeSerializationMode::Local).getTicksProperty(),
-              utc.getTicksProperty());
-    EXPECT_EQ(XmlConvert::ToDateTime(written, XmlDateTimeSerializationMode::Local).getKindProperty(),
-              DateTimeKind::Local);
+    // AN UNSPECIFIED VALUE WRITES NO MARKER AND COMES BACK UNSPECIFIED, which is what stops a
+    // value acquiring a kind it never had -- the easy over-correction in the other direction.
+    const std::string plain =
+        XmlConvert::ToString(base, XmlDateTimeSerializationMode::RoundtripKind);
+    EXPECT_EQ(plain, "2024-06-15T12:00:00");
+    EXPECT_EQ(XmlConvert::ToDateTime(plain, XmlDateTimeSerializationMode::RoundtripKind)
+                  .getKindProperty(),
+              DateTimeKind::Unspecified);
 
-    // THE SECOND CONSEQUENCE, MEASURED RATHER THAN REASONED: with no kind marker in the rendering
-    // and every parsed value unspecified, `RoundtripKind` and `Unspecified` are OBSERVATIONALLY
-    // IDENTICAL through both public doors -- for every input kind, not only for this one. That is
-    // why #1945's mutations M4 and M6, which swap the two arms' bodies, are PROVEN EQUIVALENCES
-    // rather than gaps in this file: an assertion that could catch them would have to distinguish
-    // two modes this port cannot distinguish, and both mutations preserve the equality below.
-    //
-    // The arms are kept apart because they are .NET's and because they SEPARATE the day #1942
-    // teaches `DateTime::Parse` to set a kind from a `Z`. When that lands, this loop fails.
-    for (auto kind : {DateTimeKind::Unspecified, DateTimeKind::Utc, DateTimeKind::Local}) {
-        const auto value = System::DateTime::SpecifyKind(base, kind);
-        EXPECT_EQ(XmlConvert::ToString(value, XmlDateTimeSerializationMode::RoundtripKind),
-                  XmlConvert::ToString(value, XmlDateTimeSerializationMode::Unspecified))
-            << "format door, kind " << static_cast<int>(kind);
+    // ...and `RoundtripKind` and `Unspecified` ARE NOW DISTINGUISHABLE, which #1945 recorded as a
+    // proven equivalence and which its mutations M4 and M6 relied on. That equivalence is over.
+    EXPECT_NE(XmlConvert::ToString(utc, XmlDateTimeSerializationMode::RoundtripKind),
+              XmlConvert::ToString(utc, XmlDateTimeSerializationMode::Unspecified));
+}
 
-        const auto text = XmlConvert::ToString(value, XmlDateTimeSerializationMode::RoundtripKind);
-        EXPECT_EQ(XmlConvert::ToDateTime(text, XmlDateTimeSerializationMode::RoundtripKind),
-                  XmlConvert::ToDateTime(text, XmlDateTimeSerializationMode::Unspecified))
-            << "parse door, kind " << static_cast<int>(kind);
-    }
+// The fraction is emitted only when non-zero and its trailing zeroes are TRIMMED, so `.5` rather
+// than `.5000000`. Always writing seven digits would be a different literal for the same instant.
+TEST(XmlConvertDateTimeMode1945Tests, TheFractionIsTrimmedAndOmittedWhenZero) {
+    using System::Xml::XmlConvert;
+
+    EXPECT_EQ(XmlConvert::ToString(System::DateTime(2024, 6, 15, 12, 0, 0)),
+              "2024-06-15T12:00:00");
+    EXPECT_EQ(XmlConvert::ToString(System::DateTime(2024, 6, 15, 12, 0, 0).AddTicks(5000000)),
+              "2024-06-15T12:00:00.5");
+    EXPECT_EQ(XmlConvert::ToString(System::DateTime(2024, 6, 15, 12, 0, 0).AddTicks(1234567)),
+              "2024-06-15T12:00:00.1234567");
+}
+
+// A NUMERIC OFFSET NAMES AN INSTANT, so it is converted rather than stamped. Merely stamping would
+// make `+05:00` and `+02:00` produce the same local wall-clock time -- the offset read and thrown
+// away again, which is the defect this whole ticket exists to end.
+TEST(XmlConvertDateTimeMode1945Tests, ANumericOffsetIsConvertedRatherThanStamped) {
+    using System::Xml::XmlConvert;
+    using System::DateTimeKind;
+
+    const auto a = XmlConvert::ToDateTime("2024-06-15T12:00:00+05:00");
+    const auto b = XmlConvert::ToDateTime("2024-06-15T12:00:00+02:00");
+    EXPECT_EQ(a.getKindProperty(), DateTimeKind::Local);
+    EXPECT_NE(a, b);
+    // Three hours apart, whatever this container's zone is -- asserted as a DIFFERENCE so the row
+    // holds in any tzdata, which is #2351's lesson.
+    EXPECT_EQ((b - a), System::TimeSpan::FromHours(3));
+
+    // A date's own `-` separator must not be read as an offset sign. The marker is matched as a
+    // SHAPE (`+hh:mm` / `-hh:mm`), not by scanning backwards for a sign -- `2024-06-15` ends in
+    // `06-15`, which a looser rule accepts.
+    EXPECT_EQ(XmlConvert::ToDateTime("2024-06-15").getKindProperty(), DateTimeKind::Unspecified);
+    EXPECT_EQ(XmlConvert::ToDateTime("2024-06-15"), System::DateTime(2024, 6, 15));
 }
 
 // The `default:` arm is reachable ONLY by casting a value in from outside the enumeration, which

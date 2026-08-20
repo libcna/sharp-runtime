@@ -155,6 +155,40 @@ exactly, this batch's own tests, no regression**. Graph **41 / 92**, seams **3 /
 sole member is now remediated**; CCF-019 open; CCF-021/#2131 and CCF-022/#2109 unminted. Doxygen,
 `ccache` and `/rv` absent. Maximum compiler parallelism **2 jobs**.*
 
+## 2026-08-20 — SA-16.2/16.3/16.5/16.6: the XSD round trip closes — **#1943 CLOSED**
+
+**Gate: 17,720 / 38, 0 failed, 0 skipped** (+6; `Core_Base` 6,132 → 6,136, `Xml` 524 → 526, #1945's
+declaration pin **inverted**).
+
+**Half A — `DateTimeOffset::ParseExact`.** The measurement that made it possible: **an offset is not
+a time zone**, so a format carrying an explicit one needs no zone database whatever. **The value is
+captured, not adjusted** — not the `DateTime` matrix with a different result type. Only the
+*no-offset* case needs a zone, and SA-16.6 accepted that cost knowingly: **every** offset-less
+format needs one, so the message names **all three routes out**, a caller having three genuinely
+different fixes and no way to guess them from *"zone was null"*.
+
+**Half B — `XmlConvert` round-trips a kind, and the decision went further than #1945's own
+sentence.** That ticket predicted its pin would fail *"the day #1942 teaches `Parse` to read a
+`Z`"* — but **the reading half deliberately does not go through `DateTime::Parse`**, since SA-16.4
+left it alone, still discarding the zone. **.NET does not use `DateTime.Parse` here either**: it
+builds an `XsdDateTime` that parses the zone itself.
+
+The writing half is the **full** XsdDateTime form — **two changes, not one**, because appending only
+the marker would have repaired the round trip and left the document wrong. **A numeric offset is
+converted, not stamped**, since it names an instant. **The marker is matched as a shape**, because
+`2024-06-15` ends in `06-15`.
+
+Fourteen mutations, all caught. **One was invalid as first written twice and is recorded rather than
+counted**: it left `zone->GetUtcOffset` running after the guard and **segfaulted** — undefined
+behaviour is not a verdict, and the harness must not read it as a pass.
+
+**Found on the way and filed rather than bundled: #2416.** `DateTime::ToString` has **no
+standard-format table at all** — `ToString("o")` emits the literal `"o"`, `"s"` returns `"0"`
+(reading `s` as *seconds*), `"%d"` renders `"%15"`. After #2414 and #1942 gave the *parse* side a
+table, **the two halves of one type disagree about what `o` means**.
+
+`docs/Migration-XsdDateTimeRoundTrip.md`. Downstream zero sites.
+
 ## 2026-08-20 — #1942 (SA-16.1): `DateTime::ParseExact` honours `DateTimeStyles`
 
 **Gate: 17,714 / 38, 0 failed, 0 skipped** (+6, `Core_Base` 6,126 → 6,132; two #2414 pins
