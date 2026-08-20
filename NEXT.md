@@ -3,8 +3,8 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-20 — 17,665 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,665 run: 17,665 passed, 0 failed, 0 skipped**, recounted from the
+> **Test-count floor, 2026-08-20 — 17,671 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,671 run: 17,671 passed, 0 failed, 0 skipped**, recounted from the
 > per-executable logs with every executable run separately and continuing past failures, zero build
 > warnings at `--parallel 2`. Every checkpoint below this one ends with *"the gate is not green"*;
 > this one does not. Two of the three historical failure sources were environmental and are simply
@@ -120,10 +120,15 @@
 > base-class changes**, under five conditions whose fourth (enumerate every `catch` clause whose
 > meaning changes) exists because a reparenting is invisible to a layout pin.
 >
-> **The `todo` queue is #1945, #1980 and #1997.** #1980 G-3 and #1997 A-4 were unblocked by SA-15.3;
-> #1942/#1943/#1944 stay blocked on **#1941 phase 2**, which SA-15.1 has now decided the *shape* of
-> but which nobody has implemented yet — that is the next substantial piece and it unblocks three
-> tickets.
+> **#1941 PHASE 2 IS LANDED AND THE DATE/TIME CHAIN IS FULLY OPEN.** `DateTime` converts by its
+> `Kind` against an `ILocalTimeZone` the caller passes. **The recorded blocker looked at the wrong
+> type**: `TimeZoneInfo` is date-INsensitive by its own documentation, while
+> `System::TimeZone::CurrentTimeZone()` is per-date — and that is exactly the zone these
+> conversions need, so the model was present all along.
+>
+> **Six `todo`**: #1942, #1943, #1944 (unblocked by phase 2), #1945, and #1980 / #1997 (unblocked by
+> SA-15.3). **Only three tickets remain blocked**, none of them on a decision this repository can
+> take: #1773 and #2381 wait on downstream/merge events, #1962 on `CAP_NET_RAW`.
 >
 > **One thing #2406 deliberately did NOT do, so it is not mistaken for parity**: `DisplayAttribute`'s
 > eight fields stay public data members (correct — .NET's are `{ get; set; }`), but their

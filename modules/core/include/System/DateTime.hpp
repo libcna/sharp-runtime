@@ -24,8 +24,10 @@ namespace System {
      * Partial C++ counterpart of .NET System.DateTime.
      *
      * @note Status: Partial — since ticket #1941 (#1929 row 4D, **phase 1**) `DateTimeKind` is
-     *   STORED and reported, and `SpecifyKind` and a kind-taking constructor exist. Nothing
-     *   CONVERTS by it: `ToLocalTime` and `ToUniversalTime` are still absent, as are offset/`Z`
+     *   STORED and reported, and `SpecifyKind` and a kind-taking constructor exist. **Since
+     *   #1941 phase 2, `ToLocalTime(zone)` and `ToUniversalTime(zone)` convert by it** -- taking
+     *   the zone explicitly, because `Core.Base` cannot name one; the no-argument forms .NET has
+     *   remain absent and that deviation is recorded on those members. Still absent: offset/`Z`
      *   parse conversion and the `AssumeLocal`/`AssumeUniversal`/`AdjustToUniversal`/
      *   `RoundtripKind` styles. A phase-2 approval must name a date-sensitive timezone provider
      *   before any of those can exist. OLE Automation date, FILETIME, and binary-serialization conversions
@@ -37,6 +39,8 @@ namespace System {
      *   which #1940's own acceptance criterion forbids. Widening the parser is #1942.
      *   `ToString(format)` and the parsers use invariant numeric tokens only.
      */
+    class ILocalTimeZone;
+
     class DateTime : public Object {
     public:
         static constexpr longcs TicksPerMillisecond = 10000LL;
@@ -231,6 +235,43 @@ namespace System {
          * @throws System::ArgumentException if @p kind is not a declared `DateTimeKind` value.
          */
         [[nodiscard]] static DateTime SpecifyKind(const DateTime& value, DateTimeKind kind);
+
+        /**
+         * @brief Converts to local time against @p zone. `DateTime.cs:1705-1722`.
+         *
+         * Added by #1941 **phase 2** under SA-15.1.
+         *
+         * @note **The no-argument `ToLocalTime()` .NET has is still absent, and that is the
+         * deviation SA-15.1 accepted rather than an omission.** .NET's takes no parameter because
+         * it reaches `TimeZoneInfo.Local` directly; `DateTime` lives in `Core.Base` and every
+         * timezone type lives in `TimeZone`, which depends on `Core.Base`, so there is nothing
+         * here for a no-argument form to ask. The two ways out were a **registration hook** --
+         * hidden global state with a static-initialisation-order dependency -- and this: an
+         * overload that takes the source explicitly. It is the same answer #1940 gave for format
+         * providers, where `GetInstance(nullptr)` resolves to the invariant info and a caller who
+         * wants the current culture **passes it**. Callers write
+         * `dt.ToLocalTime(System::TimeZone::CurrentTimeZone())`.
+         *
+         * @note **`Unspecified` is treated as UTC here**, which is .NET's: `:1707` tests only the
+         * `Local` bit, so anything not already local is converted as though it were UTC. The
+         * mirror rule is on `ToUniversalTime`, and the two are deliberately not symmetric.
+         *
+         * @note **Overflow clamps rather than throws** (`:1721`), and the result's `Kind` is
+         * `Local`. The reserved `LocalAmbiguousDst` encoding phase 1 transcribed stays
+         * unreachable: producing it needs an *ambiguity* answer, and this port's
+         * `TimeZoneInfo::IsAmbiguousTime` is documented as always `false`, so inventing one here
+         * would be fabricating a distinction the runtime cannot make.
+         */
+        [[nodiscard]] DateTime ToLocalTime(const ILocalTimeZone& zone) const;
+
+        /**
+         * @brief Converts to UTC against @p zone. `DateTime.cs:1771-1772`.
+         *
+         * @note **`Unspecified` is treated as LOCAL here** -- the mirror of `ToLocalTime`'s rule
+         * and, like it, .NET's: `:1772` returns early only for `Utc`. The asymmetry is the point,
+         * so each direction has its own pin.
+         */
+        [[nodiscard]] DateTime ToUniversalTime(const ILocalTimeZone& zone) const;
 
         /**
          * @brief Gets the year component of this instance (1–9999).

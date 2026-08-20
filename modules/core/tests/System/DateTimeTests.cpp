@@ -7,6 +7,8 @@
 
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
+#include "System/TimeZone.hpp"
+#include "System/ILocalTimeZone.hpp"
 #include <typeinfo>
 #include "System/IFormatProvider.hpp"
 #include "System/Globalization/DateTimeFormatInfo.hpp"
@@ -1467,4 +1469,148 @@ TEST(DateTimeProvider1940Tests, ACultureInfoIsAUsableProvider) {
     // silently drop the other.
     EXPECT_NE(culture.GetFormat(typeid(System::Globalization::NumberFormatInfo)), nullptr);
     EXPECT_EQ(culture.GetFormat(typeid(int)), nullptr);
+}
+
+// ===========================================================================================
+// #1941 PHASE 2 (SA-15.1) -- DateTime converts by its Kind, against a zone it is handed
+//
+// Phase 1 stored a Kind and converted nothing. The recorded blocker was "a date-sensitive
+// timezone/DST model", and THAT PREMISE LOOKED AT THE WRONG TYPE: TimeZoneInfo::GetUtcOffset
+// IGNORES its DateTime argument and IsDaylightSavingTime is always false -- both documented
+// limitations on that type -- while System::TimeZone::CurrentTimeZone() resolves the offset AND
+// the DST flag per instant on POSIX. It describes only the process-local zone, which is exactly
+// the zone these two members convert against, so the model was present all along.
+//
+// The zone is taken EXPLICITLY. .NET's ToLocalTime() has no parameter because it reaches
+// TimeZoneInfo.Local directly; Core.Base cannot name a zone type without a cycle, so the source
+// is a parameter and the no-argument form stays absent. That is SA-15.1's accepted deviation, and
+// the absence pin below still holds because it names the no-argument form.
+// ===========================================================================================
+
+namespace {
+
+/// A zone with a fixed, known offset -- so the assertions are about DateTime's arithmetic and
+/// Kind rules rather than about whatever zone this machine happens to be in.
+class FixedZone : public System::ILocalTimeZone {
+public:
+    explicit FixedZone(SharpRuntime::longcs hours) : hours_(hours) {}
+    [[nodiscard]] System::TimeSpan GetUtcOffset(const System::DateTime&) const override {
+        return System::TimeSpan::FromHours(static_cast<double>(hours_));
+    }
+    [[nodiscard]] bool IsDaylightSavingTime(const System::DateTime&) const override { return false; }
+private:
+    SharpRuntime::longcs hours_;
+};
+
+/// A zone whose offset DEPENDS ON THE INSTANT, which is the property the blocker was about: a
+/// date-insensitive implementation gives the same answer for both halves of the year.
+class SummerTimeZone : public System::ILocalTimeZone {
+public:
+    [[nodiscard]] System::TimeSpan GetUtcOffset(const System::DateTime& t) const override {
+        return System::TimeSpan::FromHours(t.getMonthProperty() >= 4 && t.getMonthProperty() <= 9
+                                               ? 2.0
+                                               : 1.0);
+    }
+    [[nodiscard]] bool IsDaylightSavingTime(const System::DateTime& t) const override {
+        return t.getMonthProperty() >= 4 && t.getMonthProperty() <= 9;
+    }
+};
+
+} // namespace
+
+TEST(DateTimeKindPhase2Tests, ToLocalTimeShiftsAndStampsTheKind) {
+    const FixedZone plusTwo(2);
+    const DateTime utc = DateTime::SpecifyKind(DateTime(2024, 6, 15, 10, 0, 0), System::DateTimeKind::Utc);
+    const DateTime local = utc.ToLocalTime(plusTwo);
+    EXPECT_EQ(local.getHourProperty(), 12);
+    EXPECT_EQ(local.getKindProperty(), System::DateTimeKind::Local);
+
+    // Already local: returned unchanged, ticks and all (DateTime.cs:1707-1710).
+    const DateTime again = local.ToLocalTime(plusTwo);
+    EXPECT_EQ(again.getTicksProperty(), local.getTicksProperty());
+    EXPECT_EQ(again.getKindProperty(), System::DateTimeKind::Local);
+}
+
+TEST(DateTimeKindPhase2Tests, ToUniversalTimeShiftsTheOtherWayAndStampsTheKind) {
+    const FixedZone plusTwo(2);
+    const DateTime local = DateTime::SpecifyKind(DateTime(2024, 6, 15, 12, 0, 0), System::DateTimeKind::Local);
+    const DateTime utc = local.ToUniversalTime(plusTwo);
+    EXPECT_EQ(utc.getHourProperty(), 10);
+    EXPECT_EQ(utc.getKindProperty(), System::DateTimeKind::Utc);
+
+    const DateTime again = utc.ToUniversalTime(plusTwo);
+    EXPECT_EQ(again.getTicksProperty(), utc.getTicksProperty());
+}
+
+// THE TWO Unspecified RULES ARE NOT SYMMETRIC AND THAT IS .NET'S. ToLocalTime tests only the Local
+// bit (:1707), so Unspecified converts as though it were UTC; ToUniversalTime returns early only
+// for Utc (:1772), so Unspecified converts as though it were local. A repair that "harmonised"
+// them would satisfy both cases above and fail here.
+TEST(DateTimeKindPhase2Tests, UnspecifiedIsTreatedAsUtcOneWayAndLocalTheOther) {
+    const FixedZone plusTwo(2);
+    const DateTime unspecified(2024, 6, 15, 12, 0, 0);
+    ASSERT_EQ(unspecified.getKindProperty(), System::DateTimeKind::Unspecified);
+
+    EXPECT_EQ(unspecified.ToLocalTime(plusTwo).getHourProperty(), 14)
+        << "ToLocalTime must read an Unspecified value as UTC and add the offset";
+    EXPECT_EQ(unspecified.ToUniversalTime(plusTwo).getHourProperty(), 10)
+        << "ToUniversalTime must read an Unspecified value as local and subtract the offset";
+}
+
+// The property the blocker was actually about: the offset must come from the INSTANT, not from
+// the zone alone. A date-insensitive provider answers the same for both rows.
+TEST(DateTimeKindPhase2Tests, TheOffsetIsTakenAtTheInstantNotFromTheZoneAlone) {
+    const SummerTimeZone zone;
+    const DateTime winter = DateTime::SpecifyKind(DateTime(2024, 1, 15, 10, 0, 0), System::DateTimeKind::Utc);
+    const DateTime summer = DateTime::SpecifyKind(DateTime(2024, 7, 15, 10, 0, 0), System::DateTimeKind::Utc);
+
+    EXPECT_EQ(winter.ToLocalTime(zone).getHourProperty(), 11);
+    EXPECT_EQ(summer.ToLocalTime(zone).getHourProperty(), 12)
+        << "the same zone must give a different offset in summer, or the model is date-insensitive";
+}
+
+// DateTime.cs:1718-1721 -- a conversion past either end CLAMPS rather than throwing. Both ends,
+// because clamping one and throwing at the other is the plausible half-repair.
+TEST(DateTimeKindPhase2Tests, AConversionPastTheRangeClampsRatherThanThrowing) {
+    const FixedZone plusFourteen(14);
+    const FixedZone minusFourteen(-14);
+
+    const DateTime nearMax(DateTime::MaxTicks, System::DateTimeKind::Utc);
+    DateTime clampedHigh = DateTime::MinValue;
+    EXPECT_NO_THROW(clampedHigh = nearMax.ToLocalTime(plusFourteen));
+    EXPECT_EQ(clampedHigh.getTicksProperty(), DateTime::MaxTicks);
+    EXPECT_EQ(clampedHigh.getKindProperty(), System::DateTimeKind::Local);
+
+    const DateTime nearMin(0LL, System::DateTimeKind::Utc);
+    DateTime clampedLow = DateTime::MaxValue;
+    EXPECT_NO_THROW(clampedLow = nearMin.ToLocalTime(minusFourteen));
+    EXPECT_EQ(clampedLow.getTicksProperty(), 0);
+
+    // THE BOUNDARY ITSELF, ONE TICK WIDE. A clamp written `< -1` instead of `< 0` still clamps
+    // every ordinary underflow and differs on EXACTLY this input -- so without this row the
+    // off-by-one is invisible, which is what a first run of the mutation set measured.
+    class OneTickBehind : public System::ILocalTimeZone {
+    public:
+        [[nodiscard]] System::TimeSpan GetUtcOffset(const System::DateTime&) const override {
+            return System::TimeSpan::FromTicks(-1);
+        }
+        [[nodiscard]] bool IsDaylightSavingTime(const System::DateTime&) const override {
+            return false;
+        }
+    } oneTickBehind;
+    EXPECT_EQ(nearMin.ToLocalTime(oneTickBehind).getTicksProperty(), 0)
+        << "a one-tick underflow must clamp to MinValue, not wrap";
+}
+
+// The real local zone implements the interface, which is what makes the whole shape usable rather
+// than a test-only abstraction. Only structural properties are asserted, because the machine's
+// zone is an environment fact and SA-6 makes encoding one a defect in the test.
+TEST(DateTimeKindPhase2Tests, TheRealLocalZoneIsAUsableILocalTimeZone) {
+    const System::ILocalTimeZone& zone = System::TimeZone::CurrentTimeZone();
+    const DateTime utc = DateTime::SpecifyKind(DateTime(2024, 6, 15, 10, 0, 0), System::DateTimeKind::Utc);
+    const DateTime local = utc.ToLocalTime(zone);
+
+    EXPECT_EQ(local.getKindProperty(), System::DateTimeKind::Local);
+    // A round trip returns the instant, whatever this machine's offset is.
+    EXPECT_EQ(local.ToUniversalTime(zone).getTicksProperty(), utc.getTicksProperty());
 }

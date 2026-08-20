@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "System/ILocalTimeZone.hpp"
 #include <string>
 #include "System/DateTime.hpp"
 #include "System/TimeSpan.hpp"
@@ -15,7 +16,13 @@ namespace System {
      * Concrete subclasses implement GetUtcOffset and IsDaylightSavingTime.
      * Prefer TimeZoneInfo for new code; TimeZone is provided for compatibility.
      */
-    class TimeZone {
+    /**
+     * @note #1941 phase 2 made this an `ILocalTimeZone` (`Core.Base`). The two members that
+     * interface requires were **already declared here, with the same signatures**, so deriving
+     * added nothing and changed nothing -- it only lets a `DateTime` in `Core.Base` be handed one
+     * of these without `Core.Base` naming a `TimeZone` type, which would be a cycle.
+     */
+    class TimeZone : public System::ILocalTimeZone {
     public:
         /** @brief Virtual destructor. */
         virtual ~TimeZone() = default;
@@ -40,7 +47,7 @@ namespace System {
          * C++ counterpart of .NET TimeZone.GetUtcOffset(DateTime).
          * @param time Local date/time whose offset is requested.
          */
-        virtual TimeSpan GetUtcOffset(const DateTime& time)   const = 0;
+        TimeSpan GetUtcOffset(const DateTime& time)   const override = 0;
 
         /**
          * @brief Returns true if the specified time falls within a daylight saving time period.
@@ -48,7 +55,7 @@ namespace System {
          * C++ counterpart of .NET TimeZone.IsDaylightSavingTime(DateTime).
          * @param time Local date/time to test.
          */
-        virtual bool IsDaylightSavingTime(const DateTime& time) const = 0;
+        bool IsDaylightSavingTime(const DateTime& time) const override = 0;
 
         /**
          * @brief Returns the current local time zone.

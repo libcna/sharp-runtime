@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 
 #include "System/DateTime.hpp"
+#include "System/ILocalTimeZone.hpp"
 #include "System/Globalization/DateTimeFormatInfo.hpp"
 #include <array>
 #include "System/detail/DateTimeTextScanner.hpp"
@@ -331,6 +332,29 @@ namespace System {
     // -------------------------------------------------------------------------
     // String
     // -------------------------------------------------------------------------
+
+    // #1941 PHASE 2. Both bodies are DateTime.cs's, and the two Unspecified rules are deliberately
+    // NOT symmetric: ToLocalTime tests only the Local bit (:1707) so Unspecified converts as UTC,
+    // while ToUniversalTime returns early only for Utc (:1772) so Unspecified converts as local.
+    DateTime DateTime::ToLocalTime(const ILocalTimeZone& zone) const {
+        if (getKindProperty() == DateTimeKind::Local) return *this;
+        const longcs offset = zone.GetUtcOffset(*this).getTicksProperty();
+        const longcs shifted = ticks() + offset;
+        // :1718-1721 -- clamp rather than throw. A conversion at the very edge of the range is a
+        // representable answer in .NET and must not become an exception here.
+        if (shifted < 0) return DateTime(0LL, DateTimeKind::Local);
+        if (shifted > MaxTicks) return DateTime(MaxTicks, DateTimeKind::Local);
+        return DateTime(shifted, DateTimeKind::Local);
+    }
+
+    DateTime DateTime::ToUniversalTime(const ILocalTimeZone& zone) const {
+        if (getKindProperty() == DateTimeKind::Utc) return *this;
+        const longcs offset = zone.GetUtcOffset(*this).getTicksProperty();
+        const longcs shifted = ticks() - offset;
+        if (shifted < 0) return DateTime(0LL, DateTimeKind::Utc);
+        if (shifted > MaxTicks) return DateTime(MaxTicks, DateTimeKind::Utc);
+        return DateTime(shifted, DateTimeKind::Utc);
+    }
 
     std::string DateTime::ToString() const {
         const std::tm t = toTm();
