@@ -155,6 +155,32 @@ exactly, this batch's own tests, no regression**. Graph **41 / 92**, seams **3 /
 sole member is now remediated**; CCF-019 open; CCF-021/#2131 and CCF-022/#2109 unminted. Doxygen,
 `ccache` and `/rv` absent. Maximum compiler parallelism **2 jobs**.*
 
+## 2026-08-20 — #1944: multi-format `ParseExact` — **the last open post-audit ticket**
+
+**Gate: 17,732 / 38, 0 failed, 0 skipped** (+7, `Core_Base` 6,141 → 6,148).
+
+All five exact-parsing types gain multi-format `ParseExact`, sharing **one** ordered first-success
+loop. **Ordering is pinned with an input two formats both accept**: `01/02/2024` is 2 January under
+`MM/dd` and 1 February under `dd/MM`, so the two orders give **different dates**.
+
+**An empty element aborts the whole loop rather than being skipped** — the pin puts it *before* a
+format that would have matched, so the plausible-wrong rule succeeds where the right one fails.
+
+**Two failure kinds, because .NET gives them two messages**, and that was found by measurement: with
+the empty-collection guard removed the loop never runs and the fall-through gives the same answer,
+so it **would have been a proven equivalence**.
+
+**The overload hazard the acceptance criteria anticipated was real.** `ParseExact(s, {"a", "b"})`
+and `{"one"}` were **ambiguous**, because two `const char*` in braces match
+`basic_string(InputIt, InputIt)` over two **unrelated** pointers — **and had that candidate won, the
+result would be undefined behaviour**, which is what decided a fix over documenting a papercut.
+`std::initializer_list` overloads resolve it.
+
+**The span-like shapes are recorded rather than taken**: a second text representation beside
+`const std::string&` repeats this very hazard, in a place where the wrong branch is *silent*.
+
+`docs/Migration-MultiFormatParseExact.md`. Downstream zero sites.
+
 ## 2026-08-20 — #2416: `DateTime::ToString` had no standard-format table at all
 
 **Gate: 17,725 / 38, 0 failed, 0 skipped** (+5, `Core_Base` 6,136 → 6,141; **no other executable

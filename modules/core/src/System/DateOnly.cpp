@@ -319,6 +319,47 @@ namespace System {
         return true;
     }
 
+
+    bool DateOnly::TryParseExact(const std::string& input,
+                                    const std::vector<std::string>& formats,
+                                    const System::IFormatProvider* provider,
+                                    System::Globalization::DateTimeStyles style, DateOnly& result) {
+        // The style is validated ONCE, before the loop, so an illegal style raises whatever the
+        // formats are -- including an empty collection, where no single-format call would run.
+        // Validating inside the loop would make the exception depend on the format list.
+        DateOnly candidate = DateOnly(1, 1, 1);
+        result = DateOnly(1, 1, 1);
+        const auto outcome = detail::MatchFirstOfManyFormats(
+            input, formats, [&](const std::string& format) {
+                return TryParseExact(input, format, provider, style, candidate);
+            });
+        // A Try* method returns false for BOTH failure kinds -- .NET does too -- so the kind is
+        // observable only through ParseExact's message, which is where the caller can act on it.
+        if (outcome == detail::MultiFormatOutcome::Matched) result = candidate;
+        return outcome == detail::MultiFormatOutcome::Matched;
+    }
+
+    DateOnly DateOnly::ParseExact(const std::string& input,
+                                   const std::vector<std::string>& formats,
+                                   const System::IFormatProvider* provider,
+                                   System::Globalization::DateTimeStyles style) {
+        DateOnly result = DateOnly(1, 1, 1);
+        DateOnly candidate = DateOnly(1, 1, 1);
+        const auto outcome = detail::MatchFirstOfManyFormats(
+            input, formats, [&](const std::string& format) {
+                return TryParseExact(input, format, provider, style, candidate);
+            });
+        // THE TWO FAILURE KINDS GET .NET'S TWO MESSAGES. Telling a caller who supplied no formats
+        // that their INPUT was not recognized is the wrong diagnosis, and it is the only thing
+        // that distinguishes them -- both are FormatException and both make Try* return false.
+        if (outcome == detail::MultiFormatOutcome::NoFormatSpecifier)
+            throw FormatException("No format specifiers were provided.");
+        if (outcome != detail::MultiFormatOutcome::Matched)
+            throw FormatException("String was not recognized as a valid DateOnly: " + input);
+        result = candidate;
+        return result;
+    }
+
     DateOnly DateOnly::ParseExact(const std::string& input, const std::string& format) {
         DateOnly result(1, 1, 1);
         if (!TryParseExact(input, format, result))

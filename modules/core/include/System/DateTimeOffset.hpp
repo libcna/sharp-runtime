@@ -6,6 +6,8 @@
 //
 
 #pragma once
+#include <initializer_list>
+#include <vector>
 #include "System/IFormatProvider.hpp"
 #include "System/Globalization/DateTimeStyles.hpp"
 
@@ -311,6 +313,72 @@ namespace System {
                                   System::Globalization::DateTimeStyles styles,
                                   DateTimeOffset& result,
                                   const System::ILocalTimeZone* zone = nullptr);
+
+        /**
+         * @brief Parses @p input against the FIRST of @p formats that matches (#1944).
+         *
+         * C++ counterpart of .NET `DateTimeOffset.ParseExact(string, string[], IFormatProvider,
+         * DateTimeStyles)`.
+         *
+         * @note **AN EMPTY ELEMENT ABORTS THE WHOLE LOOP RATHER THAN BEING SKIPPED**, which is the
+         *       rule a plausible implementation gets wrong: .NET returns its bad-format-specifier
+         *       failure immediately rather than trying the next entry.
+         *
+         * @note **AN EMPTY COLLECTION IS A FORMAT FAILURE, NOT AN ARGUMENT ONE** -- .NET's
+         *       `Format_NoFormatSpecifier` -- so a caller passing no formats gets
+         *       `FormatException`, which is easy to get wrong in the direction of
+         *       `ArgumentException`.
+         *
+         * @note .NET's **null formats array** raises `ArgumentNullException`; that arm has **no
+         *       C++ counterpart here** and is deliberately not reproduced, the parameter being a
+         *       `const std::vector<std::string>&` that cannot be null.
+         */
+        [[nodiscard]] static DateTimeOffset ParseExact(
+            const std::string& input, const std::vector<std::string>& formats,
+            const System::IFormatProvider* provider = nullptr,
+            System::Globalization::DateTimeStyles styles = System::Globalization::DateTimeStyles::None,
+            const System::ILocalTimeZone* zone = nullptr);
+
+        /** @brief Non-throwing counterpart of the multi-format ParseExact. */
+        static bool TryParseExact(const std::string& input,
+                                  const std::vector<std::string>& formats,
+                                  const System::IFormatProvider* provider,
+                                  System::Globalization::DateTimeStyles styles, DateTimeOffset& result,
+                                  const System::ILocalTimeZone* zone = nullptr);
+
+        /**
+         * @brief `std::initializer_list` overload of the multi-format ParseExact (#1944).
+         *
+         * **THIS EXISTS TO KEEP A BRACED LIST OUT OF `std::string`'s ITERATOR-PAIR CONSTRUCTOR,
+         * and the wrong branch is undefined behaviour rather than merely a wrong overload.**
+         * Measured: without it, `ParseExact(s, {"a", "b"})` is **ambiguous** between the
+         * single-format `(string, string)` -- where two `const char*` in braces match
+         * `basic_string(InputIt first, InputIt last)` over two **unrelated** pointers -- and the
+         * multi-format one. `{"one"}` is ambiguous too; three or more elements are not, and an
+         * explicit `std::vector<std::string>{...}` never was.
+         *
+         * A braced list binds to an `initializer_list` parameter by a **list-initialization
+         * sequence**, which outranks any user-defined conversion, so this overload takes it
+         * unambiguously and the dangerous candidate can no longer win.
+         */
+        [[nodiscard]] static DateTimeOffset ParseExact(
+            const std::string& input, std::initializer_list<std::string> formats,
+            const System::IFormatProvider* provider = nullptr,
+            System::Globalization::DateTimeStyles styles = System::Globalization::DateTimeStyles::None,
+            const System::ILocalTimeZone* zone = nullptr) {
+            return ParseExact(input, std::vector<std::string>(formats), provider,
+                              styles, zone);
+        }
+
+        /** @brief `std::initializer_list` overload of the multi-format TryParseExact. */
+        static bool TryParseExact(const std::string& input,
+                                  std::initializer_list<std::string> formats,
+                                  const System::IFormatProvider* provider,
+                                  System::Globalization::DateTimeStyles styles, DateTimeOffset& result,
+                                  const System::ILocalTimeZone* zone = nullptr) {
+            return TryParseExact(input, std::vector<std::string>(formats), provider,
+                                 styles, result, zone);
+        }
         /** @brief Returns a string representation using the default round-trip format. */
         [[nodiscard]] std::string ToString() const override;
         /** @brief Returns a string representation using the given .NET custom/standard format string. */

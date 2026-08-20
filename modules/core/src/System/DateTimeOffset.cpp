@@ -617,6 +617,51 @@ namespace System {
         return ParseExact(input, format, nullptr);
     }
 
+
+    bool DateTimeOffset::TryParseExact(const std::string& input,
+                                              const std::vector<std::string>& formats,
+                                              const System::IFormatProvider* provider,
+                                              System::Globalization::DateTimeStyles styles,
+                                              DateTimeOffset& result,
+                                              const System::ILocalTimeZone* zone) {
+        // The style is validated ONCE, before the loop, so an illegal style raises whatever the
+        // formats are -- including an empty collection, where no single-format call would ever
+        // run. Validating inside the loop would make the exception depend on the format list.
+        detail::ValidateDateTimeStyles(styles, "styles");
+        result = DateTimeOffset();
+        DateTimeOffset candidate = DateTimeOffset();
+        const auto outcome = detail::MatchFirstOfManyFormats(
+            input, formats, [&](const std::string& format) {
+                return TryParseExact(input, format, provider, styles, candidate, zone);
+            });
+        // A Try* method returns false for BOTH failure kinds -- .NET does too -- so the kind is
+        // observable only through ParseExact's message, which is where the caller can act on it.
+        if (outcome == detail::MultiFormatOutcome::Matched) result = candidate;
+        return outcome == detail::MultiFormatOutcome::Matched;
+    }
+
+    DateTimeOffset DateTimeOffset::ParseExact(const std::string& input,
+                                              const std::vector<std::string>& formats,
+                                              const System::IFormatProvider* provider,
+                                              System::Globalization::DateTimeStyles styles,
+                                              const System::ILocalTimeZone* zone) {
+        DateTimeOffset result = DateTimeOffset();
+        DateTimeOffset candidate = DateTimeOffset();
+        const auto outcome = detail::MatchFirstOfManyFormats(
+            input, formats, [&](const std::string& format) {
+                return TryParseExact(input, format, provider, styles, candidate, zone);
+            });
+        // THE TWO FAILURE KINDS GET .NET'S TWO MESSAGES. Telling a caller who supplied no formats
+        // that their INPUT was not recognized is the wrong diagnosis, and it is the only thing
+        // that distinguishes them -- both are FormatException and both make Try* return false.
+        if (outcome == detail::MultiFormatOutcome::NoFormatSpecifier)
+            throw FormatException("No format specifiers were provided.");
+        if (outcome != detail::MultiFormatOutcome::Matched)
+            throw FormatException("String was not recognized as a valid DateTimeOffset: " + input);
+        result = candidate;
+        return result;
+    }
+
     DateTimeOffset DateTimeOffset::ParseExact(const std::string& input, const std::string& format,
                                               const System::IFormatProvider* provider) {
         return ParseExact(input, format, provider,

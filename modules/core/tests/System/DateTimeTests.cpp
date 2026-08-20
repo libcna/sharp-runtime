@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
+#include <vector>
+#include "System/Globalization/TimeSpanStyles.hpp"
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/ArgumentNullException.hpp"
 #include "System/ILocalTimeZone.hpp"
@@ -2128,4 +2130,184 @@ TEST(DateTimeToStringStandard2416Tests, MultiCharacterFormatsAreStillCustom) {
     EXPECT_EQ(d.ToString("MMMM"), "June");
     // ...and the no-argument overload is untouched, keeping its space separator.
     EXPECT_EQ(d.ToString(), "2024-06-15 12:00:00");
+}
+
+// ===========================================================================
+// #1944 -- multi-format ParseExact, across all five exact-parsing types
+// ===========================================================================
+//
+// ONE LOOP FOR FIVE TYPES (`detail::MatchFirstOfManyFormats`), because the taxonomy is identical
+// and five copies of one rule is how five doors come to disagree about what an empty element
+// means. .NET writes it twice -- `TryParseExactMultiple` and `TryParseExactMultipleTimeSpan` --
+// and the two agree, so sharing is faithful rather than a shortcut.
+
+TEST(MultiFormatParseExact1944Tests, FirstSuccessWinsAndTheORDERIsWhatDecides) {
+    using System::DateTime;
+    const std::vector<std::string> formats = {"yyyy-MM-dd", "MM/dd/yyyy", "dd.MM.yyyy"};
+
+    EXPECT_EQ(DateTime::ParseExact("2024-06-15", formats), DateTime(2024, 6, 15));
+    EXPECT_EQ(DateTime::ParseExact("06/15/2024", formats), DateTime(2024, 6, 15));
+    EXPECT_EQ(DateTime::ParseExact("15.06.2024", formats), DateTime(2024, 6, 15));
+
+    // THE ROW THAT PROVES IT IS ORDERED rather than "whichever matches": an input two formats
+    // both accept must be read by the FIRST of them. `01/02/2024` is 2 January under `MM/dd` and
+    // 1 February under `dd/MM`, so the two orders give DIFFERENT DATES -- not merely a different
+    // code path -- and a set-based implementation would be visibly wrong here.
+    const std::vector<std::string> usFirst = {"MM/dd/yyyy", "dd/MM/yyyy"};
+    const std::vector<std::string> euFirst = {"dd/MM/yyyy", "MM/dd/yyyy"};
+    EXPECT_EQ(DateTime::ParseExact("01/02/2024", usFirst), DateTime(2024, 1, 2));
+    EXPECT_EQ(DateTime::ParseExact("01/02/2024", euFirst), DateTime(2024, 2, 1));
+}
+
+// THE SUBTLE RULE, and the one a plausible implementation gets wrong: an EMPTY ELEMENT aborts the
+// whole loop rather than being skipped. .NET returns SetBadFormatSpecifierFailure immediately.
+TEST(MultiFormatParseExact1944Tests, AnEmptyElementAbortsRatherThanBeingSkipped) {
+    using System::DateTime;
+    DateTime out = DateTime::MinValue;
+
+    // The empty element sits BEFORE a format that would have matched, so "skip it and carry on"
+    // succeeds here and the correct rule fails. Putting it last would make the two agree and the
+    // case would assert nothing.
+    EXPECT_FALSE(DateTime::TryParseExact("2024-06-15", {"", "yyyy-MM-dd"}, nullptr,
+                                         System::Globalization::DateTimeStyles::None, out));
+    EXPECT_THROW(DateTime::ParseExact("2024-06-15", {"", "yyyy-MM-dd"}),
+                 System::FormatException);
+
+    // ...and with no empty element the same list works, so what fails is the element rather than
+    // the shape of the call.
+    EXPECT_TRUE(DateTime::TryParseExact("2024-06-15", {"dd.MM.yyyy", "yyyy-MM-dd"}, nullptr,
+                                        System::Globalization::DateTimeStyles::None, out));
+}
+
+TEST(MultiFormatParseExact1944Tests, AnEmptyCollectionIsAFormatFailureNotAnArgumentOne) {
+    using System::DateTime;
+    DateTime out = DateTime::MinValue;
+
+    // .NET's Format_NoFormatSpecifier -- easy to get wrong in the direction of ArgumentException,
+    // which is what "no formats were supplied" sounds like.
+    EXPECT_FALSE(DateTime::TryParseExact("2024-06-15", std::vector<std::string>{}, nullptr,
+                                         System::Globalization::DateTimeStyles::None, out));
+    EXPECT_THROW(DateTime::ParseExact("2024-06-15", std::vector<std::string>{}),
+                 System::FormatException);
+
+    // THE TWO FAILURE KINDS CARRY .NET'S TWO MESSAGES, and that is the only thing distinguishing
+    // them -- both are FormatException and both make Try* return false. Measured while writing
+    // this: with the empty-collection guard simply REMOVED, the loop body never runs and the
+    // fall-through gives the same answer, so the guard would be a proven equivalence and #1944's
+    // mutation M2 uncaught. Carrying .NET's own two messages makes it load-bearing, and it is
+    // also the right diagnosis: telling a caller who supplied no formats that their INPUT was
+    // unrecognised is wrong.
+    auto messageFor = [](const std::vector<std::string>& formats) {
+        try { (void)DateTime::ParseExact("2024-06-15", formats); }
+        catch (const System::FormatException& e) { return std::string(e.what()); }
+        return std::string("<no throw>");
+    };
+    EXPECT_NE(messageFor({}).find("No format specifiers were provided."), std::string::npos)
+        << messageFor({});
+    EXPECT_NE(messageFor({"dd.MM.yyyy"}).find("was not recognized"), std::string::npos)
+        << messageFor({"dd.MM.yyyy"});
+    EXPECT_NE(messageFor({}), messageFor({"dd.MM.yyyy"}));
+
+    // An EMPTY ELEMENT is the same KIND as an empty collection -- the caller's formats are wrong,
+    // not their input -- so it gets the format-specifier message rather than the parse one.
+    EXPECT_NE(messageFor({"", "yyyy-MM-dd"}).find("No format specifiers were provided."),
+              std::string::npos)
+        << messageFor({"", "yyyy-MM-dd"});
+
+    // An empty INPUT is an ordinary parse failure too, and the two are different rules that
+    // happen to agree on the outcome -- asserted together so neither is mistaken for the other.
+    EXPECT_FALSE(DateTime::TryParseExact("", {"yyyy-MM-dd"}, nullptr,
+                                         System::Globalization::DateTimeStyles::None, out));
+}
+
+// THE STYLE IS VALIDATED ONCE, BEFORE THE LOOP, so an illegal style raises whatever the formats
+// are -- INCLUDING an empty collection, where no single-format call would ever run. Validating
+// inside the loop would make the exception depend on the format list, which is the shape a
+// caller cannot reason about.
+TEST(MultiFormatParseExact1944Tests, TheStyleIsValidatedBeforeTheLoopRuns) {
+    using System::DateTime;
+    using System::Globalization::DateTimeStyles;
+    DateTime out = DateTime::MinValue;
+    const auto bogus = static_cast<DateTimeStyles>(0x4000);
+
+    EXPECT_THROW(DateTime::TryParseExact("2024-06-15", {"yyyy-MM-dd"}, nullptr, bogus, out),
+                 System::ArgumentException);
+    // The empty-collection case is the one that discriminates: with validation inside the loop
+    // this would return false instead of raising, because the loop body never executes.
+    EXPECT_THROW(DateTime::TryParseExact("2024-06-15", std::vector<std::string>{}, nullptr,
+                                         bogus, out),
+                 System::ArgumentException);
+    EXPECT_EQ(out, DateTime::MinValue);
+}
+
+// A FAILED MULTI-FORMAT PARSE MUST NOT LEAVE A PARTIAL RESULT from a format that matched part of
+// the way. The loop writes into a candidate and commits only on success, which is the same
+// discipline every single-format door here already follows.
+TEST(MultiFormatParseExact1944Tests, AFailedParseLeavesTheOutParameterAtItsDefault) {
+    using System::DateTime;
+    DateTime out(1999, 1, 1);
+    EXPECT_FALSE(DateTime::TryParseExact("not a date", {"yyyy-MM-dd", "MM/dd/yyyy"}, nullptr,
+                                         System::Globalization::DateTimeStyles::None, out));
+    EXPECT_EQ(out, DateTime::MinValue);
+}
+
+// ALL FIVE TYPES SHARE THE LOOP, so all five must show it. A test covering only DateTime would
+// pass against four copies that had drifted.
+TEST(MultiFormatParseExact1944Tests, EveryExactParsingTypeHasTheSameTaxonomy) {
+    using System::Globalization::DateTimeStyles;
+    using System::Globalization::TimeSpanStyles;
+
+    EXPECT_EQ(System::DateOnly::ParseExact("2024-06-15", {"dd.MM.yyyy", "yyyy-MM-dd"}),
+              System::DateOnly(2024, 6, 15));
+    EXPECT_EQ(System::TimeOnly::ParseExact("13:45", {"HH-mm", "HH:mm"}), System::TimeOnly(13, 45));
+    EXPECT_EQ(System::TimeSpan::ParseExact("01:30", {"hh-mm", "hh':'mm"}),
+              System::TimeSpan::FromMinutes(90));
+    EXPECT_EQ(System::DateTimeOffset::ParseExact(
+                  "2024-06-15T12:00:00Z", {"dd.MM.yyyy", "yyyy-MM-ddTHH:mm:ssK"})
+                  .getOffsetProperty(),
+              System::TimeSpan(static_cast<SharpRuntime::longcs>(0)));
+
+    // ...and the empty-element rule holds on every one of them, which is the property the shared
+    // loop exists to guarantee rather than to be assumed.
+    System::DateOnly d = System::DateOnly::MinValue;
+    System::TimeOnly t(0, 0);
+    System::TimeSpan ts;
+    System::DateTimeOffset dto;
+    EXPECT_FALSE(System::DateOnly::TryParseExact("2024-06-15", {"", "yyyy-MM-dd"}, nullptr,
+                                                 DateTimeStyles::None, d));
+    EXPECT_FALSE(System::TimeOnly::TryParseExact("13:45", {"", "HH:mm"}, nullptr,
+                                                 DateTimeStyles::None, t));
+    EXPECT_FALSE(System::TimeSpan::TryParseExact("01:30", {"", "hh':'mm"}, nullptr,
+                                                 TimeSpanStyles::None, ts));
+    EXPECT_FALSE(System::DateTimeOffset::TryParseExact("2024-06-15T12:00:00Z",
+                                                       {"", "yyyy-MM-ddTHH:mm:ssK"}, nullptr,
+                                                       DateTimeStyles::None, dto, nullptr));
+}
+
+// THE OVERLOAD-RESOLUTION HAZARD #1944's acceptance criteria anticipated ("compile ambiguity
+// fixtures"), measured rather than reasoned about.
+//
+// Without the `std::initializer_list` overloads, `ParseExact(s, {"a", "b"})` is AMBIGUOUS: two
+// `const char*` in braces match `std::basic_string(InputIt first, InputIt last)` over two
+// UNRELATED pointers, so the single-format overload is a candidate -- and if it had ever won, the
+// result would be undefined behaviour rather than a wrong answer. `{"one"}` was ambiguous too;
+// three or more elements were not, and an explicit `std::vector<std::string>{...}` never was.
+//
+// A braced list binds to an `initializer_list` parameter by a LIST-INITIALIZATION SEQUENCE, which
+// outranks any user-defined conversion, so the dangerous candidate can no longer win. These rows
+// are compile-time evidence: each spelling below simply has to compile and give the right answer.
+TEST(MultiFormatParseExact1944Tests, EveryBracedSpellingResolvesToTheMultiFormatReading) {
+    using System::DateTime;
+    const DateTime expected(2024, 6, 15);
+
+    EXPECT_EQ(DateTime::ParseExact("2024-06-15", {"yyyy-MM-dd"}), expected);
+    EXPECT_EQ(DateTime::ParseExact("2024-06-15", {"dd.MM.yyyy", "yyyy-MM-dd"}), expected);
+    EXPECT_EQ(DateTime::ParseExact("2024-06-15", {"a.b", "c/d", "yyyy-MM-dd"}), expected);
+    EXPECT_EQ(DateTime::ParseExact("2024-06-15", std::vector<std::string>{"yyyy-MM-dd"}), expected);
+    EXPECT_EQ(DateTime::ParseExact("2024-06-15", {std::string("yyyy-MM-dd")}), expected);
+
+    // ...and the SINGLE-format overload is still reachable, unbraced, which is the half a fix
+    // aimed only at the braced spelling could have broken.
+    EXPECT_EQ(DateTime::ParseExact("2024-06-15", "yyyy-MM-dd"), expected);
+    EXPECT_EQ(DateTime::ParseExact("2024-06-15", std::string("yyyy-MM-dd")), expected);
 }

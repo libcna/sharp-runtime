@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cstddef>
 #include <string>
+#include <vector>
 #include <string_view>
 
 /**
@@ -114,6 +115,64 @@ namespace System::detail {
      * @return The expanded custom pattern, or an empty string when @p format is not standard.
      */
     /** @brief The options a null provider and `DateTimeStyles::None` resolve to. */
+    /**
+     * @brief The ordered first-success loop every multi-format `ParseExact` shares (#1944).
+     *
+     * ONE DEFINITION FOR FIVE TYPES, because the loop is identical and only the single-format call
+     * differs -- five copies of one taxonomy is how five doors come to disagree about what an
+     * empty element means.
+     *
+     * .NET's `TryParseExactMultiple` (`DateTimeParse.cs:170-200`) and
+     * `TryParseExactMultipleTimeSpan` (`TimeSpanParse.cs`) are the same four rules in both files:
+     *
+     *   1. a **null** formats array raises `ArgumentNullException`. **THAT ARM HAS NO C++
+     *      COUNTERPART HERE** and is deliberately not reproduced: the parameter is a
+     *      `const std::vector<std::string>&`, which cannot be null.
+     *   2. an **empty input** is an ordinary parse failure.
+     *   3. an **empty formats collection** is a FORMAT failure, not an argument one -- .NET's
+     *      `Format_NoFormatSpecifier`. A caller passing no formats gets `FormatException`, which
+     *      is easy to get wrong in the direction of `ArgumentException`.
+     *   4. an **empty element** ABORTS THE WHOLE LOOP rather than being skipped. This is the
+     *      subtle one: "skip a bad format and try the next" is the plausible implementation and it
+     *      is wrong, because .NET returns `SetBadFormatSpecifierFailure` immediately.
+     *
+     * @param tryOne Invoked as `tryOne(format)` and returning whether that format matched; it is
+     *        responsible for writing the caller's result on success.
+     * @return false for every failure; the caller turns that into its own exception or `false`.
+     */
+    /**
+     * @brief The two failure kinds .NET distinguishes, which this port must distinguish too.
+     *
+     * MEASURED: with the empty-collection guard simply removed, the loop body never runs and the
+     * fall-through `return false` gives the SAME answer -- so the guard would be a proven
+     * equivalence and #1944's mutation M2 uncaught. But **.NET's two failures carry DIFFERENT
+     * MESSAGES**: `Format_NoFormatSpecifier` is *"No format specifiers were provided."* while an
+     * ordinary miss is *"String was not recognized as a valid …"*. Collapsing them would tell a
+     * caller who passed no formats that their INPUT was bad, which is the wrong diagnosis.
+     */
+    enum class MultiFormatOutcome { Matched, NoFormatSpecifier, NotRecognized };
+
+    template <typename TryOne>
+    [[nodiscard]] inline MultiFormatOutcome MatchFirstOfManyFormats(
+            const std::string& input, const std::vector<std::string>& formats, TryOne&& tryOne) {
+        if (formats.empty()) return MultiFormatOutcome::NoFormatSpecifier;
+        // A PROVEN EQUIVALENCE, recorded rather than counted (#1944's mutation M3): with this
+        // line removed the loop still runs, every format fails to match an empty input, and the
+        // fall-through returns the SAME outcome with the SAME message. **.NET's is an equivalence
+        // too** -- its `s.Length == 0` arm and its all-formats-failed arm are both
+        // `SetBadDateTimeFailure`, one kind and one text -- so this is a statement of intent
+        // rather than a rule, kept because it is .NET's and because it says WHY an empty input
+        // cannot succeed without relying on every format's scanner to refuse it.
+        if (input.empty()) return MultiFormatOutcome::NotRecognized;
+        for (const std::string& format : formats) {
+            // An empty ELEMENT is `SetBadFormatSpecifierFailure`, which is the same KIND as an
+            // empty collection: the caller's formats are wrong, not their input.
+            if (format.empty()) return MultiFormatOutcome::NoFormatSpecifier;
+            if (tryOne(format)) return MultiFormatOutcome::Matched;
+        }
+        return MultiFormatOutcome::NotRecognized;
+    }
+
     /**
      * @brief .NET's `DateTimeFormatInfo.ValidateStyles`, transcribed (#1942).
      *
