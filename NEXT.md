@@ -139,6 +139,47 @@
 > and each is itemised in §2 below. **§4b says where to look next, and the method that found all
 > three of today's tickets.**
 
+## 2026-08-20 — #1997 group A-4: `UriParser` could not extend anything
+
+**Gate: 17,689 / 38, 0 failed, 0 skipped** (+6, `Uri` 308 → 314). Graph 41/94. Fixture set
+52/264 → 53/269.
+
+**The change SA-3's vtable exclusion was blocking, released by SA-15.3.** Closes SR-AUD-146.
+
+Three defects in one type: **`Register` did not exist at all**, so a custom parser could be written
+and then had nowhere to go — A-3's shape one member over; **three override hooks were `public`**
+where .NET's are `protected`, so any caller holding a `UriParser&` could invoke another parser's
+hook; and **`OnRegister` was absent**, so a parser could not observe its own registration.
+
+**The registration is observable, which is the whole point.** A `Register` that validated and stored
+into a table nothing reads is accepted-and-ignored — the SR-AUD-168 defect. `IsKnownScheme` now
+consults the registry; M1 breaks that link and is caught by four cases.
+
+Transcribed rather than derived: a **one-character scheme is refused** though `CheckSchemeName`
+accepts it; the **port range is 0..65535 plus the sentinel −1**, because .NET's test casts to `uint`
+and *the cast is the rule* (a naive `port > 0xFFFF` accepts −2); **`OnRegister` runs before the
+scheme is stored**, so the parser cannot read its own scheme in the callback.
+
+**A mistake of my own, recorded rather than quietly fixed:** .NET keeps built-ins and customs in
+*one* table; this port must split them, having no parser objects for the sixteen built-ins, and a
+first cut checked only the custom map — it would have let a caller claim `gopher`. M5 catches it.
+
+`sizeof(UriParser)` **8 → 48**. **SA-15.3's fourth condition is discharged as empty and says so**:
+no exception type was introduced, reparented or removed, so no `catch` clause changes meaning.
+
+Eight mutations, all caught. **M8 — republishing a hook — is invisible to gtest**, because a widened
+hook behaves identically wherever both spellings compile; the negative fixture catches it. One M7
+verdict was harness noise (an ambiguous anchor, so the edit never applied) and is recorded rather
+than counted.
+
+Deliberately absent with reasons: `OnNewUri` (no caller — this port's `Uri` never consults a
+parser), `InitializeAndValidate` and `Resolve` (an `out UriFormatException` with no uninvented C++
+counterpart, reaching `uri._syntax` this port has not). **That nothing calls the hooks at all is
+declared in the header** rather than left to be discovered.
+
+`docs/Migration-UriParserRegistrationAndProtectedHooks.md`. Downstream zero sites, so no
+#1773-shaped ticket was owed. **#1997 now has only A-2 left.**
+
 ## 2026-08-20 — #2414: `DateTime` had no `ParseExact` at all
 
 **Gate: 17,683 / 38, 0 failed, 0 skipped** (+7, `Core_Base` 6,111 → 6,118).
