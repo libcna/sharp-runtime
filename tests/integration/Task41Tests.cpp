@@ -19,6 +19,8 @@
 #include "System/Text/EncoderFallback.hpp"
 #include "System/ComponentModel/Win32Exception.hpp"
 #include "System/ComponentModel/DataAnnotations/DataAnnotationAttributes.hpp"
+#include "System/InvalidOperationException.hpp"
+#include <utility>
 #include "System/Text/Json/JsonSerializerOptions.hpp"
 #include "System/Text/Json/JsonValueKind.hpp"
 #include "System/Text/Json/Serialization/JsonSerializationAttributes.hpp"
@@ -324,6 +326,9 @@ using System::ComponentModel::DataAnnotations::StringLengthAttribute;
 using System::ComponentModel::DataAnnotations::MaxLengthAttribute;
 using System::ComponentModel::DataAnnotations::MinLengthAttribute;
 using System::ComponentModel::DataAnnotations::RegularExpressionAttribute;
+using System::ComponentModel::DataAnnotations::DataTypeAttribute;
+using System::ComponentModel::DataAnnotations::DataType;
+using System::ComponentModel::DataAnnotations::ScaffoldColumnAttribute;
 
 TEST(ValidationAttributeTests, DefaultCtor_EmptyMessage) {
     ValidationAttribute a;
@@ -584,4 +589,129 @@ TEST(PropMacroTests, DDATA_MoveSet) {
     PropBox box;
     box.setWidthProperty(7);
     EXPECT_EQ(box.getWidthProperty(), 7);
+}
+
+
+// ===========================================================================================
+// #2406 -- DataAnnotations: DataTypeAttribute's enum, ScaffoldColumnAttribute's get-only field,
+// and the declaration that this whole family validates nothing.
+// ===========================================================================================
+
+// DataType.cs -- all seventeen, Custom = 0 through Upload = 16. Asserted as VALUES, because these
+// are metadata: the number is the contract, and a renumbering is invisible to any behavioural test.
+TEST(DataAnnotations2406Tests, TheDataTypeEnumHasDotNetsValues) {
+    EXPECT_EQ(static_cast<int>(DataType::Custom), 0);
+    EXPECT_EQ(static_cast<int>(DataType::DateTime), 1);
+    EXPECT_EQ(static_cast<int>(DataType::Date), 2);
+    EXPECT_EQ(static_cast<int>(DataType::Time), 3);
+    EXPECT_EQ(static_cast<int>(DataType::Duration), 4);
+    EXPECT_EQ(static_cast<int>(DataType::PhoneNumber), 5);
+    EXPECT_EQ(static_cast<int>(DataType::Currency), 6);
+    EXPECT_EQ(static_cast<int>(DataType::Text), 7);
+    EXPECT_EQ(static_cast<int>(DataType::Html), 8);
+    EXPECT_EQ(static_cast<int>(DataType::MultilineText), 9);
+    EXPECT_EQ(static_cast<int>(DataType::EmailAddress), 10);
+    EXPECT_EQ(static_cast<int>(DataType::Password), 11);
+    EXPECT_EQ(static_cast<int>(DataType::Url), 12);
+    EXPECT_EQ(static_cast<int>(DataType::ImageUrl), 13);
+    EXPECT_EQ(static_cast<int>(DataType::CreditCard), 14);
+    EXPECT_EQ(static_cast<int>(DataType::PostalCode), 15);
+    EXPECT_EQ(static_cast<int>(DataType::Upload), 16);
+}
+
+// DataTypeAttribute.cs:20,55-59 -- TWO constructors with DIFFERENT meanings, which the old
+// single-string member could not express. The string form chains to Custom and stores the name
+// BESIDE it, so the kind really is Custom and the name is a separate fact.
+TEST(DataAnnotations2406Tests, TheTwoConstructorsMeanDifferentThings) {
+    const DataTypeAttribute known(DataType::EmailAddress);
+    EXPECT_EQ(known.getDataTypeProperty(), DataType::EmailAddress);
+    EXPECT_FALSE(known.getCustomDataTypeProperty().has_value())
+        << "a known kind must not invent a custom name";
+
+    const DataTypeAttribute custom(std::string("SocialSecurityNumber"));
+    EXPECT_EQ(custom.getDataTypeProperty(), DataType::Custom)
+        << "the string constructor must chain to Custom, not replace the kind";
+    ASSERT_TRUE(custom.getCustomDataTypeProperty().has_value());
+    EXPECT_EQ(custom.getCustomDataTypeProperty().value(), "SocialSecurityNumber");
+}
+
+// DataTypeAttribute.cs:83-96 -- the name is the enumerator's for a known kind and the custom
+// string for Custom. Every enumerator is exercised, because the switch that produces them is
+// exhaustive and a wrong arm is invisible to a spot check.
+TEST(DataAnnotations2406Tests, GetDataTypeNameIsTheEnumeratorName) {
+    const std::pair<DataType, const char*> rows[] = {
+        {DataType::DateTime, "DateTime"},           {DataType::Date, "Date"},
+        {DataType::Time, "Time"},                   {DataType::Duration, "Duration"},
+        {DataType::PhoneNumber, "PhoneNumber"},     {DataType::Currency, "Currency"},
+        {DataType::Text, "Text"},                   {DataType::Html, "Html"},
+        {DataType::MultilineText, "MultilineText"}, {DataType::EmailAddress, "EmailAddress"},
+        {DataType::Password, "Password"},           {DataType::Url, "Url"},
+        {DataType::ImageUrl, "ImageUrl"},           {DataType::CreditCard, "CreditCard"},
+        {DataType::PostalCode, "PostalCode"},       {DataType::Upload, "Upload"},
+    };
+    for (const auto& [kind, name] : rows) {
+        EXPECT_EQ(DataTypeAttribute(kind).GetDataTypeName(), name)
+            << "kind " << static_cast<int>(kind);
+    }
+    EXPECT_EQ(DataTypeAttribute(std::string("Custom thing")).GetDataTypeName(), "Custom thing");
+}
+
+// DataTypeAttribute.cs:115-121 -- EnsureValidDataType, whose test is IsNullOrWhiteSpace rather
+// than merely empty. The whitespace row is the one an `.empty()` reading would get wrong.
+TEST(DataAnnotations2406Tests, ACustomKindWithNoUsableNameThrowsDotNetsMessage) {
+    EXPECT_THROW((void)DataTypeAttribute(DataType::Custom).GetDataTypeName(),
+                 System::InvalidOperationException);
+    EXPECT_THROW((void)DataTypeAttribute(std::string("")).GetDataTypeName(),
+                 System::InvalidOperationException);
+    EXPECT_THROW((void)DataTypeAttribute(std::string("   \t ")).GetDataTypeName(),
+                 System::InvalidOperationException)
+        << "IsNullOrWhiteSpace, not IsNullOrEmpty";
+    try {
+        (void)DataTypeAttribute(DataType::Custom).GetDataTypeName();
+        FAIL() << "an unnamed custom kind was accepted";
+    } catch (const System::InvalidOperationException& e) {
+        EXPECT_EQ(std::string(e.getMessageProperty()),
+                  "The custom DataType string cannot be null or empty.");
+    }
+}
+
+// ScaffoldColumnAttribute.cs -- `public bool Scaffold { get; }`. This port published a mutable
+// field; the read is the same read and the write is gone.
+TEST(DataAnnotations2406Tests, ScaffoldColumnIsGetOnly) {
+    EXPECT_TRUE(ScaffoldColumnAttribute(true).getScaffoldProperty());
+    EXPECT_FALSE(ScaffoldColumnAttribute(false).getScaffoldProperty());
+}
+
+// THE DECLARATION (#2406). This family carries no IsValid, no Validate, no FormatErrorMessage and
+// no RequiresValidationContext -- .NET has all four on ValidationAttribute
+// (ValidationAttribute.cs:139,330,352,468,497) and overrides IsValid on every subclass. This case
+// is a DECLARATION rather than a repair: it asserts the absence, so that the day somebody adds
+// real validation they must come here and say so, and so that nobody reads the silence as parity.
+TEST(DataAnnotations2406Tests, ThisFamilyValidatesNothingAndThatIsDeclared) {
+    // The detection idiom this repository uses for an absent member: a dependent parameter, so
+    // gcc does not evaluate the requires-expression eagerly (the #2299 trap).
+    auto hasIsValid = []<typename T>(const T& a) {
+        return requires { a.IsValid(std::string{}); };
+    };
+    auto hasValidate = []<typename T>(const T& a) {
+        return requires { a.Validate(std::string{}, std::string{}); };
+    };
+    auto hasFormatErrorMessage = []<typename T>(const T& a) {
+        return requires { a.FormatErrorMessage(std::string{}); };
+    };
+
+    const RequiredAttribute required;
+    EXPECT_FALSE(hasIsValid(required));
+    EXPECT_FALSE(hasValidate(required));
+    EXPECT_FALSE(hasFormatErrorMessage(required));
+
+    const RangeAttribute range(1.0, 10.0);
+    EXPECT_FALSE(hasIsValid(range));
+
+    // What the family DOES carry is the error-message template, and it is inert: storing one
+    // changes nothing, because nothing ever formats or raises it.
+    RequiredAttribute withMessage;
+    withMessage.setErrorMessageProperty("this is never shown by anything");
+    EXPECT_EQ(withMessage.getErrorMessageProperty(), "this is never shown by anything");
+    EXPECT_FALSE(hasIsValid(withMessage));
 }

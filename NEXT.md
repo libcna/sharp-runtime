@@ -3,8 +3,8 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-20 — 17,640 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,640 run: 17,640 passed, 0 failed, 0 skipped**, recounted from the
+> **Test-count floor, 2026-08-20 — 17,646 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,646 run: 17,646 passed, 0 failed, 0 skipped**, recounted from the
 > per-executable logs with every executable run separately and continuing past failures, zero build
 > warnings at `--parallel 2`. Every checkpoint below this one ends with *"the gate is not green"*;
 > this one does not. Two of the three historical failure sources were environmental and are simply
@@ -66,13 +66,24 @@
 > existing consumers", a reason that measures to **zero** — and `System::ComponentModel::Attribute`
 > turned out to be a **phantom**: no .NET counterpart, no members, no derived classes, no callers.
 >
-> **THE `todo` QUEUE HAS ONE ITEM: #2406**, `System::ComponentModel::DataAnnotations`. It was split
-> out rather than bundled because `DataTypeAttribute` holds an untyped mutable **string** where .NET
-> has an **enum** plus a separate custom-type constructor and two accessors — closing it means
-> **adding public surface**, not changing an accessor. Ten tickets were filed and closed by this
-> sweep: #2397–#2402 on 2026-08-19, #2403–#2405 and #2407 on 2026-08-20. `task` has **0**
-> unclassified (14,979 ignored / 1,082 ported / 140 ignore). Ticket totals: **2,389 done, 1 todo, 9
-> blocked, 1 needs_user, 5 wontfix**. Graph **41 / 94**, negative fixtures **51 / 260**. What remains *blocked* needs the user or an external event,
+> **#2406 closed the `component-model` sweep, and its largest half is a DECLARATION.** The eleven
+> `ValidationAttribute` subclasses — `Required`, `Range`, `StringLength`, `RegularExpression`,
+> `EmailAddress` and the rest — **validate nothing**; .NET has `IsValid`/`Validate`/
+> `FormatErrorMessage`/`RequiresValidationContext` and this port has none of them. The **names** are
+> what make that dangerous: a caller who writes `RequiredAttribute` and sets an error message has
+> every reason to think something checks it, and the mistake surfaces as *validation that silently
+> never happened*. It is now a `@warning` on the base class and a pinned absence — **mutation M7
+> adds an `IsValid` and is caught**, so the declaration is enforced.
+>
+> **BOTH WORK QUEUES ARE EMPTY AGAIN.** Twelve tickets were filed and closed by this sweep:
+> #2397–#2402 on 2026-08-19, #2403–#2408 on 2026-08-20. `ticket` has **0 `todo`**; `task` has **0**
+> unclassified (14,979 ignored / 1,082 ported / 140 ignore). Ticket totals: **2,391 done, 9 blocked,
+> 1 needs_user, 5 wontfix**. Graph **41 / 94**, negative fixtures **52 / 264**.
+>
+> **One thing #2406 deliberately did NOT do, so it is not mistaken for parity**: `DisplayAttribute`'s
+> eight fields stay public data members (correct — .NET's are `{ get; set; }`), but their
+> **nullability** still diverges (`string?`, `int?`, `bool?` with `GetOrder()`/
+> `GetAutoGenerateField()`), which is the #2295 shape across eight signatures. What remains *blocked* needs the user or an external event,
 > and each is itemised in §2 below. **§4b says where to look next, and the method that found all
 > three of today's tickets.**
 

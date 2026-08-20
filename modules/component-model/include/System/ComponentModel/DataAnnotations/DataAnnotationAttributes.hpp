@@ -2,15 +2,38 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <optional>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Attribute.hpp"
+#include "System/InvalidOperationException.hpp"
 
 namespace System::ComponentModel::DataAnnotations {
 
     using SharpRuntime::intcs;
 
     /** Base class for validation attributes. */
+    /**
+     * @brief Base class for validation attributes.
+     *
+     * @warning **THIS FAMILY VALIDATES NOTHING, AND THAT IS A DECLARED LIMITATION RATHER THAN a
+     * defect to be discovered at run time (#2406).** .NET's `ValidationAttribute` carries
+     * `IsValid(object?)` (`ValidationAttribute.cs:352`), `Validate(...)` (`:468,497`),
+     * `FormatErrorMessage(string)` (`:330`) and `RequiresValidationContext` (`:139`), and every
+     * subclass overrides `IsValid`. **None of those exist here**, on this class or on any of the
+     * eleven subclasses below: this whole namespace is **metadata only**.
+     *
+     * The names are what make that worth a warning rather than a footnote. A caller who writes
+     * `RequiredAttribute` and sets an error message has every reason to believe something checks
+     * it, and nothing does -- there is no member to call, so the mistake surfaces as *validation
+     * that silently never happened*.
+     *
+     * Implementing it is not one member: `RegularExpressionAttribute` needs the regular-expression
+     * engine, `EmailAddressAttribute`/`UrlAttribute`/`PhoneAttribute` need .NET's exact accepted
+     * grammars, and `Validate` needs `ValidationContext` and `ValidationResult`, neither of which
+     * this port has. It is a feature, not a repair, and it is recorded here rather than implied by
+     * silence.
+     */
     class ValidationAttribute : public System::Attribute {
     protected:
         std::string errorMessage_; ///< The validation error message template.
@@ -138,21 +161,133 @@ namespace System::ComponentModel::DataAnnotations {
     class KeyAttribute          : public System::Attribute {};
 
     /** Specifies whether a class or data column is excluded from scaffolding. */
+    /**
+     * @brief Specifies whether a column should be included in scaffolding.
+     * `ScaffoldColumnAttribute.cs` -- `public bool Scaffold { get; }`, get-only.
+     */
     class ScaffoldColumnAttribute : public System::Attribute {
-    public:
-        bool Scaffold; ///< True if the column should be included in scaffolding.
+        bool scaffold_;
 
+    public:
         /** @param scaffold True to include the column in scaffolding. */
-        explicit ScaffoldColumnAttribute(bool scaffold) : Scaffold(scaffold) {}
+        explicit ScaffoldColumnAttribute(bool scaffold) : scaffold_(scaffold) {}
+
+        /** @return true if the column should be included in scaffolding. */
+        [[nodiscard]] bool getScaffoldProperty() const noexcept { return scaffold_; }
     };
 
     /** Specifies the data type to associate with a data field. */
-    class DataTypeAttribute : public System::Attribute {
-    public:
-        std::string DataType; ///< The data type name.
+    /**
+     * @brief The kind of data a member holds. `DataType.cs` -- transcribed exactly, all seventeen.
+     *
+     * This port used to have no such enum: `DataTypeAttribute` held an untyped `std::string`, so
+     * *"a known data type"* and *"a custom one named by the caller"* -- which .NET separates with
+     * two constructors -- were the same thing, and any string at all was accepted where only
+     * seventeen values are meaningful.
+     */
+    enum class DataType {
+        Custom        = 0,
+        DateTime      = 1,
+        Date          = 2,
+        Time          = 3,
+        Duration      = 4,
+        PhoneNumber   = 5,
+        Currency      = 6,
+        Text          = 7,
+        Html          = 8,
+        MultilineText = 9,
+        EmailAddress  = 10,
+        Password      = 11,
+        Url           = 12,
+        ImageUrl      = 13,
+        CreditCard    = 14,
+        PostalCode    = 15,
+        Upload        = 16,
+    };
 
-        /** @param dt The data type name string. */
-        explicit DataTypeAttribute(const std::string& dt) : DataType(dt) {}
+    /**
+     * @brief Specifies the kind of data a member holds. `DataTypeAttribute.cs:20-71,83`.
+     *
+     * @note **`DisplayFormat` is deliberately absent.** .NET's constructor sets a
+     * `DisplayFormatAttribute` for `Date`, `Time` and `Currency` (`:26-45`) and publishes it as
+     * `public DisplayFormatAttribute? DisplayFormat { get; protected set; }` (`:56`).
+     * `DisplayFormatAttribute` does not exist in this port, and inventing it to be set by this
+     * constructor would be adding a type in order to have somewhere to put a value nothing reads.
+     * The constructor's three-case switch exists **only** to populate it, so omitting the switch
+     * *is* the omission of `DisplayFormat` rather than a second one.
+     */
+    class DataTypeAttribute : public System::Attribute {
+        DataAnnotations::DataType dataType_;
+        std::optional<std::string> customDataType_;
+
+    public:
+        /** @param dataType One of the seventeen known kinds. `DataTypeAttribute.cs:20`. */
+        explicit DataTypeAttribute(DataAnnotations::DataType dataType) : dataType_(dataType) {}
+
+        /**
+         * @brief Names a custom kind. `DataTypeAttribute.cs:55-59` -- chains to
+         * `this(DataType.Custom)` and then stores the name, so the kind really is `Custom` and the
+         * string is a separate fact rather than a replacement for it.
+         */
+        explicit DataTypeAttribute(const std::string& customDataType)
+            : dataType_(DataAnnotations::DataType::Custom), customDataType_(customDataType) {}
+
+        /** @return The kind. `:64` -- get-only. */
+        [[nodiscard]] DataAnnotations::DataType getDataTypeProperty() const noexcept {
+            return dataType_;
+        }
+
+        /** @return The custom kind's name, absent unless the string constructor was used. `:70`. */
+        [[nodiscard]] const std::optional<std::string>& getCustomDataTypeProperty() const noexcept {
+            return customDataType_;
+        }
+
+        /**
+         * @brief The kind's name. `DataTypeAttribute.cs:83-96`.
+         *
+         * .NET reads `Enum.GetNames<DataType>()[(int)DataType]`, which is reflection. The
+         * exhaustive `switch` below is this repository's substitute and is **stronger** for one
+         * reason worth keeping: it has **no `default:`**, so under `-Wall -Wextra -Werror` a new
+         * enumerator is a **compile error** here rather than a silently missing name -- the idiom
+         * #1980 G-5 established, where a name table could not pin an enum's membership and an
+         * exhaustive switch could.
+         *
+         * @throws System::InvalidOperationException if the kind is `Custom` and no custom name was
+         *         supplied (`:115-121`, `EnsureValidDataType`), with .NET's own text.
+         */
+        [[nodiscard]] virtual std::string GetDataTypeName() const {
+            if (dataType_ == DataAnnotations::DataType::Custom) {
+                // EnsureValidDataType tests IsNullOrWhiteSpace, not merely empty.
+                const bool blank =
+                    !customDataType_.has_value() ||
+                    customDataType_->find_first_not_of(" \t\n\v\f\r") == std::string::npos;
+                if (blank) {
+                    throw System::InvalidOperationException(
+                        "The custom DataType string cannot be null or empty.");
+                }
+                return *customDataType_;
+            }
+            switch (dataType_) { // no default: -Wswitch pins this enum's membership
+                case DataAnnotations::DataType::Custom:        break; // handled above
+                case DataAnnotations::DataType::DateTime:      return "DateTime";
+                case DataAnnotations::DataType::Date:          return "Date";
+                case DataAnnotations::DataType::Time:          return "Time";
+                case DataAnnotations::DataType::Duration:      return "Duration";
+                case DataAnnotations::DataType::PhoneNumber:   return "PhoneNumber";
+                case DataAnnotations::DataType::Currency:      return "Currency";
+                case DataAnnotations::DataType::Text:          return "Text";
+                case DataAnnotations::DataType::Html:          return "Html";
+                case DataAnnotations::DataType::MultilineText: return "MultilineText";
+                case DataAnnotations::DataType::EmailAddress:  return "EmailAddress";
+                case DataAnnotations::DataType::Password:      return "Password";
+                case DataAnnotations::DataType::Url:           return "Url";
+                case DataAnnotations::DataType::ImageUrl:      return "ImageUrl";
+                case DataAnnotations::DataType::CreditCard:    return "CreditCard";
+                case DataAnnotations::DataType::PostalCode:    return "PostalCode";
+                case DataAnnotations::DataType::Upload:        return "Upload";
+            }
+            return "Custom";
+        }
     };
 
     /** Specifies that a data field value must match the value of another property. */
