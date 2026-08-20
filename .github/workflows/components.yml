@@ -37,7 +37,7 @@ jobs:
           - component: Xml.Linq
             fixture: xml_linq.cpp
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
       - run: scripts/check_selective_components.sh "${{ matrix.component }}" "${{ matrix.fixture }}"
@@ -46,16 +46,20 @@ jobs:
     name: Full compatibility build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
+      # Ping uses Linux's unprivileged SOCK_DGRAM/IPPROTO_ICMP interface. GitHub's
+      # current hosted-runner image ships with an empty ping_group_range, which
+      # makes every loopback Ping test fail before the request is sent.
+      - run: sudo sysctl --write net.ipv4.ping_group_range='0 2147483647'
       - run: scripts/local_ci_check.sh build
 
   documentation:
     name: Doxygen warning baseline
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
       - run: sudo apt-get update && sudo apt-get install --yes doxygen graphviz
