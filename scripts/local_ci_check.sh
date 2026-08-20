@@ -60,4 +60,17 @@ echo "    build clean: 0 warnings, 0 errors"
 echo "==> Running tests"
 scripts/run_component_tests.sh "$BUILD_DIR"
 
+# ADDED BY #2415, AND THE REASON IS THAT ITS ABSENCE WAS THE DEFECT. The selective-component
+# check verifies an invariant nothing else does -- that a component built on its own drags in no
+# more than it declares -- and because NOTHING RAN IT, it sat red for a day behind a green test
+# count: #1889 legitimately gave Text.Json a public Collections.Core dependency while a fixture
+# still asserted the opposite, and CLAUDE.md rule 2's gate says nothing about either.
+#
+# IT COSTS ABOUT TEN MINUTES (measured 2026-08-20, two jobs), because it configures and builds one
+# selective tree per matrix entry. That is stated here rather than left as a surprise. It runs
+# LAST, so the cheap checks and the full suite still report first, and it is deliberately NOT
+# behind an opt-out: a check that can be skipped is the check that rotted.
+echo "==> Checking selective component isolation (~10 min)"
+scripts/check_selective_components.sh
+
 echo "==> Local CI check passed"

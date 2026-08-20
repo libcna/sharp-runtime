@@ -139,6 +139,37 @@
 > and each is itemised in §2 below. **§4b says where to look next, and the method that found all
 > three of today's tickets.**
 
+## 2026-08-20 — #2415: the selective-component gate was red, and building into `/tmp`
+
+**Gate unchanged at 17,700 / 38** — no production code was touched. This repairs a *gate*, and the
+build-policy violation that gate was committing on every run.
+
+**Three defects, not one.**
+
+1. **Red since 2026-08-19, behind a green test count.** #1889 legitimately gave `Text.Json` a
+   **public** `Collections.Core` dependency — fail-fast enumeration needs `detail::MutationCounter`,
+   and the boundary validator *rejected the private declaration outright* — while
+   `forbidden_text_json_collections` still asserted `List.hpp` was unreachable. **Retargeted rather
+   than deleted**, because CLAUDE.md names the fixture as an invariant: `List.hpp` was only a
+   **proxy** for "Collections", and the proxy moves to `BlockingCollection`, the type that sentence
+   is actually about. **Strictly stronger** — `Collections.Blocking` publicly needs `Threading`, so
+   the include can only compile if `Text.Json` acquired a `Threading` requirement, pinning **by
+   compilation** what `assert_target_absent sharp_runtime_threading` pinned by target name.
+
+2. **A second, independent defect in the same script.** `MATRIX_ROOT="$(mktemp -d)"` with nothing in
+   the repository setting `TMPDIR`, so every run built **eight selective component trees into
+   `/tmp`** — the one place the build-resource policy exists to keep builds out of, and `build-tmp/`
+   is in the closed directory list described as exactly this redirect. **The mechanism was designed
+   and never wired up.**
+
+3. **Nothing ran the script**, which is why (1) survived a day. `local_ci_check.sh` ran the boundary
+   validator, the seam checker and the negative-fixture checker but not this. It now runs **last**,
+   costs a **measured ~10 minutes at two jobs** stated in the script rather than left as a surprise,
+   and is deliberately **not** behind an opt-out — a check that can be skipped is the check that
+   rotted.
+
+`docs/Migration-SelectiveComponentCheckRepair.md`.
+
 ## 2026-08-20 — #1945: four `XmlConvert` arguments accepted and discarded
 
 **Gate: 17,700 / 38, 0 failed, 0 skipped** (+6, `Xml` 518 → 524). Graph **41/94 → 41/95**,

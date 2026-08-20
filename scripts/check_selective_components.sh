@@ -6,7 +6,13 @@ set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MATRIX_ROOT="$(mktemp -d)"
+# CLAUDE.md's build-resource policy forbids a build tree under /tmp and names `build-tmp/` as
+# this repository's local TMPDIR for exactly this kind of mktemp-based script. THE MECHANISM WAS
+# DESIGNED AND NEVER WIRED UP: this line was a bare `mktemp -d`, so every run of this script --
+# which configures and builds one selective component tree per matrix entry -- built into /tmp,
+# the one place the policy exists to keep builds out of. Found and repaired by #2415.
+mkdir -p "$REPO_ROOT/build-tmp"
+MATRIX_ROOT="$(TMPDIR="$REPO_ROOT/build-tmp" mktemp -d)"
 trap 'rm -rf "$MATRIX_ROOT"' EXIT
 
 # Resolve the same repository job budget as local CI and export it to every
@@ -111,7 +117,7 @@ check_component() {
             echo "FAIL: Text.Json unexpectedly configured ZLIB" >&2
             exit 1
         fi
-        expect_consumer_failure Text.Json forbidden_text_json_collections.cpp
+        expect_consumer_failure Text.Json forbidden_text_json_collections_blocking.cpp
         expect_consumer_failure Text.Json forbidden_text_json_object_model.cpp
     elif [ "$component" = "Xml.Linq" ]; then
         expect_consumer_failure Xml.Linq forbidden_xml_diagnostics.cpp
