@@ -155,6 +155,36 @@ exactly, this batch's own tests, no regression**. Graph **41 / 92**, seams **3 /
 sole member is now remediated**; CCF-019 open; CCF-021/#2131 and CCF-022/#2109 unminted. Doxygen,
 `ccache` and `/rv` absent. Maximum compiler parallelism **2 jobs**.*
 
+## 2026-08-20 — #1942 (SA-16.1): `DateTime::ParseExact` honours `DateTimeStyles`
+
+**Gate: 17,714 / 38, 0 failed, 0 skipped** (+6, `Core_Base` 6,126 → 6,132; two #2414 pins
+**inverted** rather than deleted).
+
+#2414 left the style overloads **absent and pinned absent** and recorded why. **SA-16.1 took the
+decision: the zone is a parameter** — #1941 phase 2's own shape, so the port answers the question
+once rather than twice.
+
+**The grammar gained a zone token.** `z`/`zz`/`zzz`/`K` were rejected in every mode; they are now
+admitted behind a flag `DateTime`'s doors set and `DateOnly`'s and `TimeOnly`'s do not. `g` stays
+rejected everywhere — a *different* absence (no era table). **Widths differ** (`zzz` and `K` carry
+`:mm`, `z` and `zz` do not) and **`K` alone matches the empty string**, .NET's rule rather than
+leniency. **`o` got its `K` back** — the row #2414's header said a later ticket must revisit.
+
+**Two cases, and the second is not the first with a default.** With a zone in the input the
+`Assume*` styles do *not apply at all*. With none, **four of five outcomes return without converting
+anything**, and the fifth is the row a reader most expects to be different: **`AssumeUniversal`
+alone comes back `Local`**, because .NET sets the offset to zero and falls through to the local
+adjustment.
+
+**`RoundtripKind` fires only for a literal `Z`.** `+00:00` names the same instant and is *converted*
+rather than stamped — **no assertion about the value can separate them**, only the kind.
+
+Nine mutations, all caught. **M7 was NOT CAUGHT at first and found a defect in my test, not the
+code**: `"+15:00"` is already refused by the scanner's coarse `hours > 14`, so **`+14:59`** is the
+row that separates the two guards.
+
+`docs/Migration-DateTimeExactParseStyles.md`. Downstream zero sites.
+
 ## 2026-08-20 — #1943 (TimeSpan half): `TimeSpan` had no `ParseExact` in any spelling
 
 **Gate: 17,708 / 38, 0 failed, 0 skipped** (+8, `Core_Base` 6,118 → 6,126). Graph 41/95, catalogue

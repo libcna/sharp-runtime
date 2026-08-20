@@ -38,6 +38,13 @@ namespace System::detail {
         int  weekday = -1;     ///< 0 = Sunday, from `ddd`/`dddd`; -1 when absent.
         int  amPm    = -1;     ///< 0 = AM, 1 = PM, from `t`/`tt`; -1 when absent.
         bool twelveHour = false;
+
+        // #1942 (SA-16.1/16.3). THIS PORT'S EXACT GRAMMAR CARRIED NO ZONE TOKEN AT ALL until now,
+        // which is why #2414 recorded that `RoundtripKind` would have nothing to preserve: an
+        // input could never state its own kind. `K` and `z`/`zz`/`zzz` now bind these three.
+        bool hasOffset = false;   ///< the input carried a zone token that matched something.
+        bool zoneIsUtc = false;   ///< the token was a literal `Z`, .NET's `ParseFlags.TimeZoneUtc`.
+        int  offsetMinutes = 0;   ///< signed minutes east of UTC; 0 when `zoneIsUtc`.
     };
 
     /** @brief Invariant English month names, abbreviated and full, in calendar order. */
@@ -75,6 +82,15 @@ namespace System::detail {
         bool allowLeadingWhite = false;
         bool allowTrailingWhite = false;
         bool allowInnerWhite = false;
+
+        /**
+         * @brief Whether `K` and `z`/`zz`/`zzz` are admitted (#1942).
+         *
+         * OFF for `DateOnly` and `TimeOnly`, which have no kind and no offset to carry, and off by
+         * default so that admitting a zone is a deliberate act at each door rather than a silent
+         * widening of every exact parse in the runtime.
+         */
+        bool allowZoneToken = false;
     };
 
     inline constexpr std::array<const char*, 12> kAbbreviatedMonths = {
@@ -98,6 +114,55 @@ namespace System::detail {
      * @return The expanded custom pattern, or an empty string when @p format is not standard.
      */
     /** @brief The options a null provider and `DateTimeStyles::None` resolve to. */
+    /**
+     * @brief .NET's `DateTimeFormatInfo.ValidateStyles`, transcribed (#1942).
+     *
+     * THREE RULES, THREE DIFFERENT MESSAGES (`DateTimeFormatInfo.cs:1725-1743`). #2414 transcribed
+     * them into its record for whoever took this; this is that transcription made executable.
+     *
+     * The third rule is written in .NET as an INTEGER comparison on the masked value --
+     * `(style & (RoundtripKind | localUniversal | AdjustToUniversal)) > RoundtripKind` -- which
+     * does not look like what it means: `RoundtripKind` may not combine with any of the other
+     * three. It is spelled out here rather than copied, because a reader cannot check the copy.
+     *
+     * @param styles The value to validate.
+     * @param paramName `"style"` or `"styles"`, which .NET varies BY OVERLOAD rather than using
+     *        one name -- so the caller passes its own parameter's name (#2323's rule).
+     */
+    inline void ValidateDateTimeStyles(System::Globalization::DateTimeStyles styles,
+                                       const char* paramName) {
+        using System::Globalization::DateTimeStyles;
+        constexpr int kValid =
+            static_cast<int>(DateTimeStyles::AllowLeadingWhite) |
+            static_cast<int>(DateTimeStyles::AllowTrailingWhite) |
+            static_cast<int>(DateTimeStyles::AllowInnerWhite) |
+            static_cast<int>(DateTimeStyles::NoCurrentDateDefault) |
+            static_cast<int>(DateTimeStyles::AdjustToUniversal) |
+            static_cast<int>(DateTimeStyles::AssumeLocal) |
+            static_cast<int>(DateTimeStyles::AssumeUniversal) |
+            static_cast<int>(DateTimeStyles::RoundtripKind);
+        const int raw = static_cast<int>(styles);
+
+        if ((raw & ~kValid) != 0) {
+            throw System::ArgumentException("An undefined DateTimeStyles value is being used.",
+                                            paramName);
+        }
+        const int assumeBoth = static_cast<int>(DateTimeStyles::AssumeLocal) |
+                               static_cast<int>(DateTimeStyles::AssumeUniversal);
+        if ((raw & assumeBoth) == assumeBoth) {
+            throw System::ArgumentException(
+                "The DateTimeStyles values AssumeLocal and AssumeUniversal cannot be used "
+                "together.", paramName);
+        }
+        const int roundtrip = static_cast<int>(DateTimeStyles::RoundtripKind);
+        if ((raw & roundtrip) != 0 &&
+            (raw & (assumeBoth | static_cast<int>(DateTimeStyles::AdjustToUniversal))) != 0) {
+            throw System::ArgumentException(
+                "The DateTimeStyles value RoundtripKind cannot be used with the values "
+                "AssumeLocal, AssumeUniversal or AdjustToUniversal.", paramName);
+        }
+    }
+
     [[nodiscard]] inline ExactParseOptions InvariantExactParseOptions() {
         ExactParseOptions options;
         for (std::size_t i = 0; i < 12; ++i) {
@@ -140,7 +205,11 @@ namespace System::detail {
     [[nodiscard]] inline std::string ExpandStandardDateTimeFormat(const std::string& format) {
         if (format.size() != 1) return {};
         switch (format[0]) {
-            case 'O': case 'o': return "yyyy-MM-ddTHH:mm:ss.fffffff";
+            // #1942 GAVE `o` ITS `K` BACK. #2414 had to drop it, because the grammar carried no
+            // zone token at all and the pattern would not have compiled; the header there named
+            // the loss and said a later ticket adding a zone token must revisit this row. This is
+            // that ticket, and this is that row -- `o` is now .NET's pattern in full.
+            case 'O': case 'o': return "yyyy-MM-ddTHH:mm:ss.fffffffK";
             case 'R': case 'r': return "ddd, dd MMM yyyy HH:mm:ss 'GMT'";
             case 's':           return "yyyy-MM-ddTHH:mm:ss";
             case 'u':           return "yyyy-MM-dd HH:mm:ss'Z'";
@@ -154,6 +223,11 @@ namespace System::detail {
         explicit ExactInputCursor(const std::string& text) noexcept : text_(text) {}
         [[nodiscard]] bool        atEnd() const noexcept { return index_ >= text_.size(); }
         [[nodiscard]] std::size_t position() const noexcept { return index_; }
+
+        /** @brief The character at the cursor, or NUL at the end. Added by #1942 for the sign. */
+        [[nodiscard]] char peek() const noexcept {
+            return index_ < text_.size() ? text_[index_] : '\0';
+        }
 
         /** @brief Consumes any run of whitespace; `DateTimeStyles::AllowInnerWhite` (#2412). */
         void skipWhitespace() noexcept {
@@ -385,9 +459,12 @@ namespace System::detail {
                     i += run;
                     continue;
                 }
-                // A ZONE token is unsupported in every mode: this port's exact grammar carries no
-                // zone, which is why RoundtripKind would have nothing to preserve.
-                if (c == 'z' || c == 'K' || c == 'g') return false;
+                // `g` (the era) is unsupported in every mode -- this port has no era table.
+                if (c == 'g') return false;
+                // A ZONE token falls through to the shared arm below when the caller admits one,
+                // and is otherwise still rejected. Before #1942 it was rejected unconditionally,
+                // which is why #2414 recorded that RoundtripKind would have nothing to preserve.
+                if (!options.allowZoneToken && (c == 'z' || c == 'K')) return false;
                 // A time token is unsupported only when time tokens are not admitted at all --
                 // otherwise it must FALL THROUGH to the time block below rather than be rejected
                 // here, which is the whole of what DateAndTime changes.
@@ -449,7 +526,8 @@ namespace System::detail {
                     i += run;
                     continue;
                 }
-                if (c == 'z' || c == 'K' || c == 'g') return false;
+                if (c == 'g') return false;
+                if (!options.allowZoneToken && (c == 'z' || c == 'K')) return false;
                 // Mirror of the rule above -- but with an ASYMMETRY that is worth stating, because
                 // it was measured rather than assumed. `!allowDate` here is a PROVEN EQUIVALENCE
                 // rather than a load-bearing guard: every date-token arm above ends in `continue`,
@@ -459,6 +537,52 @@ namespace System::detail {
                 // says WHY the rejection is correct -- and it becomes load-bearing the day an arm
                 // above stops consuming its token.
                 if (!allowDate && (c == 'y' || c == 'M' || c == 'd')) return false;
+            }
+
+            // THE ZONE ARM (#1942), shared rather than duplicated in the two blocks above: a zone
+            // belongs to neither family, so putting it in either would have made its admission
+            // depend on which block happened to run.
+            if (options.allowZoneToken && (c == 'K' || c == 'z')) {
+                const int run = static_cast<int>(runLength(i));
+                if (c == 'z' && run > 3) return false;
+                if (c == 'K' && run > 1) return false;
+                if (fields.hasOffset || fields.zoneIsUtc) return false;   // at most once
+
+                // `K` ALONE MATCHES THE EMPTY STRING, and that is .NET's rule rather than
+                // leniency: `K` renders empty for an Unspecified kind, so a round trip through
+                // `o` must be able to read back what it wrote. `z` has no such form -- it always
+                // renders a sign and digits -- so an absent offset fails there.
+                if (c == 'K' && cursor.take('Z')) {
+                    fields.zoneIsUtc = true;
+                    fields.hasOffset = true;
+                    i += run;
+                    continue;
+                }
+                const bool signPresent = !cursor.atEnd() &&
+                                         (cursor.peek() == '+' || cursor.peek() == '-');
+                if (!signPresent) {
+                    if (c == 'K') { i += run; continue; }   // Unspecified: nothing to read
+                    return false;
+                }
+                const bool negative = cursor.peek() == '-';
+                (void)cursor.take(negative ? '-' : '+');
+
+                int hours = 0;
+                // `z` is one or two digits, `zz` and `zzz` exactly two -- .NET's ParseDigits width
+                // rule, the same one the date tokens use.
+                if (!cursor.takeNumber(c == 'z' && run == 1 ? 1 : 2, hours)) return false;
+                int minutes = 0;
+                if (c == 'K' || run == 3) {
+                    // `zzz` and `K` carry `:mm`; `z` and `zz` do not, which is the whole
+                    // difference between them and is easy to collapse into one arm by accident.
+                    if (!cursor.take(':')) return false;
+                    if (!cursor.takeNumber(2, minutes)) return false;
+                }
+                if (hours > 14 || minutes > 59) return false;
+                fields.hasOffset = true;
+                fields.offsetMinutes = (negative ? -1 : 1) * (hours * 60 + minutes);
+                i += run;
+                continue;
             }
 
             // Everything else is a literal, matched exactly once per format character.

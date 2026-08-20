@@ -533,6 +533,62 @@ caller who names `LastAccess` receive events for it.
 
 ---
 
+## 4m. SA-16 — three decisions taken on 2026-08-20, closing the date/time zone chain
+
+Three decisions, all taken as recommended, which together close the remaining blockers on
+**#1942**, **#1943** and the `RoundtripKind` limitation **#1945** declared.
+
+### SA-16.1 — `DateTime`'s style overloads take the zone as a parameter
+
+The kind-affecting `DateTimeStyles` members **convert**: `AdjustToUniversal` must produce UTC and
+`AssumeLocal` must interpret an unqualified value as local. .NET reaches `TimeZoneInfo.Local`
+internally; `Core.Base` cannot name a time zone at all.
+
+**Granted: the style-taking overloads take a `const System::ILocalTimeZone*`.** This is exactly the
+precedent **#1941 phase 2** set and that **SA-15.1** already accepted once as a recorded deviation —
+`ToLocalTime(zone)` / `ToUniversalTime(zone)` — so the port is consistent with itself rather than
+answering the same question two ways.
+
+Two alternatives were declined on the record. Accepting only the *stamping* styles and rejecting
+`AdjustToUniversal` keeps .NET's signature but makes a legal .NET style illegal here — an
+asymmetry .NET does not have. A registration hook keeps the signature too, at the price of hidden
+global state and a static-initialisation-order dependency, which **#1940 already refused once**.
+
+**The deviation is one parameter and must be stated in the header rather than implied.**
+
+### SA-16.2 — `DateTimeOffset::ParseExact` gets an offset token, and the zone for the default
+
+**An offset is not a time zone.** A format carrying an explicit offset needs no zone database at
+all — the offset is read from the input and stored, and `DateTimeOffset` is a `DateTime` plus a
+`TimeSpan`. Only the **no-offset** case needs a zone, because .NET's `DateTimeStyles.None` gives
+such a result the **local** offset.
+
+**Granted: add the offset token to the exact grammar, admitted for the types that can carry one,
+and take the zone as a parameter for the no-offset default** — consistent with SA-16.1 rather than
+a second answer to the same question. Requiring an explicit offset instead was declined: it would
+be a narrowing .NET does not have, and it would leave
+`ParseExact("2024-06-15", "yyyy-MM-dd")` failing where .NET succeeds.
+
+### SA-16.3 — `RoundtripKind` is made real, in both directions
+
+**#1945 measured that a kind cannot cross a string in this port**: `DateTime::Parse` sets no kind
+from a `Z` or an offset — #1929 records that it parses one and **discards** it — and
+`XmlConvert::ToString` emits no marker where .NET's `XsdDateTime` does. So `RoundtripKind` and
+`Unspecified` are observationally identical, which #1945 declared and pinned.
+
+**Granted: close it in BOTH directions.** The parse side sets the kind from a zone token, and
+`XmlConvert::ToString` emits the marker as `XsdDateTime` does.
+
+**The output change is accepted knowingly and is the reason this needed asking**: today
+`XmlConvert::ToString(value)` renders `2024-06-15 12:00:00`, and it becomes the ISO form carrying a
+kind marker. That is a **behaviour change on a public member**, it lands under SA-5 with a migration
+note, and #1945's declaration pin is expected to fail and be inverted rather than deleted.
+
+Closing only the parse half was declined for a stated reason: with nothing writing a marker there
+is nothing to read, so it would close half a round trip and leave the pin standing.
+
+---
+
 ## 5. Environment facts, measured 2026-08-17
 
 These are measurements of this container, not decisions. They are recorded because a large number

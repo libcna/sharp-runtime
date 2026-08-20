@@ -7,6 +7,7 @@
 #include "System/DateTimeKind.hpp"
 
 #include "System/Object.hpp"
+#include "System/Globalization/DateTimeStyles.hpp"
 #include "System/IFormatProvider.hpp"
 #include "System/TimeSpan.hpp"
 #include "System/DayOfWeek.hpp"
@@ -509,7 +510,9 @@ namespace System {
          * for a format provider or a `DateTimeStyles` to reach -- the same cycle #2412 resolved
          * for `DateOnly` and `TimeOnly` one type over.
          *
-         * @note THE STYLE-TAKING OVERLOADS ARE DELIBERATELY ABSENT AND ARE PINNED AS SUCH.
+         * @note **#1942 (SA-16.1) ADDED THE STYLE-TAKING OVERLOADS**, which #2414 left absent. The
+         *       paragraph below is kept because it records WHY they could not land then, and the
+         *       answer -- the zone is a parameter -- is the one it predicted.
          *       `DateTimeStyles`'s kind-affecting members need a local time zone -- `AssumeLocal`
          *       and `AdjustToUniversal` CONVERT, and .NET reaches `TimeZoneInfo.Local` internally
          *       where `Core.Base` cannot. #1941 phase 2 resolved that one level down by TAKING THE
@@ -538,6 +541,50 @@ namespace System {
         /** @brief Non-throwing counterpart of ParseExact(input, format, provider). */
         static bool TryParseExact(const std::string& input, const std::string& format,
                                   const System::IFormatProvider* provider, DateTime& result);
+
+        /**
+         * @brief Parses @p input against exactly @p format, honouring @p styles.
+         *
+         * C++ counterpart of .NET `DateTime.ParseExact(string, string, IFormatProvider,
+         * DateTimeStyles)`, added by #1942 under **SA-16.1**.
+         *
+         * @note **THE ZONE IS A PARAMETER, AND THAT IS THE ONE DEVIATION FROM .NET'S SIGNATURE.**
+         *       `AdjustToUniversal` and `AssumeLocal` **convert** rather than merely stamping a
+         *       kind, and a conversion needs a local zone. .NET reaches `TimeZoneInfo.Local`
+         *       internally; `Core.Base` cannot name a time zone at all, so the caller supplies one
+         *       -- normally `System::TimeZone::CurrentTimeZone()`. This is #1941 phase 2's own
+         *       shape (`ToLocalTime(zone)`), so the port answers the question once rather than
+         *       twice, and SA-16.1 records that both alternatives were declined: accepting only
+         *       the *stamping* styles would make a legal .NET style illegal here, and a
+         *       registration hook is the hidden global state #1940 already refused.
+         *
+         * @note **A NULL @p zone IS ONLY AN ERROR WHEN A STYLE ACTUALLY NEEDS ONE.** The default
+         *       argument therefore costs nothing: every style that does not convert works without
+         *       a zone, and one that does raises `ArgumentNullException` naming `zone` rather than
+         *       silently producing an unconverted value.
+         *
+         * @throws System::ArgumentException if @p styles is not a legal combination.
+         * @throws System::ArgumentNullException if a converting style was used with a null zone.
+         * @throws System::FormatException if @p input does not match @p format.
+         */
+        [[nodiscard]] static DateTime ParseExact(
+            const std::string& input, const std::string& format,
+            const System::IFormatProvider* provider,
+            System::Globalization::DateTimeStyles styles,
+            const System::ILocalTimeZone* zone = nullptr);
+
+        /**
+         * @brief Non-throwing counterpart of the style-taking ParseExact.
+         *
+         * @note **A `Try*` METHOD THAT THROWS**, which is .NET's own shape: a parse *failure*
+         *       returns false, but an illegal style or a missing zone is a programming error and
+         *       is raised. Validation runs BEFORE @p result is written.
+         */
+        static bool TryParseExact(const std::string& input, const std::string& format,
+                                  const System::IFormatProvider* provider,
+                                  System::Globalization::DateTimeStyles styles,
+                                  DateTime& result,
+                                  const System::ILocalTimeZone* zone = nullptr);
 
         using Object::Equals;
 

@@ -17,6 +17,7 @@
 #include <sstream>
 #include "System/detail/InvariantExactDateTimeParser.hpp"
 #include "System/Globalization/DateTimeStyles.hpp"
+#include "System/ArgumentNullException.hpp"
 
 namespace System {
 
@@ -568,8 +569,28 @@ namespace System {
 
     bool DateTime::TryParseExact(const std::string& input, const std::string& format,
                                  const System::IFormatProvider* provider, DateTime& result) {
-        const detail::ExactParseOptions options =
-            detail::ResolveExactParseOptions(provider, System::Globalization::DateTimeStyles::None);
+        return TryParseExact(input, format, provider,
+                             System::Globalization::DateTimeStyles::None, result, nullptr);
+    }
+
+    bool DateTime::TryParseExact(const std::string& input, const std::string& format,
+                                 const System::IFormatProvider* provider,
+                                 System::Globalization::DateTimeStyles styles, DateTime& result,
+                                 const System::ILocalTimeZone* zone) {
+        using System::Globalization::DateTimeStyles;
+        // .NET raises here rather than returning false -- a Try* method that throws. Validation
+        // runs BEFORE the result is written, so a rejected style leaves the caller's variable
+        // untouched; that is two claims and each has its own assertion.
+        detail::ValidateDateTimeStyles(styles, "style");
+
+        const auto has = [styles](DateTimeStyles f) {
+            return (static_cast<int>(styles) & static_cast<int>(f)) != 0;
+        };
+
+        detail::ExactParseOptions options = detail::ResolveExactParseOptions(provider, styles);
+        // The zone token is admitted only here. `DateOnly` and `TimeOnly` have no kind and no
+        // offset to carry, so their doors leave it off -- see ExactParseOptions.
+        options.allowZoneToken = true;
 
         result = DateTime::MinValue;
 
@@ -627,12 +648,89 @@ namespace System {
             static_cast<int>(candidate.getDayOfWeekProperty()) != fields.weekday)
             return false;
 
+        // -------------------------------------------------------------------------------
+        // .NET's DetermineTimeZoneAdjustments (DateTimeParse.cs:2764-2839), transcribed.
+        // -------------------------------------------------------------------------------
+        // TWO CASES, AND THE SECOND IS NOT THE FIRST WITH A DEFAULT. When the input carried a
+        // zone the Assume* styles do NOT apply at all -- .NET says so in its own comment -- and
+        // when it did not, four of the five outcomes RETURN EARLY without converting anything.
+
+        const auto requireZone = [&zone](const char* why) -> const System::ILocalTimeZone& {
+            if (zone == nullptr) {
+                throw System::ArgumentNullException(
+                    "zone", std::string("A local time zone is required because ") + why +
+                    ". Pass System::TimeZone::CurrentTimeZone(), or use a style that does not "
+                    "convert.");
+            }
+            return *zone;
+        };
+
+        // An offset outside +-14:00 is a FAILURE rather than a clamp (DateTimeParse.cs:2776-2781).
+        if (fields.hasOffset && (fields.offsetMinutes < -14 * 60 || fields.offsetMinutes > 14 * 60))
+            return false;
+
+        if (!fields.hasOffset) {
+            if (has(DateTimeStyles::AssumeLocal)) {
+                if (has(DateTimeStyles::AdjustToUniversal)) {
+                    // Read as local, then converted -- the ONE Assume* path that needs a zone.
+                    candidate = SpecifyKind(candidate, DateTimeKind::Local)
+                                    .ToUniversalTime(requireZone(
+                                        "AssumeLocal with AdjustToUniversal converts a local "
+                                        "value to UTC"));
+                } else {
+                    // STAMP and return: the ticks do not move.
+                    candidate = SpecifyKind(candidate, DateTimeKind::Local);
+                }
+            } else if (has(DateTimeStyles::AssumeUniversal)) {
+                if (has(DateTimeStyles::AdjustToUniversal)) {
+                    candidate = SpecifyKind(candidate, DateTimeKind::Utc);
+                } else {
+                    // .NET sets the offset to ZERO and falls through to the local adjustment, so
+                    // an assumed-universal value WITHOUT AdjustToUniversal comes back as LOCAL --
+                    // the row a reader most expects to be Utc, and it is .NET's.
+                    candidate = SpecifyKind(candidate, DateTimeKind::Utc)
+                                    .ToLocalTime(requireZone(
+                                        "AssumeUniversal without AdjustToUniversal converts a UTC "
+                                        "value to local"));
+                }
+            }
+            // Neither Assume* style: Unspecified, and the ticks are untouched.
+        } else {
+            // RoundtripKind fires ONLY for a literal `Z`, .NET's ParseFlags.TimeZoneUtc -- a
+            // numeric offset is not a kind, so `+00:00` does not roundtrip as Utc even though it
+            // names the same instant. That distinction is invisible to any value-based test.
+            if (has(DateTimeStyles::RoundtripKind) && fields.zoneIsUtc) {
+                candidate = SpecifyKind(candidate, DateTimeKind::Utc);
+            } else {
+                const DateTime asUtc = SpecifyKind(
+                    candidate.AddMinutes(-static_cast<double>(fields.offsetMinutes)),
+                    DateTimeKind::Utc);
+                candidate = has(DateTimeStyles::AdjustToUniversal)
+                                ? asUtc
+                                : asUtc.ToLocalTime(requireZone(
+                                      "a zone-qualified input is converted to local time unless "
+                                      "AdjustToUniversal or RoundtripKind is used"));
+            }
+        }
+
         result = candidate;
         return true;
     }
 
     DateTime DateTime::ParseExact(const std::string& input, const std::string& format) {
         return ParseExact(input, format, nullptr);
+    }
+
+    DateTime DateTime::ParseExact(const std::string& input, const std::string& format,
+                                  const System::IFormatProvider* provider,
+                                  System::Globalization::DateTimeStyles styles,
+                                  const System::ILocalTimeZone* zone) {
+        DateTime result = DateTime::MinValue;
+        // The style is validated by TryParseExact below, which raises for an illegal one exactly
+        // as .NET's does; a PARSE failure is what becomes the FormatException here.
+        if (!TryParseExact(input, format, provider, styles, result, zone))
+            throw FormatException("String was not recognized as a valid DateTime: " + input);
+        return result;
     }
 
     DateTime DateTime::ParseExact(const std::string& input, const std::string& format,

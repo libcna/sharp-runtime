@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include "System/ArgumentNullException.hpp"
+#include "System/ILocalTimeZone.hpp"
+#include "System/TimeSpan.hpp"
 #include "System/DateOnly.hpp"
 #include "System/TimeOnly.hpp"
 #include <gtest/gtest.h>
@@ -1668,21 +1671,59 @@ TEST(DateTimeParseExact2414Tests, TimeComponentsDefaultToMidnightButTheDateIsMan
     EXPECT_THROW(System::DateTime::ParseExact("13:45:30", "HH:mm:ss"), System::FormatException);
 }
 
-TEST(DateTimeParseExact2414Tests, ZoneTokensAreRejectedInEveryMode) {
-    // This port's exact grammar carries NO zone token, which is not an accident of the widening
-    // but the reason #1942's `RoundtripKind` has nothing to preserve. All three are refused in
-    // the new combined mode exactly as they were in each single-family mode.
+// INVERTED BY #1942 (SA-16.1), NOT DELETED -- this case was asserting the boundary that ticket
+// exists to move. #2414 recorded that "this port's exact grammar carries no zone token at all,
+// which is also why #1942's RoundtripKind would have nothing to preserve"; the grammar now has
+// one, admitted at the doors that can carry a kind and still refused at the doors that cannot.
+TEST(DateTimeParseExact2414Tests, ZoneTokensAreAdmittedForDateTimeAndStillRefusedElsewhere) {
+    using System::Globalization::DateTimeStyles;
+
+    // `g` (the era) is STILL rejected in every mode -- this port has no era table, and that is a
+    // different absence from the zone one. Asserting them together is what kept the old case
+    // honest and keeps this one honest.
     System::DateTime unused = System::DateTime::MinValue;
-    EXPECT_FALSE(System::DateTime::TryParseExact("2024-06-15 13:45:30 +02:00",
-                                                 "yyyy-MM-dd HH:mm:ss zzz", unused));
-    EXPECT_FALSE(System::DateTime::TryParseExact("2024-06-15T13:45:30Z",
-                                                 "yyyy-MM-ddTHH:mm:ssK", unused));
     EXPECT_FALSE(System::DateTime::TryParseExact("2024-06-15 A.D.", "yyyy-MM-dd g", unused));
 
-    // And the kind is therefore Unspecified for every input, which is the observable consequence
-    // a caller must not mistake for "the parser decided it was local".
-    const auto dt = System::DateTime::ParseExact("2024-06-15T13:45:30", "s");
-    EXPECT_EQ(dt.getKindProperty(), System::DateTimeKind::Unspecified);
+    // A zone token is now MATCHED for DateTime. It needs a zone to convert against, so the
+    // zone-less door reports that rather than silently failing to parse -- see the case below.
+    System::DateTime dt = System::DateTime::MinValue;
+    ASSERT_TRUE(System::DateTime::TryParseExact("2024-06-15T13:45:30Z", "yyyy-MM-ddTHH:mm:ssK",
+                                                nullptr, DateTimeStyles::RoundtripKind, dt));
+    EXPECT_EQ(dt.getKindProperty(), System::DateTimeKind::Utc);
+    EXPECT_EQ(dt, System::DateTime(2024, 6, 15, 13, 45, 30));
+
+    // ...and it is still refused for `DateOnly` and `TimeOnly`, which have no kind and no offset
+    // to carry. Their doors leave `allowZoneToken` off, so the widening did not reach them.
+    System::DateOnly d = System::DateOnly::MinValue;
+    EXPECT_FALSE(System::DateOnly::TryParseExact("2024-06-15Z", "yyyy-MM-ddK", d));
+    System::TimeOnly t(0, 0);
+    EXPECT_FALSE(System::TimeOnly::TryParseExact("13:45Z", "HH:mmK", t));
+}
+
+// The zone-less doors CANNOT CONVERT, so a converting input reports that rather than failing to
+// parse. This is a diagnostic where #2414 had a silent mismatch, and it is the visible cost of
+// SA-16.1's one deviation: the zone is a parameter, so a door without one says so.
+TEST(DateTimeParseExact2414Tests, AConvertingInputThroughAZonelessDoorNamesTheMissingZone) {
+    using System::Globalization::DateTimeStyles;
+    System::DateTime unused = System::DateTime::MinValue;
+
+    EXPECT_THROW(System::DateTime::TryParseExact("2024-06-15T13:45:30Z", "yyyy-MM-ddTHH:mm:ssK",
+                                                 unused),
+                 System::ArgumentNullException);
+    try {
+        System::DateTime::ParseExact("2024-06-15T13:45:30Z", "yyyy-MM-ddTHH:mm:ssK");
+        FAIL() << "expected ArgumentNullException";
+    } catch (const System::ArgumentNullException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "zone");
+        // The message must tell the caller what to do, not merely that something is null.
+        EXPECT_NE(std::string(e.what()).find("CurrentTimeZone"), std::string::npos) << e.what();
+    }
+
+    // RoundtripKind needs NO zone, because it stamps rather than converts -- so the same input and
+    // the same door succeed once a non-converting style is named. That is what shows the throw is
+    // about the conversion rather than about the token.
+    EXPECT_NO_THROW(System::DateTime::ParseExact("2024-06-15T13:45:30Z", "yyyy-MM-ddTHH:mm:ssK",
+                                                 nullptr, DateTimeStyles::RoundtripKind));
 }
 
 TEST(DateTimeParseExact2414Tests, StandardFormatsAreTheDateTimeTableNotTheTwoHalvesConcatenated) {
@@ -1702,12 +1743,18 @@ TEST(DateTimeParseExact2414Tests, StandardFormatsAreTheDateTimeTableNotTheTwoHal
               System::DateTime(2024, 6, 15, 13, 45, 30));
     EXPECT_FALSE(System::DateTime::TryParseExact("Mon, 15 Jun 2024 13:45:30 GMT", "R", unused));
 
-    // `o` is .NET's roundtrip pattern for an UNSPECIFIED kind, its `K` rendering as the empty
-    // string there. The loss is named rather than hidden: the Z and +hh:mm forms .NET accepts
-    // are refused here, and a later ticket adding a zone token has to revisit this row.
+    // `o` GOT ITS `K` BACK IN #1942. #2414 had to drop it -- the grammar carried no zone token,
+    // so the pattern would not have compiled -- and its header said a later ticket adding one must
+    // revisit this row. This is that row: `o` is now .NET's pattern in full, so `K`'s empty form
+    // still reads an unspecified value AND the `Z` form is accepted, which #2414 pinned refused.
     EXPECT_EQ(System::DateTime::ParseExact("2024-06-15T13:45:30.1234567", "o").getTicksProperty(),
               System::DateTime(2024, 6, 15, 13, 45, 30).getTicksProperty() + 1234567);
-    EXPECT_FALSE(System::DateTime::TryParseExact("2024-06-15T13:45:30.1234567Z", "o", unused));
+    EXPECT_EQ(System::DateTime::ParseExact("2024-06-15T13:45:30.1234567", "o").getKindProperty(),
+              System::DateTimeKind::Unspecified);
+    ASSERT_TRUE(System::DateTime::TryParseExact(
+        "2024-06-15T13:45:30.1234567Z", "o", nullptr,
+        System::Globalization::DateTimeStyles::RoundtripKind, unused));
+    EXPECT_EQ(unused.getKindProperty(), System::DateTimeKind::Utc);
 
     // A one-character format that is NOT standard stays refused rather than being read as a
     // custom single specifier -- .NET requires "%H" for that, and the rule is #1939's.
@@ -1775,4 +1822,197 @@ TEST(DateTimeParseExact2414Tests, WideningDidNotOpenTheSingleFamilyModes) {
     System::TimeOnly t(0, 0);
     EXPECT_FALSE(System::TimeOnly::TryParseExact("2024-06-15 13:45", "yyyy-MM-dd HH:mm", t));
     ASSERT_TRUE(System::TimeOnly::TryParseExact("13:45", "HH:mm", t));
+}
+
+// ===========================================================================
+// #1942 (SA-16.1) -- the exact-parsing DateTimeStyles contract for DateTime
+// ===========================================================================
+//
+// A FIXED ZONE RATHER THAN THE MACHINE'S, on purpose. Asserting against
+// `TimeZone::CurrentTimeZone()` would make every row depend on the container's tzdata -- the
+// mistake #2351 repaired -- and a zone that is always +02:00 makes each conversion's DIRECTION
+// and MAGNITUDE visible, which the process zone cannot do when it happens to be UTC.
+//
+// It REUSES #1941 phase 2's `FixedZone` rather than declaring a second one: two zone doubles in
+// one file is the shape that lets two suites drift apart on what "fixed" means.
+
+TEST(DateTimeStyles1942Tests, ValidateStylesHasThreeRulesAndThreeDifferentMessages) {
+    using System::Globalization::DateTimeStyles;
+    const std::string in = "2024-06-15", fmt = "yyyy-MM-dd";
+
+    // Rule 1: an undefined bit.
+    EXPECT_THROW(System::DateTime::ParseExact(in, fmt, nullptr,
+                                              static_cast<DateTimeStyles>(0x4000)),
+                 System::ArgumentException);
+    // Rule 2: AssumeLocal and AssumeUniversal together.
+    EXPECT_THROW(System::DateTime::ParseExact(
+                     in, fmt, nullptr,
+                     static_cast<DateTimeStyles>(static_cast<int>(DateTimeStyles::AssumeLocal) |
+                                                 static_cast<int>(DateTimeStyles::AssumeUniversal))),
+                 System::ArgumentException);
+    // Rule 3: RoundtripKind with any of the other three. .NET writes this as an INTEGER
+    // comparison on the masked value, which does not look like what it means, so all three
+    // partners are asserted rather than one standing for the set.
+    for (auto partner : {DateTimeStyles::AssumeLocal, DateTimeStyles::AssumeUniversal,
+                         DateTimeStyles::AdjustToUniversal}) {
+        EXPECT_THROW(System::DateTime::ParseExact(
+                         in, fmt, nullptr,
+                         static_cast<DateTimeStyles>(
+                             static_cast<int>(DateTimeStyles::RoundtripKind) |
+                             static_cast<int>(partner))),
+                     System::ArgumentException)
+            << static_cast<int>(partner);
+    }
+
+    // THE THREE MESSAGES DIFFER, which is what makes them three rules rather than one. A single
+    // "invalid styles" text would satisfy every EXPECT_THROW above.
+    auto messageFor = [&](DateTimeStyles s) {
+        try { System::DateTime::ParseExact(in, fmt, nullptr, s); }
+        catch (const System::ArgumentException& e) { return std::string(e.what()); }
+        return std::string("<no throw>");
+    };
+    const auto m1 = messageFor(static_cast<DateTimeStyles>(0x4000));
+    const auto m2 = messageFor(static_cast<DateTimeStyles>(
+        static_cast<int>(DateTimeStyles::AssumeLocal) |
+        static_cast<int>(DateTimeStyles::AssumeUniversal)));
+    const auto m3 = messageFor(static_cast<DateTimeStyles>(
+        static_cast<int>(DateTimeStyles::RoundtripKind) |
+        static_cast<int>(DateTimeStyles::AdjustToUniversal)));
+    EXPECT_NE(m1, m2);
+    EXPECT_NE(m2, m3);
+    EXPECT_NE(m1, m3);
+}
+
+TEST(DateTimeStyles1942Tests, AnIllegalStyleThrowsAndLeavesTheOutParameterAlone) {
+    using System::Globalization::DateTimeStyles;
+    System::DateTime sentinel(1999, 1, 1);
+
+    EXPECT_THROW(System::DateTime::TryParseExact("2024-06-15", "yyyy-MM-dd", nullptr,
+                                                 static_cast<DateTimeStyles>(0x4000), sentinel),
+                 System::ArgumentException);
+    // Two claims -- it throws, AND it did not write -- so the second needs its own assertion.
+    EXPECT_EQ(sentinel, System::DateTime(1999, 1, 1));
+}
+
+// THE NO-ZONE CASE. Four of its five outcomes return WITHOUT converting anything, and the fifth
+// is the row a reader most expects to be different: .NET's AssumeUniversal WITHOUT
+// AdjustToUniversal falls through to the local adjustment, so the result is LOCAL, not Utc.
+TEST(DateTimeStyles1942Tests, TheAssumeStylesStampFourWaysAndConvertOnce) {
+    using System::Globalization::DateTimeStyles;
+    using System::DateTimeKind;
+    const FixedZone plusTwo(2);
+    const std::string in = "2024-06-15T12:00:00", fmt = "yyyy-MM-ddTHH:mm:ss";
+    const System::DateTime naive(2024, 6, 15, 12, 0, 0);
+
+    // Neither Assume* style: Unspecified, ticks untouched, and no zone needed.
+    const auto none = System::DateTime::ParseExact(in, fmt, nullptr, DateTimeStyles::None);
+    EXPECT_EQ(none.getKindProperty(), DateTimeKind::Unspecified);
+    EXPECT_EQ(none.getTicksProperty(), naive.getTicksProperty());
+
+    // AssumeLocal alone STAMPS and returns -- .NET returns early here, so the ticks do not move.
+    const auto asLocal = System::DateTime::ParseExact(in, fmt, nullptr,
+                                                      DateTimeStyles::AssumeLocal);
+    EXPECT_EQ(asLocal.getKindProperty(), DateTimeKind::Local);
+    EXPECT_EQ(asLocal.getTicksProperty(), naive.getTicksProperty());
+
+    // AssumeUniversal WITH AdjustToUniversal also stamps and returns.
+    const auto utcAdjusted = System::DateTime::ParseExact(
+        in, fmt, nullptr,
+        static_cast<DateTimeStyles>(static_cast<int>(DateTimeStyles::AssumeUniversal) |
+                                    static_cast<int>(DateTimeStyles::AdjustToUniversal)));
+    EXPECT_EQ(utcAdjusted.getKindProperty(), DateTimeKind::Utc);
+    EXPECT_EQ(utcAdjusted.getTicksProperty(), naive.getTicksProperty());
+
+    // AssumeLocal WITH AdjustToUniversal CONVERTS: 12:00 local at +02:00 is 10:00 UTC.
+    const auto toUtc = System::DateTime::ParseExact(
+        in, fmt, nullptr,
+        static_cast<DateTimeStyles>(static_cast<int>(DateTimeStyles::AssumeLocal) |
+                                    static_cast<int>(DateTimeStyles::AdjustToUniversal)),
+        &plusTwo);
+    EXPECT_EQ(toUtc.getKindProperty(), DateTimeKind::Utc);
+    EXPECT_EQ(toUtc, System::DateTime(2024, 6, 15, 10, 0, 0));
+
+    // AssumeUniversal ALONE is the surprising row and it is .NET's: the value is read as UTC and
+    // then adjusted to LOCAL, so 12:00 becomes 14:00 and the kind is Local rather than Utc.
+    const auto assumedUtc = System::DateTime::ParseExact(
+        in, fmt, nullptr, DateTimeStyles::AssumeUniversal, &plusTwo);
+    EXPECT_EQ(assumedUtc.getKindProperty(), DateTimeKind::Local);
+    EXPECT_EQ(assumedUtc, System::DateTime(2024, 6, 15, 14, 0, 0));
+}
+
+// THE ZONE-CARRYING CASE, where the Assume* styles do NOT apply at all -- .NET says so in its own
+// comment. Three outcomes, and the first turns on a distinction no value-based test can see.
+TEST(DateTimeStyles1942Tests, RoundtripKindFiresOnlyForALiteralZ) {
+    using System::Globalization::DateTimeStyles;
+    using System::DateTimeKind;
+    const FixedZone plusTwo(2);
+    const std::string fmt = "yyyy-MM-ddTHH:mm:ssK";
+
+    // A literal `Z` roundtrips: kind Utc, ticks untouched, no zone needed.
+    const auto z = System::DateTime::ParseExact("2024-06-15T12:00:00Z", fmt, nullptr,
+                                                DateTimeStyles::RoundtripKind);
+    EXPECT_EQ(z.getKindProperty(), DateTimeKind::Utc);
+    EXPECT_EQ(z, System::DateTime(2024, 6, 15, 12, 0, 0));
+
+    // `+00:00` NAMES THE SAME INSTANT AND IS NOT THE SAME THING. .NET's RoundtripKind tests
+    // ParseFlags.TimeZoneUtc, which only a literal `Z` sets -- so a numeric zero offset is
+    // converted rather than stamped, and comes back as LOCAL. No assertion about the VALUE could
+    // separate these two, because both name 12:00 UTC.
+    const auto zeroOffset = System::DateTime::ParseExact("2024-06-15T12:00:00+00:00", fmt, nullptr,
+                                                         DateTimeStyles::RoundtripKind, &plusTwo);
+    EXPECT_EQ(zeroOffset.getKindProperty(), DateTimeKind::Local);
+    EXPECT_EQ(zeroOffset, System::DateTime(2024, 6, 15, 14, 0, 0));
+
+    // AdjustToUniversal on a zone-qualified input removes the offset and stops there.
+    const auto toUtc = System::DateTime::ParseExact("2024-06-15T12:00:00+05:00", fmt, nullptr,
+                                                    DateTimeStyles::AdjustToUniversal);
+    EXPECT_EQ(toUtc.getKindProperty(), DateTimeKind::Utc);
+    EXPECT_EQ(toUtc, System::DateTime(2024, 6, 15, 7, 0, 0));
+
+    // ...and with no adjusting style it goes to LOCAL: 12:00+05:00 is 07:00 UTC is 09:00 at +02:00.
+    const auto toLocal = System::DateTime::ParseExact("2024-06-15T12:00:00+05:00", fmt, nullptr,
+                                                      DateTimeStyles::None, &plusTwo);
+    EXPECT_EQ(toLocal.getKindProperty(), DateTimeKind::Local);
+    EXPECT_EQ(toLocal, System::DateTime(2024, 6, 15, 9, 0, 0));
+}
+
+TEST(DateTimeStyles1942Tests, TheZoneTokenWidthsDifferAndAnOutOfRangeOffsetFails) {
+    using System::Globalization::DateTimeStyles;
+    const FixedZone utcZone(0);
+    System::DateTime out = System::DateTime::MinValue;
+
+    // `zzz` and `K` carry `:mm`; `z` and `zz` do not. Collapsing them into one arm is the easy
+    // mistake and it changes which inputs parse.
+    EXPECT_TRUE(System::DateTime::TryParseExact("2024-06-15 +05:30", "yyyy-MM-dd zzz", nullptr,
+                                                DateTimeStyles::None, out, &utcZone));
+    EXPECT_FALSE(System::DateTime::TryParseExact("2024-06-15 +05:30", "yyyy-MM-dd zz", nullptr,
+                                                 DateTimeStyles::None, out, &utcZone));
+    EXPECT_TRUE(System::DateTime::TryParseExact("2024-06-15 +05", "yyyy-MM-dd zz", nullptr,
+                                                DateTimeStyles::None, out, &utcZone));
+    EXPECT_TRUE(System::DateTime::TryParseExact("2024-06-15 +5", "yyyy-MM-dd %z", nullptr,
+                                                DateTimeStyles::None, out, &utcZone));
+
+    // An offset outside +-14:00 is a FAILURE rather than a clamp (DateTimeParse.cs:2776-2781).
+    EXPECT_TRUE(System::DateTime::TryParseExact("2024-06-15 +14:00", "yyyy-MM-dd zzz", nullptr,
+                                                DateTimeStyles::None, out, &utcZone));
+    EXPECT_FALSE(System::DateTime::TryParseExact("2024-06-15 +15:00", "yyyy-MM-dd zzz", nullptr,
+                                                 DateTimeStyles::None, out, &utcZone));
+
+    // `+14:59` IS THE ROW THAT SEPARATES THE TWO GUARDS, and mutation M7 found that the case
+    // above could not: the scanner's own `hours > 14` already refuses `+15:00`, so removing the
+    // +-14:00 bound at the DateTime level changed nothing there. Fourteen hours and fifty-nine
+    // minutes passes the coarse hour check and exceeds the exact bound, so only the second guard
+    // can refuse it -- and the negative direction is asserted too, because a bound written on the
+    // magnitude and a bound written on the signed value differ exactly at one end.
+    EXPECT_FALSE(System::DateTime::TryParseExact("2024-06-15 +14:59", "yyyy-MM-dd zzz", nullptr,
+                                                 DateTimeStyles::None, out, &utcZone));
+    EXPECT_FALSE(System::DateTime::TryParseExact("2024-06-15 -14:59", "yyyy-MM-dd zzz", nullptr,
+                                                 DateTimeStyles::None, out, &utcZone));
+    EXPECT_TRUE(System::DateTime::TryParseExact("2024-06-15 -14:00", "yyyy-MM-dd zzz", nullptr,
+                                                DateTimeStyles::None, out, &utcZone));
+
+    // A zone token may bind at most once.
+    EXPECT_FALSE(System::DateTime::TryParseExact("2024-06-15 +05:00 +05:00",
+                                                 "yyyy-MM-dd zzz zzz", nullptr,
+                                                 DateTimeStyles::None, out, &utcZone));
 }
