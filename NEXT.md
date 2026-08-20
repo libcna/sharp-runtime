@@ -3,8 +3,8 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-19 — 17,631 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,631 run: 17,631 passed, 0 failed, 0 skipped**, recounted from the
+> **Test-count floor, 2026-08-20 — 17,637 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,637 run: 17,637 passed, 0 failed, 0 skipped**, recounted from the
 > per-executable logs with every executable run separately and continuing past failures, zero build
 > warnings at `--parallel 2`. Every checkpoint below this one ends with *"the gate is not green"*;
 > this one does not. Two of the three historical failure sources were environmental and are simply
@@ -51,11 +51,19 @@
 > name claimed "DiffersAcrossProcesses" while its body only checked within one. §4b has the
 > remaining candidates.
 >
-> **BOTH WORK QUEUES ARE EMPTY AGAIN.** Six tickets were filed and closed on 2026-08-19 by this
-> sweep — #2397, #2398, #2399, #2400 (downstream record), #2401 and #2402. `ticket` has **0
-> `todo`**; `task` has **0** unclassified (14,979 ignored / 1,082 ported / 140 ignore). Ticket
-> totals: **2,385 done, 9 blocked, 1 needs_user, 5 wontfix**. Graph **41 / 94** (#2401 added one
-> private edge), negative fixtures **49 / 248** (#2399 added one). What remains *blocked* needs the user or an external event,
+> **#2403 — `System::ComponentModel`, and the pattern that found it is pattern (2) below.** Six
+> attributes published a **bare mutable public data member** where .NET publishes a get-only
+> property, most with **no statics and no equality members at all** — while four siblings **in the
+> same header** already had the correct shape. The module's whole prior coverage for those six was
+> constructor round-trips through the public field, so .NET's `Default` values — the actual contract
+> of a metadata attribute — were unpinned, and `MergablePropertyAttribute::Default` is `Yes` where
+> its four siblings are `No`.
+>
+> **BOTH WORK QUEUES ARE EMPTY AGAIN.** Eight tickets were filed and closed by this sweep — #2397,
+> #2398, #2399, #2400, #2401, #2402 on 2026-08-19, then #2403 and #2404 on 2026-08-20. `ticket` has
+> **0 `todo`**; `task` has **0** unclassified (14,979 ignored / 1,082 ported / 140 ignore). Ticket
+> totals: **2,387 done, 9 blocked, 1 needs_user, 5 wontfix**. Graph **41 / 94** (#2401 added one
+> private edge), negative fixtures **50 / 256** (#2399 and #2403 added one each). What remains *blocked* needs the user or an external event,
 > and each is itemised in §2 below. **§4b says where to look next, and the method that found all
 > three of today's tickets.**
 
@@ -164,6 +172,7 @@ coverage" and the difference matters:
 | Module | Component | Where it is exercised today |
 |---|---|---|
 | `text-regular-expressions` | `Text.RegularExpressions` | a section of `tests/integration/System/Text/TextRemainingTests.cpp` — **this is the one #2397 measured, and it held four divergences** |
+| *(not in this table)* `component-model` | `ComponentModel` | **has** its own tests, and #2403 still found six attributes with a mutable public representation — so **"has tests" is not "is covered"** |
 | `io-compression-zip` | `IO.Compression.Zip` | `tests/integration/System/IO/Compression/CompressionTests.cpp` (145 cases in the file, covering the whole namespace) |
 | `security-cryptography-random` | `Security.Cryptography.Random` | **exhausted — measured by #2398 and #2399, and both found real defects.** Its three shipped cases could not fail: each asserted a buffer's size *after* filling a buffer sized before the call |
 | `storage` | `Storage` | `tests/integration/Task39RemainingTests.cpp` (78 cases in the file) — one header, `StoragePaths` |

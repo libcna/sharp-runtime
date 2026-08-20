@@ -33,6 +33,10 @@ using System::ComponentModel::ReadOnlyAttribute;
 using System::ComponentModel::DisplayNameAttribute;
 using System::ComponentModel::ImmutableObjectAttribute;
 using System::ComponentModel::LocalizableAttribute;
+using System::ComponentModel::MergablePropertyAttribute;
+using System::ComponentModel::NotifyParentPropertyAttribute;
+using System::ComponentModel::RefreshPropertiesAttribute;
+using System::ComponentModel::RefreshProperties;
 using System::ComponentModel::TypeConverterAttribute;
 using System::ComponentModel::EditorBrowsableAttribute;
 using System::ComponentModel::EditorBrowsableState;
@@ -260,22 +264,24 @@ TEST(BrowsableAttributeTests, DefaultAndEquality_MatchDotNet) {
 // ReadOnlyAttribute
 // ===========================================================================
 
+// #2403 migrated these four from the public data member `attr.IsReadOnly` to `.NET`'s get-only
+// shape. The reads are the same reads; what is gone is the ability to WRITE one.
 TEST(ReadOnlyAttributeTests, Constructor_True) {
     ReadOnlyAttribute attr(true);
-    EXPECT_TRUE(attr.IsReadOnly);
+    EXPECT_TRUE(attr.getIsReadOnlyProperty());
 }
 
 TEST(ReadOnlyAttributeTests, Constructor_False) {
     ReadOnlyAttribute attr(false);
-    EXPECT_FALSE(attr.IsReadOnly);
+    EXPECT_FALSE(attr.getIsReadOnlyProperty());
 }
 
 TEST(ReadOnlyAttributeTests, StaticYes_IsReadOnly) {
-    EXPECT_TRUE(ReadOnlyAttribute::Yes.IsReadOnly);
+    EXPECT_TRUE(ReadOnlyAttribute::Yes.getIsReadOnlyProperty());
 }
 
 TEST(ReadOnlyAttributeTests, StaticNo_IsNotReadOnly) {
-    EXPECT_FALSE(ReadOnlyAttribute::No.IsReadOnly);
+    EXPECT_FALSE(ReadOnlyAttribute::No.getIsReadOnlyProperty());
 }
 
 // ===========================================================================
@@ -308,22 +314,125 @@ TEST(DisplayNameAttributeTests, DefaultAndEquality_MatchDotNet) {
 
 TEST(ImmutableObjectAttributeTests, Constructor_True) {
     ImmutableObjectAttribute attr(true);
-    EXPECT_TRUE(attr.Immutable);
+    EXPECT_TRUE(attr.getImmutableProperty());
 }
 
 TEST(ImmutableObjectAttributeTests, Constructor_False) {
     ImmutableObjectAttribute attr(false);
-    EXPECT_FALSE(attr.Immutable);
+    EXPECT_FALSE(attr.getImmutableProperty());
 }
 
 TEST(LocalizableAttributeTests, Constructor_True) {
     LocalizableAttribute attr(true);
-    EXPECT_TRUE(attr.IsLocalizable);
+    EXPECT_TRUE(attr.getIsLocalizableProperty());
 }
 
 TEST(LocalizableAttributeTests, Constructor_False) {
     LocalizableAttribute attr(false);
-    EXPECT_FALSE(attr.IsLocalizable);
+    EXPECT_FALSE(attr.getIsLocalizableProperty());
+}
+
+// ===========================================================================================
+// #2403 -- the six attributes that used to publish a bare mutable data member
+//
+// The four cases above and below were the whole of this module's coverage for them: constructor
+// round-trips through a public field. Nothing asserted the statics, the equality members, or the
+// defaults -- so .NET's Default values, which are the actual contract of a metadata attribute,
+// were unpinned. These cases pin them.
+// ===========================================================================================
+
+// The defaults are NOT uniform, and that is the row a "harmonising" repair gets wrong:
+// MergablePropertyAttribute.Default is YES (MergablePropertyAttribute.cs:12) where the other four
+// boolean attributes default to NO. BrowsableAttribute.Default is Yes too (BrowsableAttribute.cs:32)
+// and this port already had that right. Asserted together, in one case, so the asymmetry is
+// visible as an asymmetry rather than scattered across five files.
+TEST(ComponentModelAttribute2403Tests, TheDefaultsAreDotNetsAndTheyAreNotUniform) {
+    EXPECT_FALSE(ReadOnlyAttribute::Default.getIsReadOnlyProperty());
+    EXPECT_FALSE(ImmutableObjectAttribute::Default.getImmutableProperty());
+    EXPECT_FALSE(LocalizableAttribute::Default.getIsLocalizableProperty());
+    EXPECT_FALSE(NotifyParentPropertyAttribute::Default.getNotifyParentProperty());
+
+    EXPECT_TRUE(MergablePropertyAttribute::Default.getAllowMergeProperty())
+        << "MergablePropertyAttribute.Default is Yes in .NET, unlike its four siblings";
+    EXPECT_TRUE(BrowsableAttribute::Default.getBrowsableProperty())
+        << "BrowsableAttribute.Default is Yes in .NET";
+
+    EXPECT_EQ(RefreshPropertiesAttribute::Default.getRefreshPropertiesProperty(),
+              RefreshProperties::None);
+}
+
+// Yes and No say what they say. Trivial, and it is what makes the Default case above meaningful:
+// without it, a Default wired to the wrong static would be indistinguishable from a wrong literal.
+TEST(ComponentModelAttribute2403Tests, YesAndNoCarryTheirOwnValue) {
+    EXPECT_TRUE(ReadOnlyAttribute::Yes.getIsReadOnlyProperty());
+    EXPECT_FALSE(ReadOnlyAttribute::No.getIsReadOnlyProperty());
+    EXPECT_TRUE(ImmutableObjectAttribute::Yes.getImmutableProperty());
+    EXPECT_FALSE(ImmutableObjectAttribute::No.getImmutableProperty());
+    EXPECT_TRUE(LocalizableAttribute::Yes.getIsLocalizableProperty());
+    EXPECT_FALSE(LocalizableAttribute::No.getIsLocalizableProperty());
+    EXPECT_TRUE(MergablePropertyAttribute::Yes.getAllowMergeProperty());
+    EXPECT_FALSE(MergablePropertyAttribute::No.getAllowMergeProperty());
+    EXPECT_TRUE(NotifyParentPropertyAttribute::Yes.getNotifyParentProperty());
+    EXPECT_FALSE(NotifyParentPropertyAttribute::No.getNotifyParentProperty());
+
+    EXPECT_EQ(RefreshPropertiesAttribute::All.getRefreshPropertiesProperty(),
+              RefreshProperties::All);
+    EXPECT_EQ(RefreshPropertiesAttribute::Repaint.getRefreshPropertiesProperty(),
+              RefreshProperties::Repaint);
+}
+
+// Equality is by VALUE and across TYPES it must not hold: two attributes carrying `true` are not
+// interchangeable just because they carry the same bool. The cross-type row is the one a
+// `dynamic_cast`-free implementation would fail.
+TEST(ComponentModelAttribute2403Tests, EqualityIsByValueAndIsTypeAware) {
+    ReadOnlyAttribute readOnly(true);
+    ReadOnlyAttribute alsoReadOnly(true);
+    ReadOnlyAttribute notReadOnly(false);
+    ImmutableObjectAttribute immutable(true);
+
+    EXPECT_TRUE(readOnly.Equals(alsoReadOnly));
+    EXPECT_FALSE(readOnly.Equals(notReadOnly));
+    EXPECT_FALSE(readOnly.Equals(immutable))
+        << "two different attribute types carrying the same bool compared equal";
+
+    // The house rule in System/Attribute.hpp: a subclass overriding Equals must override
+    // GetHashCode too, or the contract breaks. Asserted rather than assumed.
+    EXPECT_EQ(readOnly.GetHashCode(), alsoReadOnly.GetHashCode());
+}
+
+// `IsDefaultAttribute` is what a metadata consumer uses to decide whether an attribute is worth
+// recording at all, so it has to follow the (non-uniform) defaults rather than "false".
+TEST(ComponentModelAttribute2403Tests, IsDefaultAttributeFollowsEachTypesOwnDefault) {
+    EXPECT_TRUE(ReadOnlyAttribute(false).getIsDefaultAttributeProperty());
+    EXPECT_FALSE(ReadOnlyAttribute(true).getIsDefaultAttributeProperty());
+
+    // ...and the inverse for Mergable, whose Default is Yes.
+    EXPECT_TRUE(MergablePropertyAttribute(true).getIsDefaultAttributeProperty());
+    EXPECT_FALSE(MergablePropertyAttribute(false).getIsDefaultAttributeProperty());
+
+    EXPECT_TRUE(RefreshPropertiesAttribute(RefreshProperties::None).getIsDefaultAttributeProperty());
+    EXPECT_FALSE(RefreshPropertiesAttribute(RefreshProperties::All).getIsDefaultAttributeProperty());
+}
+
+// RefreshProperties is a TOP-LEVEL enum in .NET (RefreshProperties.cs), not a member of the
+// attribute. This port nested it as RefreshPropertiesAttribute::Refresh, differing in both the
+// name and the scope; naming it unqualified here is what pins the scope.
+TEST(ComponentModelAttribute2403Tests, RefreshPropertiesIsATopLevelEnumWithDotNetsValues) {
+    RefreshProperties none = RefreshProperties::None;
+    EXPECT_EQ(static_cast<int>(none), 0);
+    EXPECT_EQ(static_cast<int>(RefreshProperties::All), 1);
+    EXPECT_EQ(static_cast<int>(RefreshProperties::Repaint), 2);
+}
+
+// .NET declares all six `public sealed class`. A behavioural test cannot see a seal.
+TEST(ComponentModelAttribute2403Tests, AllSixAreSealed) {
+    static_assert(std::is_final_v<ReadOnlyAttribute>);
+    static_assert(std::is_final_v<ImmutableObjectAttribute>);
+    static_assert(std::is_final_v<LocalizableAttribute>);
+    static_assert(std::is_final_v<MergablePropertyAttribute>);
+    static_assert(std::is_final_v<NotifyParentPropertyAttribute>);
+    static_assert(std::is_final_v<RefreshPropertiesAttribute>);
+    SUCCEED();
 }
 
 // ===========================================================================

@@ -176,19 +176,50 @@ namespace System::ComponentModel {
     inline const BrowsableAttribute BrowsableAttribute::No{false};
     inline const BrowsableAttribute BrowsableAttribute::Default{true};
 
-    /** Specifies whether the property it is bound to is read-only. */
-    class ReadOnlyAttribute : public System::Attribute {
+    // ------------------------------------------------------------------------------------------
+    // #2403 -- THE SIX ATTRIBUTES BELOW USED TO PUBLISH A BARE MUTABLE DATA MEMBER.
+    //
+    // .NET declares every one of them `public sealed class` with a get-only property
+    // (`public bool X { get; }`), the full Yes/No/Default static set, and value-based `Equals`
+    // plus `IsDefaultAttribute`. THE PORT WAS INCONSISTENT WITH ITSELF ABOUT IT: `CategoryAttribute`,
+    // `BrowsableAttribute`, `DisplayNameAttribute` and `DescriptionAttribute`, in this very header
+    // and its neighbour, already had the correct shape.
+    //
+    // ONE DIVERGENCE IS DELIBERATE AND IS NOT A SLIP. .NET's `GetHashCode` for all six is
+    // `base.GetHashCode()` -- IDENTITY -- while its `Equals` is VALUE-based, so two equal .NET
+    // instances can hash differently. That is a hash-contract violation in the reference itself,
+    // and this port does not reproduce it, for a reason that is written down rather than chosen:
+    // `System/Attribute.hpp`'s own doc-comment states the house rule -- "A subclass that needs
+    // value equality must override BOTH Equals and GetHashCode ... Overriding only one breaks the
+    // equals/hashCode contract" -- and the four already-correct siblings use a value-based hash.
+    // Reproducing .NET here would contradict this port's own stated rule and its own neighbours.
+    // ------------------------------------------------------------------------------------------
+
+    /** Specifies whether the property it is bound to is read-only. `ReadOnlyAttribute.cs:9-23`. */
+    class ReadOnlyAttribute final : public System::Attribute {
+        bool isReadOnly_;
+
     public:
-        bool IsReadOnly; ///< True if the property is read-only.
-
         /** @param isReadOnly True to mark the property as read-only. */
-        explicit ReadOnlyAttribute(bool isReadOnly) : IsReadOnly(isReadOnly) {}
+        explicit ReadOnlyAttribute(bool isReadOnly) : isReadOnly_(isReadOnly) {}
 
-        static const ReadOnlyAttribute Yes; ///< Pre-built "read-only = true" instance.
-        static const ReadOnlyAttribute No;  ///< Pre-built "read-only = false" instance.
+        static const ReadOnlyAttribute Yes;     ///< Pre-built "read-only = true" instance.
+        static const ReadOnlyAttribute No;      ///< Pre-built "read-only = false" instance.
+        static const ReadOnlyAttribute Default; ///< `ReadOnlyAttribute.cs:14` -- Default is **No**.
+
+        /** @return true if the property this attribute is bound to is read-only. */
+        [[nodiscard]] bool getIsReadOnlyProperty() const noexcept { return isReadOnly_; }
+
+        [[nodiscard]] bool Equals(const System::Attribute& other) const override {
+            const auto* attribute = dynamic_cast<const ReadOnlyAttribute*>(&other);
+            return attribute != nullptr && attribute->isReadOnly_ == isReadOnly_;
+        }
+        [[nodiscard]] int GetHashCode() const override { return isReadOnly_ ? 1 : 0; }
+        [[nodiscard]] bool getIsDefaultAttributeProperty() const override { return Equals(Default); }
     };
     inline const ReadOnlyAttribute ReadOnlyAttribute::Yes{true};
     inline const ReadOnlyAttribute ReadOnlyAttribute::No{false};
+    inline const ReadOnlyAttribute ReadOnlyAttribute::Default{false};
 
     /** Specifies the display name for a property or event. */
     class DisplayNameAttribute : public System::Attribute {
@@ -233,53 +264,166 @@ namespace System::ComponentModel {
     };
     inline const DisplayNameAttribute DisplayNameAttribute::Default{};
 
-    /** Specifies that the decorated class is immutable. */
-    class ImmutableObjectAttribute : public System::Attribute {
-    public:
-        bool Immutable; ///< True if the object is immutable.
+    /** Specifies that the decorated class is immutable. `ImmutableObjectAttribute.cs:9-30`. */
+    class ImmutableObjectAttribute final : public System::Attribute {
+        bool immutable_;
 
+    public:
         /** @param immutable True to mark the object as immutable. */
-        explicit ImmutableObjectAttribute(bool immutable) : Immutable(immutable) {}
+        explicit ImmutableObjectAttribute(bool immutable) : immutable_(immutable) {}
+
+        static const ImmutableObjectAttribute Yes;     ///< Pre-built "immutable = true" instance.
+        static const ImmutableObjectAttribute No;      ///< Pre-built "immutable = false" instance.
+        static const ImmutableObjectAttribute Default; ///< `:14` -- Default is **No**.
+
+        /** @return true if the decorated object is immutable. */
+        [[nodiscard]] bool getImmutableProperty() const noexcept { return immutable_; }
+
+        [[nodiscard]] bool Equals(const System::Attribute& other) const override {
+            const auto* attribute = dynamic_cast<const ImmutableObjectAttribute*>(&other);
+            return attribute != nullptr && attribute->immutable_ == immutable_;
+        }
+        [[nodiscard]] int GetHashCode() const override { return immutable_ ? 1 : 0; }
+        [[nodiscard]] bool getIsDefaultAttributeProperty() const override { return Equals(Default); }
     };
+    inline const ImmutableObjectAttribute ImmutableObjectAttribute::Yes{true};
+    inline const ImmutableObjectAttribute ImmutableObjectAttribute::No{false};
+    inline const ImmutableObjectAttribute ImmutableObjectAttribute::Default{false};
 
-    /** Specifies whether a property should be localised. */
-    class LocalizableAttribute : public System::Attribute {
+    /** Specifies whether a property should be localised. `LocalizableAttribute.cs:9-30`. */
+    class LocalizableAttribute final : public System::Attribute {
+        bool isLocalizable_;
+
     public:
-        bool IsLocalizable; ///< True if the property value should be localised.
-
         /** @param localizable True to indicate the property is localizable. */
-        explicit LocalizableAttribute(bool localizable) : IsLocalizable(localizable) {}
+        explicit LocalizableAttribute(bool localizable) : isLocalizable_(localizable) {}
+
+        static const LocalizableAttribute Yes;     ///< Pre-built "localizable = true" instance.
+        static const LocalizableAttribute No;      ///< Pre-built "localizable = false" instance.
+        static const LocalizableAttribute Default; ///< `:20` -- Default is **No**.
+
+        /** @return true if the property value should be localised. */
+        [[nodiscard]] bool getIsLocalizableProperty() const noexcept { return isLocalizable_; }
+
+        [[nodiscard]] bool Equals(const System::Attribute& other) const override {
+            const auto* attribute = dynamic_cast<const LocalizableAttribute*>(&other);
+            return attribute != nullptr && attribute->isLocalizable_ == isLocalizable_;
+        }
+        [[nodiscard]] int GetHashCode() const override { return isLocalizable_ ? 1 : 0; }
+        [[nodiscard]] bool getIsDefaultAttributeProperty() const override { return Equals(Default); }
     };
+    inline const LocalizableAttribute LocalizableAttribute::Yes{true};
+    inline const LocalizableAttribute LocalizableAttribute::No{false};
+    inline const LocalizableAttribute LocalizableAttribute::Default{false};
 
-    /** Specifies whether the list value of this property can be merged into a single object. */
-    class MergablePropertyAttribute : public System::Attribute {
+    /**
+     * @brief Specifies whether the list value of this property can be merged into a single object.
+     * `MergablePropertyAttribute.cs:9-30`.
+     *
+     * @note **Its `Default` is `Yes`, not `No`** (`:12`), unlike the other four boolean attributes
+     * in this header. That asymmetry is .NET's, and a repair that "harmonised" the five would be
+     * wrong here and nowhere else -- which is why it carries a pin of its own.
+     */
+    class MergablePropertyAttribute final : public System::Attribute {
+        bool allowMerge_;
+
     public:
-        bool AllowMerge; ///< True if property values can be merged.
-
         /** @param allowMerge True to allow merging. */
-        explicit MergablePropertyAttribute(bool allowMerge) : AllowMerge(allowMerge) {}
+        explicit MergablePropertyAttribute(bool allowMerge) : allowMerge_(allowMerge) {}
+
+        static const MergablePropertyAttribute Yes;     ///< Pre-built "allow merge = true".
+        static const MergablePropertyAttribute No;      ///< Pre-built "allow merge = false".
+        static const MergablePropertyAttribute Default; ///< `:12` -- Default is **Yes**.
+
+        /** @return true if this property's list value can be merged. */
+        [[nodiscard]] bool getAllowMergeProperty() const noexcept { return allowMerge_; }
+
+        [[nodiscard]] bool Equals(const System::Attribute& other) const override {
+            const auto* attribute = dynamic_cast<const MergablePropertyAttribute*>(&other);
+            return attribute != nullptr && attribute->allowMerge_ == allowMerge_;
+        }
+        [[nodiscard]] int GetHashCode() const override { return allowMerge_ ? 1 : 0; }
+        [[nodiscard]] bool getIsDefaultAttributeProperty() const override { return Equals(Default); }
     };
+    inline const MergablePropertyAttribute MergablePropertyAttribute::Yes{true};
+    inline const MergablePropertyAttribute MergablePropertyAttribute::No{false};
+    inline const MergablePropertyAttribute MergablePropertyAttribute::Default{true};
 
-    /** Specifies that changing this property should trigger re-querying the parent property. */
-    class NotifyParentPropertyAttribute : public System::Attribute {
+    /**
+     * @brief Specifies that changing this property should trigger re-querying the parent property.
+     * `NotifyParentPropertyAttribute.cs:9-30`.
+     */
+    class NotifyParentPropertyAttribute final : public System::Attribute {
+        bool notifyParent_;
+
     public:
-        bool NotifyParent; ///< True if the parent property should be notified.
-
         /** @param notifyParent True to enable parent notification. */
-        explicit NotifyParentPropertyAttribute(bool notifyParent) : NotifyParent(notifyParent) {}
+        explicit NotifyParentPropertyAttribute(bool notifyParent) : notifyParent_(notifyParent) {}
+
+        static const NotifyParentPropertyAttribute Yes;     ///< Pre-built "notify = true".
+        static const NotifyParentPropertyAttribute No;      ///< Pre-built "notify = false".
+        static const NotifyParentPropertyAttribute Default; ///< `:14` -- Default is **No**.
+
+        /** @return true if the parent property should be notified of a change. */
+        [[nodiscard]] bool getNotifyParentProperty() const noexcept { return notifyParent_; }
+
+        [[nodiscard]] bool Equals(const System::Attribute& other) const override {
+            const auto* attribute = dynamic_cast<const NotifyParentPropertyAttribute*>(&other);
+            return attribute != nullptr && attribute->notifyParent_ == notifyParent_;
+        }
+        [[nodiscard]] int GetHashCode() const override { return notifyParent_ ? 1 : 0; }
+        [[nodiscard]] bool getIsDefaultAttributeProperty() const override { return Equals(Default); }
+    };
+    inline const NotifyParentPropertyAttribute NotifyParentPropertyAttribute::Yes{true};
+    inline const NotifyParentPropertyAttribute NotifyParentPropertyAttribute::No{false};
+    inline const NotifyParentPropertyAttribute NotifyParentPropertyAttribute::Default{false};
+
+    /**
+     * @brief Controls how the property grid refreshes. `RefreshProperties.cs:5-11`.
+     *
+     * @note **Top-level, not nested.** This port used to declare it as
+     * `RefreshPropertiesAttribute::Refresh`, which differed from .NET in both the name and the
+     * scope. .NET's is a top-level `public enum RefreshProperties` in its own file.
+     */
+    enum class RefreshProperties {
+        None    = 0,
+        All     = 1,
+        Repaint = 2,
     };
 
-    /** Specifies how the property grid refreshes when the decorated property changes. */
-    class RefreshPropertiesAttribute : public System::Attribute {
+    /**
+     * @brief Specifies how the property grid refreshes when the decorated property changes.
+     * `RefreshPropertiesAttribute.cs:6-20`.
+     */
+    class RefreshPropertiesAttribute final : public System::Attribute {
+        RefreshProperties refreshProperties_;
+
     public:
-        /** Controls how the property grid refreshes. */
-        enum class Refresh { None = 0, All = 1, Repaint = 2 };
+        /** @param refresh The desired refresh mode. */
+        explicit RefreshPropertiesAttribute(RefreshProperties refresh)
+            : refreshProperties_(refresh) {}
 
-        Refresh RefreshProperties_; ///< The refresh mode.
+        static const RefreshPropertiesAttribute All;     ///< `:8` -- RefreshProperties::All.
+        static const RefreshPropertiesAttribute Repaint; ///< `:9` -- RefreshProperties::Repaint.
+        static const RefreshPropertiesAttribute Default; ///< `:10` -- RefreshProperties::None.
 
-        /** @param r The desired refresh mode. */
-        explicit RefreshPropertiesAttribute(Refresh r) : RefreshProperties_(r) {}
+        /** @return the refresh mode this attribute carries. */
+        [[nodiscard]] RefreshProperties getRefreshPropertiesProperty() const noexcept {
+            return refreshProperties_;
+        }
+
+        [[nodiscard]] bool Equals(const System::Attribute& other) const override {
+            const auto* attribute = dynamic_cast<const RefreshPropertiesAttribute*>(&other);
+            return attribute != nullptr && attribute->refreshProperties_ == refreshProperties_;
+        }
+        [[nodiscard]] int GetHashCode() const override {
+            return static_cast<int>(refreshProperties_);
+        }
+        [[nodiscard]] bool getIsDefaultAttributeProperty() const override { return Equals(Default); }
     };
+    inline const RefreshPropertiesAttribute RefreshPropertiesAttribute::All{RefreshProperties::All};
+    inline const RefreshPropertiesAttribute RefreshPropertiesAttribute::Repaint{RefreshProperties::Repaint};
+    inline const RefreshPropertiesAttribute RefreshPropertiesAttribute::Default{RefreshProperties::None};
 
     /**
      * @brief Specifies the type converter type associated with an object.

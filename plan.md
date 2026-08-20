@@ -1,13 +1,24 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-19 — branch **`next`**, working tree clean. Gate **17,631 across 38
-executables: 17,631 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs
+*Last verified: 2026-08-20 — branch **`next`**, working tree clean. Gate **17,637 across 38
+executables: 17,637 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs
 with every executable run separately and continuing past failures, zero build warnings at
 `--parallel 2`. Graph **41 / 94** (#2401 added one private edge), seams **3 / 20**, negative
-fixtures **49 / 248** (#2399 added one; #2397, #2398 and #2401 outlawed no spelling). **BOTH WORK
+fixtures **50 / 256** (#2399 and #2403 added one each; #2397, #2398, #2401 and #2402 outlawed no
+spelling). **BOTH WORK
 QUEUES ARE EMPTY**: `ticket` has 0 `todo` (2,384 done, 9 blocked, 1 needs_user, 5 wontfix) and
 `task` has 0 unclassified. Six tickets were filed and closed by one sweep on 2026-08-19: #2397,
-#2398, #2399, #2400, #2401 and #2402.*
+#2398, #2399, #2400, #2401 and #2402, and two more on 2026-08-20: #2403 and #2404.*
+
+***#2403 is the one that shows "has tests" is not "is covered".*** *`component-model` has its own
+test executable, and it still held six attributes publishing a **bare mutable public data member**
+where .NET publishes a get-only property — most with no statics and no equality members at all,
+while four siblings **in the same header** already had the correct shape. Its whole prior coverage
+for those six was constructor round-trips through the public field, so .NET's `Default` values were
+unpinned, including `MergablePropertyAttribute::Default = Yes` where its four siblings are `No`. One
+divergence is deliberate and pinned: .NET's `GetHashCode` here is identity while its `Equals` is
+by value, which breaks the hash contract, and `System/Attribute.hpp` states the opposite rule in
+terms.*
 
 ***The latest change is #2397, and what it demonstrates matters more than what it repaired.*** *The
 queues were already empty, so the work was **found by measurement**: the restored reference was
