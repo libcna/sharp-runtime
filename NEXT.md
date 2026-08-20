@@ -139,6 +139,46 @@
 > and each is itemised in §2 below. **§4b says where to look next, and the method that found all
 > three of today's tickets.**
 
+## 2026-08-20 — #1997 group A-2: `Uri::CheckHostName`, and the move that made it possible — **#1997 CLOSED**
+
+**Gate: 17,694 / 38, 0 failed, 0 skipped** (+5, `Uri` 314 → 319; **`Net` unchanged at 340**, which
+is the evidence the move below changed no behaviour). Graph 41/94.
+
+`UriHostNameType` had documented this member since the enum was ported and **nothing in this
+runtime could produce a value of that type**.
+
+**The recorded cost was understated.** #1997 priced A-2 as *"a new public module edge to
+`System::Net::IPAddress`, or a second address-literal parser"*. **The first is impossible rather
+than expensive**: `modules/net` declares `PUBLIC_DEPENDENCIES … Uri`, so that edge is a **cycle** —
+the dependency inversion `Guid.cpp` refused for cryptography, and the reason a first cut written
+against `IPAddress` was rejected by the boundary validator.
+
+**A third route neither option named.** `modules/net`'s IPv4/IPv6 scanners are pure
+string-to-number scanners with no platform call and no dependency on `IPAddress`, so they moved
+verbatim into `Core.Base`. Both modules already depend on it → **graph unchanged, one definition
+instead of two**, `IPAddress.cpp` **−197 / +11**.
+
+**IPv4-before-DNS decides an answer rather than tidying**: `CheckHostName` passes
+`allowIPv6=false, unknownScheme=false`, selecting `ParseNonCanonical` — so `"1"`, `"0x7F.1"` and
+`"3232235777"` are **IPv4** though all three are good DNS labels, while `"1.2.3.4.5"` falls through
+to **Dns**.
+
+Two rules new with the member: the **label** rules (first char an ASCII letter or digit, length
+**1..63**, **trailing dot accepted**), which the constructor never needed; and **an unbracketed IPv6
+literal is still IPv6**, which .NET gets by retrying `IsValid($"[{name}]")`.
+
+The constructor's character loop was **factored so there is one definition** (#2393's shape), while
+the two remain different questions — the constructor applies no label rules, so `Uri("http://-x/")`
+parses where `CheckHostName("-x")` is `Unknown`, asserted together.
+
+Seven mutations, all caught. **M6 was NOT CAUGHT at first and found a defect in my test, not the
+code**: *"the entire name must be consumed"* was asserted with `"[::1]junk"`, which fails on the
+front/back guard and never enters the bracketed branch, so a body measuring to the **first** `]`
+passed it. The discriminating input is `"[::1]]"`.
+
+`docs/Migration-UriCheckHostName.md`. Downstream zero sites. **#1997's four groups A-1…A-4 are all
+landed and the ticket is closed.**
+
 ## 2026-08-20 — #1997 group A-4: `UriParser` could not extend anything
 
 **Gate: 17,689 / 38, 0 failed, 0 skipped** (+6, `Uri` 308 → 314). Graph 41/94. Fixture set

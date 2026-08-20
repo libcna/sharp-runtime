@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Uri.hpp"
+#include "System/detail/IPAddressLiteral.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -12,6 +13,75 @@
 #include <functional>
 
 namespace System {
+
+namespace detail {
+
+    /**
+     * @brief .NET's `DomainNameHelper.IsValid` character rule, both the ASCII and the IRI arm.
+     *
+     * The ASCII set is `s_validChars`, exactly `-0123456789A-Z_a-z.`
+     * (`DomainNameHelper.cs:36-37`). The IRI arm accepts any non-ASCII scalar EXCEPT
+     * U+0080-U+009F, which `s_iriInvalidChars` lists explicitly (`:40-45`). Decoding the scalar
+     * rather than waving bytes through is what makes that exact, and it costs nothing because
+     * #2354 put the decoder in `Core.Base`, which this module already depends on.
+     */
+    bool hostCharactersAreValid(const std::string& host) {
+        for (std::size_t i = 0; i < host.size();) {
+            const unsigned char c = static_cast<unsigned char>(host[i]);
+            if (c < 0x80) {
+                const bool valid = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ||
+                                   (c >= 'a' && c <= 'z') || c == '-' || c == '_' || c == '.';
+                if (!valid) return false;
+                ++i;
+                continue;
+            }
+            std::uint32_t cp  = 0;
+            std::size_t   len = 0;
+            if (!System::detail::TryDecodeUtf8Scalar(host, i, cp, len) ||
+                (cp >= 0x80 && cp <= 0x9F))
+                return false;
+            i += len;
+        }
+        return true;
+    }
+
+    /**
+     * @brief .NET's `DomainNameHelper.IsValid` LABEL rule, which the character rule does not cover.
+     *
+     * Transcribed from `DomainNameHelper.cs:126-190`. Three separate requirements, and the
+     * constructor never needed any of them -- it only ever asked about characters -- so this is
+     * new with `CheckHostName` rather than factored out of it:
+     *   * every label's first character is an ASCII letter or digit (RFC 1123 §2.1 drops the
+     *     older "must be alphabetic", and .NET's own comment says so);
+     *   * every label is 1..63 characters;
+     *   * a TRAILING DOT is accepted and ends the walk -- `"example.com."` is a valid DNS name,
+     *     which is easy to get wrong in either direction because an empty final label would
+     *     otherwise fail the 1..63 rule.
+     */
+    bool hostLabelsAreValid(const std::string& host) {
+        if (host.empty()) return false;
+        std::size_t start = 0;
+        while (true) {
+            const unsigned char first = static_cast<unsigned char>(host[start]);
+            const bool asciiAlnum = (first >= '0' && first <= '9') ||
+                                    (first >= 'A' && first <= 'Z') ||
+                                    (first >= 'a' && first <= 'z');
+            // The IRI arm exempts a non-ASCII first character (`firstChar < 0xA0` guards the
+            // test), so a label beginning with a non-ASCII scalar is accepted.
+            if (first < 0xA0 && !asciiAlnum) return false;
+
+            const std::size_t dot = host.find('.', start);
+            const std::size_t labelLength = (dot == std::string::npos ? host.size() : dot) - start;
+            if (labelLength < 1 || labelLength > 63) return false;
+
+            if (dot == std::string::npos) return true;
+            start = dot + 1;
+            if (start >= host.size()) return true;   // a trailing dot ends a valid name
+        }
+    }
+
+} // namespace detail
+
 
 // ---------------------------------------------------------------------------
 // Private helpers
@@ -372,33 +442,66 @@ void Uri::parse(const std::string& rawUriString) {
     //
     // A bracketed IPv6 literal takes IPv6AddressHelper and is already validated above, so it is
     // exempt here. An IPv4 literal needs no exemption: digits and dots are in s_validChars.
-    if (!host_.empty() && host_.front() != '[') {
-        for (std::size_t i = 0; i < host_.size();) {
-            const unsigned char c = static_cast<unsigned char>(host_[i]);
-            if (c < 0x80) {
-                const bool valid = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ||
-                                   (c >= 'a' && c <= 'z') || c == '-' || c == '_' || c == '.';
-                if (!valid)
-                    throw System::UriFormatException(
-                        "Invalid URI: The hostname could not be parsed.");
-                ++i;
-                continue;
-            }
-            // The IRI path accepts any non-ASCII scalar EXCEPT U+0080-U+009F, which
-            // s_iriInvalidChars lists. Decoding rather than waving bytes through is what makes
-            // that exact -- and it costs nothing, because #2354 put the decoder in Core.Base,
-            // which this module already depends on.
-            std::uint32_t cp  = 0;
-            std::size_t   len = 0;
-            if (!System::detail::TryDecodeUtf8Scalar(host_, i, cp, len) ||
-                (cp >= 0x80 && cp <= 0x9F))
-                throw System::UriFormatException("Invalid URI: The hostname could not be parsed.");
-            i += len;
-        }
+    // #1997 A-2 factored the loop that used to sit here into detail::hostCharactersAreValid, so
+    // the constructor and `CheckHostName` decide "is this a DNS-shaped host" by ONE definition.
+    // Two grammars for one question is the #2393 defect, and there it was found only after a
+    // caller could construct a Uri this port's own TryCreate called invalid.
+    if (!host_.empty() && host_.front() != '[' && !detail::hostCharactersAreValid(host_)) {
+        throw System::UriFormatException("Invalid URI: The hostname could not be parsed.");
     }
 
     absoluteUri_   = uriString;
     isAbsoluteUri_ = true;
+}
+
+
+// ---------------------------------------------------------------------------
+// CheckHostName -- ticket #1997 group A-2 (SR-AUD-151)
+// ---------------------------------------------------------------------------
+
+UriHostNameType Uri::CheckHostName(const std::string& name) {
+    // .NET's order is transcribed rather than rearranged, and IPv4-BEFORE-DNS is where it
+    // decides an answer rather than merely tidying: `CheckHostName` passes
+    // `IPv4AddressHelper.IsValid(name, out end, false, false, false)`, whose `allowIPv6` and
+    // `unknownScheme` both being false selects **ParseNonCanonical** rather than the canonical
+    // dotted-quad grammar -- so `"1"` and `"0x7F.1"` are IPv4 here, though both are also
+    // perfectly good DNS labels. Reordering the two would answer Dns for them.
+    if (name.empty()) return UriHostNameType::Unknown;
+
+    // 1. A fully bracketed IPv6 literal. .NET requires the ENTIRE name be consumed
+    //    (`end == name.Length`), which is what stops "[::1]junk" from classifying.
+    if (name.front() == '[' && name.back() == ']') {
+        std::array<std::uint16_t, 8> groups{};
+        std::uint32_t scopeId = 0;
+        if (System::detail::tryParseIPv6(name.substr(1, name.size() - 2), groups, scopeId))
+            return UriHostNameType::IPv6;
+    }
+
+    // 2. IPv4. This port's scanner is .NET's `ParseNonCanonical` behaviour, so the non-canonical
+    //    forms .NET accepts are accepted here too -- "0x7F.1" is IPv4, not a DNS name. That is
+    //    not a widening introduced here: it is the same scanner `IPAddress::Parse` has used
+    //    since #2036, now shared rather than copied.
+    std::uint32_t v4 = 0;
+    if (System::detail::tryParseIPv4Groups(name, v4)) return UriHostNameType::IPv4;
+
+    // 3. DNS. Both halves of `DomainNameHelper.IsValid` are required: the character set AND the
+    //    label rules. Checking only the characters -- which is all this port's constructor ever
+    //    needed -- would answer Dns for "-x", for an empty label in "a..b", and for a label of
+    //    64 characters.
+    if (detail::hostCharactersAreValid(name) && detail::hostLabelsAreValid(name))
+        return UriHostNameType::Dns;
+
+    // 4. .NET's last resort: an UNBRACKETED IPv6 literal, retried by adding the brackets
+    //    (`Uri.cs:1320-1324`). It runs after DNS, so a name that is both -- there is none, since
+    //    ':' is not in the DNS character set -- would answer Dns; the ordering is kept because
+    //    it is .NET's, and the comment says so rather than claiming it is load-bearing.
+    if (name.front() != '[') {
+        std::array<std::uint16_t, 8> groups{};
+        std::uint32_t scopeId = 0;
+        if (System::detail::tryParseIPv6(name, groups, scopeId)) return UriHostNameType::IPv6;
+    }
+
+    return UriHostNameType::Unknown;
 }
 
 // ---------------------------------------------------------------------------

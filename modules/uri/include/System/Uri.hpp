@@ -282,22 +282,32 @@ namespace System {
          *       allowed.
          */
         /**
-         * @note <b>`CheckHostName` is deliberately ABSENT, and #1997 corrected its cost estimate
-         *       rather than paying it.</b> The ticket calls its group A-2 "strictly additive"
-         *       and pairs it with `GetLeftPart` as "the recommended minimum". Measured, it is
-         *       not: `Uri.CheckHostName` (`Uri.cs:1286-1325`) classifies through
-         *       `IPv6AddressHelper.IsValid` and `IPv4AddressHelper.IsValid`, and this module has
-         *       neither. `modules/uri` depends on `Core.Base` alone, and validating an IPv6
-         *       literal's CONTENT is an explicitly declared out-of-scope boundary here
-         *       (`docs/SystemUriNamespaceReviewPlan.md` §15.4) -- `parse()` checks only the
-         *       bracket structure.
+         * @brief Classifies a host name as DNS, IPv4, IPv6 or unknown.
          *
-         *       So it costs either a new public module edge to reach `System::Net::IPAddress`,
-         *       or a second address-literal parser inside this module -- the duplication #2354
-         *       spent a ticket removing. Neither is "touches no existing declaration". It stays
-         *       with #1997 as group A-2.
+         * C++ counterpart of .NET `Uri.CheckHostName(string)` (`Uri.cs:1286-1325`), added by
+         * #1997 group A-2. `System::UriHostNameType` has documented this member since it was
+         * ported, and nothing could produce a value of that type until now.
+         *
+         * @note **THE RECORDED COST WAS UNDERSTATED AND THE MEASUREMENT CORRECTS IT.** #1997
+         *       priced this as *"a new public module edge to reach `System::Net::IPAddress`, or a
+         *       second address-literal parser inside this module"*. The first is **impossible
+         *       rather than expensive**: `modules/net` declares `PUBLIC_DEPENDENCIES ... Uri`, so
+         *       that edge is a **cycle**, the dependency inversion `Guid.cpp` refused for
+         *       cryptography. The second is the duplication #2354 spent a ticket removing. The
+         *       route taken is the third one neither option named -- the scanners **moved into
+         *       `Core.Base`**, which both modules already depend on, so there is one definition
+         *       and **the module graph does not change**.
+         *
+         * @note **AN UNBRACKETED IPv6 LITERAL IS ACCEPTED**, which is easy to read as a bug and is
+         *       .NET's own last resort: it retries `IPv6AddressHelper.IsValid($"[{name}]")`
+         *       (`Uri.cs:1320-1324`), so `CheckHostName("::1")` is `IPv6` even though a `Uri`
+         *       authority requires the brackets. The two questions are different -- this one asks
+         *       what a string *is*, not whether it may appear in an authority.
+         *
+         * @param name The host name to classify. An empty name is `Unknown`, not an error.
+         * @return The host name type; `UriHostNameType::Unknown` if it is none of the three.
          */
-
+        [[nodiscard]] static UriHostNameType CheckHostName(const std::string& name);
         /**
          * @brief Returns the leftmost portion of the URI up to and including @p part.
          *

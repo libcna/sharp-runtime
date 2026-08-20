@@ -5,6 +5,8 @@
 #include "System/UriParser.hpp"
 #include "System/Uri.hpp"
 #include "System/NotImplementedException.hpp"
+#include "System/UriFormatException.hpp"
+#include "System/UriHostNameType.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
@@ -252,4 +254,119 @@ TEST(UriParserA4Tests, RegisteringOverABuiltInSchemeIsRefused) {
     // The refusal must not consume the parser either: it is still fresh and can be registered
     // somewhere else. A guard that stamped the scheme before throwing would fail this.
     EXPECT_NO_THROW(System::UriParser::Register(parser, "a4afterrefusal", 70));
+}
+
+// ===========================================================================
+// #1997 group A-2 (SR-AUD-151) -- Uri::CheckHostName
+// ===========================================================================
+//
+// `System::UriHostNameType` has documented this member since it was ported and NOTHING COULD
+// PRODUCE A VALUE OF THAT TYPE. The ticket priced the repair as "a new public module edge to
+// System::Net::IPAddress, or a second address-literal parser"; the first is a CYCLE
+// (modules/net declares PUBLIC_DEPENDENCIES ... Uri) and the second is the duplication #2354
+// removed, so the scanners moved into Core.Base instead -- one definition, graph unchanged.
+
+TEST(UriCheckHostNameA2Tests, TheThreeKindsAndTheAbsenceOfOne) {
+    using System::Uri;
+    using System::UriHostNameType;
+
+    EXPECT_EQ(Uri::CheckHostName(""), UriHostNameType::Unknown);
+    EXPECT_EQ(Uri::CheckHostName("example.com"), UriHostNameType::Dns);
+    EXPECT_EQ(Uri::CheckHostName("1.2.3.4"), UriHostNameType::IPv4);
+    EXPECT_EQ(Uri::CheckHostName("[::1]"), UriHostNameType::IPv6);
+    EXPECT_EQ(Uri::CheckHostName("exa mple.com"), UriHostNameType::Unknown);
+
+    // `Basic` is .NET's "set but undeterminable" and CheckHostName NEVER returns it -- its four
+    // returns are Unknown, IPv6, IPv4 and Dns. Asserting that keeps a later repair from reaching
+    // for the enumerator because it is there.
+    for (const char* n : {"", "example.com", "1.2.3.4", "[::1]", "exa mple.com", "!!"})
+        EXPECT_NE(Uri::CheckHostName(n), UriHostNameType::Basic) << n;
+}
+
+// THE ROW THAT DECIDES THE ORDER. CheckHostName passes allowIPv6=false and unknownScheme=false,
+// which selects ParseNonCanonical rather than the canonical dotted-quad grammar -- so a bare
+// number and a hex-prefixed short form are IPv4 even though both are also valid DNS labels.
+// Reordering IPv4 and DNS answers Dns for them and passes every other row in this file.
+TEST(UriCheckHostNameA2Tests, NonCanonicalIPv4BeatsDnsBecauseItIsTriedFirst) {
+    using System::Uri;
+    using System::UriHostNameType;
+
+    EXPECT_EQ(Uri::CheckHostName("1"), UriHostNameType::IPv4);
+    EXPECT_EQ(Uri::CheckHostName("0x7F.1"), UriHostNameType::IPv4);
+    EXPECT_EQ(Uri::CheckHostName("3232235777"), UriHostNameType::IPv4);
+
+    // ...and five dotted numbers are NOT an IPv4 address -- ParseNonCanonical takes at most four
+    // parts -- so they fall through to DNS, where every label is a legal one.
+    EXPECT_EQ(Uri::CheckHostName("1.2.3.4.5"), UriHostNameType::Dns);
+}
+
+// The LABEL rules are new with this member. The constructor only ever asked about CHARACTERS, so
+// a DNS answer derived from the character set alone would accept all four of these.
+TEST(UriCheckHostNameA2Tests, DnsNeedsTheLabelRulesAndNotOnlyTheCharacterSet) {
+    using System::Uri;
+    using System::UriHostNameType;
+
+    EXPECT_EQ(Uri::CheckHostName("-x"), UriHostNameType::Unknown);       // label starts with '-'
+    EXPECT_EQ(Uri::CheckHostName("_x"), UriHostNameType::Unknown);       // ...or with '_'
+    EXPECT_EQ(Uri::CheckHostName("a..b"), UriHostNameType::Unknown);     // empty inner label
+    EXPECT_EQ(Uri::CheckHostName(std::string(64, 'a')), UriHostNameType::Unknown);  // 64 > 63
+
+    // ...and 63 is accepted, so the bound is pinned on both sides rather than in one direction.
+    EXPECT_EQ(Uri::CheckHostName(std::string(63, 'a')), UriHostNameType::Dns);
+
+    // A TRAILING DOT IS A VALID DNS NAME and ends the walk. It is easy to get wrong in either
+    // direction: an empty final label would otherwise fail the 1..63 rule.
+    EXPECT_EQ(Uri::CheckHostName("example.com."), UriHostNameType::Dns);
+    EXPECT_EQ(Uri::CheckHostName("."), UriHostNameType::Unknown);
+}
+
+// .NET'S LAST RESORT, which reads like a bug until the reference is read: it retries
+// `IPv6AddressHelper.IsValid($"[{name}]")` (Uri.cs:1320-1324), so an UNBRACKETED literal
+// classifies as IPv6 even though a Uri authority requires the brackets. The two questions are
+// different -- this one asks what a string IS, not whether it may appear in an authority.
+TEST(UriCheckHostNameA2Tests, AnUnbracketedIPv6LiteralIsStillIPv6) {
+    using System::Uri;
+    using System::UriHostNameType;
+
+    EXPECT_EQ(Uri::CheckHostName("::1"), UriHostNameType::IPv6);
+    EXPECT_EQ(Uri::CheckHostName("2001:db8::1"), UriHostNameType::IPv6);
+
+    // The bracketed form must consume the ENTIRE name, which is what stops trailing junk from
+    // classifying -- .NET writes `end == name.Length` for exactly this.
+    //
+    // THE FIRST CUT ASSERTED THIS WITH AN INPUT THAT COULD NOT DISCRIMINATE IT, and mutation M6
+    // found that rather than a defect in the code. "[::1]junk" fails on the FRONT/BACK guard --
+    // its last character is 'k', so it never enters the bracketed branch at all -- so a body that
+    // measured the literal to the FIRST ']' instead of to the end of the name passed it anyway.
+    // The input that separates the two is bracketed at both ends with junk INSIDE.
+    EXPECT_EQ(Uri::CheckHostName("[::1]junk"), UriHostNameType::Unknown);
+    EXPECT_EQ(Uri::CheckHostName("[::1]]"), UriHostNameType::Unknown);
+    EXPECT_EQ(Uri::CheckHostName("[[::1]"), UriHostNameType::Unknown);
+    EXPECT_EQ(Uri::CheckHostName("[not-ipv6]"), UriHostNameType::Unknown);
+    EXPECT_EQ(Uri::CheckHostName("[]"), UriHostNameType::Unknown);
+}
+
+// ONE DEFINITION, NOT TWO. The constructor's host-character rule and CheckHostName's now come
+// from the same helper, so a host the constructor accepts cannot be a host CheckHostName calls
+// malformed on CHARACTERS. That is the #2393 shape -- there, two grammars for one question let a
+// caller construct a Uri this port's own TryCreate reported as invalid.
+TEST(UriCheckHostNameA2Tests, TheConstructorAndCheckHostNameShareOneCharacterRule) {
+    using System::Uri;
+    using System::UriHostNameType;
+
+    for (const char* host : {"example.com", "a-b_c.d", "1.2.3.4"}) {
+        EXPECT_NE(Uri::CheckHostName(host), UriHostNameType::Unknown) << host;
+        EXPECT_NO_THROW(Uri(std::string("http://") + host + "/")) << host;
+    }
+    for (const char* host : {"exa mple.com", "a\tb"}) {
+        EXPECT_EQ(Uri::CheckHostName(host), UriHostNameType::Unknown) << host;
+        EXPECT_THROW(Uri(std::string("http://") + host + "/"), System::UriFormatException) << host;
+    }
+
+    // The two are NOT the same question, and the difference is stated rather than left to be
+    // discovered: the constructor does not apply the LABEL rules, so "http://-x/" parses while
+    // CheckHostName("-x") is Unknown. .NET has the same split -- its constructor reaches
+    // DomainNameHelper through a different path with different flags.
+    EXPECT_NO_THROW(Uri("http://-x/"));
+    EXPECT_EQ(Uri::CheckHostName("-x"), UriHostNameType::Unknown);
 }
