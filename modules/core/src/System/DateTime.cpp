@@ -389,8 +389,41 @@ namespace System {
         const std::array<std::string, 7> abbreviatedDays = info.getAbbreviatedDayNamesProperty();
         const std::array<std::string, 7> fullDays = info.getDayNamesProperty();
 
+        // ---------------------------------------------------------------------------------
+        // #2416: THE STANDARD-FORMAT TABLE, WHICH THIS MEMBER NEVER CONSULTED.
+        // ---------------------------------------------------------------------------------
+        // Measured before the repair: `ToString("o")` emitted the LITERAL "o", `ToString("s")`
+        // returned "0" -- reading `s` as SECONDS -- and `"%d"` rendered "%15". So a one-character
+        // format was silently treated as a CUSTOM specifier, where .NET treats it as a STANDARD
+        // one and requires `%d` for the custom reading.
+        //
+        // THE TABLE ALREADY EXISTED AND WAS SIMPLY NOT CALLED: `DateTimeFormatInfo::
+        // GetAllDateTimePatterns(char)` carries all nineteen specifiers, culture-aware. So this is
+        // a wiring repair rather than a new table, and it is what makes the two halves of this
+        // type agree -- #2414 and #1942 gave the PARSE side its table, and until now
+        // `ParseExact(x, "o")` read .NET's roundtrip pattern while `ToString("o")` emitted the
+        // letter.
+        std::string expanded = format;
+        if (format.size() == 1) {
+            static constexpr std::string_view kStandard = "dDfFgGmMoOrRstTuUyY";
+            if (kStandard.find(format[0]) == std::string_view::npos) {
+                // .NET raises FormatException here, NOT the ArgumentException
+                // `GetAllDateTimePatterns` raises -- two members, two contracts, and emitting the
+                // character as a literal (which is what this did) is neither.
+                throw FormatException("Format specifier was invalid.");
+            }
+            expanded = info.GetAllDateTimePatterns(format[0]).front();
+        } else if (format.size() == 2 && format[0] == '%') {
+            // `%d` is .NET's spelling for a SINGLE custom specifier, and it exists precisely
+            // because a bare `d` is the short-date pattern. Without it there is no way to ask for
+            // an unpadded day at all.
+            if (format[1] == '%') throw FormatException("Format specifier was invalid.");
+            expanded = format.substr(1);
+        }
+        const std::string& fmt = expanded;
+
         std::string result;
-        result.reserve(format.size() + 8);
+        result.reserve(fmt.size() + 8);
         int yr  = getYearProperty(),   mo  = getMonthProperty(),  dy  = getDayProperty();
         int hr  = getHourProperty(),   mn  = getMinuteProperty(), sc  = getSecondProperty();
         const int fractionTicks = static_cast<int>(ticks() % TicksPerSecond);
@@ -402,11 +435,11 @@ namespace System {
         };
 
         size_t i = 0;
-        while (i < format.size()) {
-            char c = format[i];
+        while (i < fmt.size()) {
+            char c = fmt[i];
             auto run = [&](char ch) {
                 size_t k = i + 1;
-                while (k < format.size() && format[k] == ch) ++k;
+                while (k < fmt.size() && fmt[k] == ch) ++k;
                 return static_cast<int>(k - i);
             };
             if (c == 'y') {
@@ -456,10 +489,31 @@ namespace System {
                 const int width = (n <= 7) ? n : 3;
                 result += fraction.substr(0, static_cast<size_t>(width));
                 i += n;
+            } else if (c == 't') {
+                // AM/PM, which the formatter did not have -- so `hh:mm tt` emitted a literal `tt`
+                // while the PARSE side has read `t`/`tt` since #1939. Another row where the two
+                // halves of one type disagreed.
+                const std::size_t n = static_cast<std::size_t>(run(c));
+                const std::string& designator = (hr < 12) ? info.getAMDesignatorProperty()
+                                                          : info.getPMDesignatorProperty();
+                if (n == 1) result += designator.empty() ? std::string() : designator.substr(0, 1);
+                else result += designator;
+                i += n;
+            } else if (c == 'K') {
+                // The kind marker, needed for `o` to be .NET's roundtrip pattern rather than a
+                // shape. `Unspecified` emits NOTHING, which is why `K` can also match the empty
+                // string on the parse side (#1942) -- the two rules are one rule.
+                const std::size_t n = static_cast<std::size_t>(run(c));
+                if (getKindProperty() == DateTimeKind::Utc) result += 'Z';
+                // A LOCAL value would need this process's zone, which `Core.Base` cannot name --
+                // the same boundary #1941 phase 2 and SA-16.1 recorded, here with no parameter to
+                // carry one. It is emitted as empty rather than guessed, and that is stated in
+                // the header rather than left to be discovered.
+                i += n;
             } else if (c == '\'') {
                 ++i;
-                while (i < format.size() && format[i] != '\'') result += format[i++];
-                if (i < format.size()) ++i;
+                while (i < fmt.size() && fmt[i] != '\'') result += fmt[i++];
+                if (i < fmt.size()) ++i;
             } else {
                 result += c;
                 ++i;

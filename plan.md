@@ -155,6 +155,39 @@ exactly, this batch's own tests, no regression**. Graph **41 / 92**, seams **3 /
 sole member is now remediated**; CCF-019 open; CCF-021/#2131 and CCF-022/#2109 unminted. Doxygen,
 `ccache` and `/rv` absent. Maximum compiler parallelism **2 jobs**.*
 
+## 2026-08-20 — #2416: `DateTime::ToString` had no standard-format table at all
+
+**Gate: 17,725 / 38, 0 failed, 0 skipped** (+5, `Core_Base` 6,136 → 6,141; **no other executable
+moved**, so nothing that formatted a date changed its answer).
+
+Measured: `ToString("o")` emitted the **literal** `"o"`, `ToString("s")` returned **`"0"`** (reading
+`s` as *seconds*), `"d"` returned **`"15"`**, and `"%d"` rendered **`"%15"`**.
+
+**Three distinct defects in one member:** an unrecognised specifier emitted *as a literal*; a
+one-character **custom** specifier accepted where .NET requires `%d`, so `"s"` and `"d"` gave a
+**plausible wrong answer** rather than a visible failure; and `%` not being the escape at all.
+
+**It mattered now** because #2414 and #1942 gave the *parse* side a table, so **the two halves of
+one type disagreed about what `o` means** — the #2393 shape, one type over.
+
+**The table already existed and was simply not called.**
+`DateTimeFormatInfo::GetAllDateTimePatterns(char)` carries all nineteen specifiers, culture-aware —
+so this is a **wiring** repair, and a provider's patterns are honoured for free. **Two exceptions,
+two contracts**: `ToString` raises `FormatException` where `GetAllDateTimePatterns` raises
+`ArgumentException`, and emitting the character as a literal was neither.
+
+Two custom tokens came with it — `t`/`tt` and `K`, both read by the parse side since #1939 and
+#1942. **`K` for a `Local` value emits nothing**, stated rather than discovered: a local marker
+needs a zone `Core.Base` cannot name. `Unspecified` emits nothing too, which is the **same rule** as
+`K` matching the empty string when parsing.
+
+Seven mutations, all caught, with the round trip asserted as a **property**. **A first cut of one
+case wrote `ToString("K")` and threw** — a one-character format is the *standard* reading and `K` is
+not one of the nineteen — so **the test tripped over its own subject**; the row is kept as evidence
+the rule bites.
+
+`docs/Migration-DateTimeToStringStandardFormats.md`. Downstream zero sites.
+
 ## 2026-08-20 — SA-16.2/16.3/16.5/16.6: the XSD round trip closes — **#1943 CLOSED**
 
 **Gate: 17,720 / 38, 0 failed, 0 skipped** (+6; `Core_Base` 6,132 → 6,136, `Xml` 524 → 526, #1945's

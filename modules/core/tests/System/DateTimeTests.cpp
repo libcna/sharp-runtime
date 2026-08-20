@@ -2016,3 +2016,116 @@ TEST(DateTimeStyles1942Tests, TheZoneTokenWidthsDifferAndAnOutOfRangeOffsetFails
                                                  "yyyy-MM-dd zzz zzz", nullptr,
                                                  DateTimeStyles::None, out, &utcZone));
 }
+
+// ===========================================================================
+// #2416 -- DateTime::ToString had no standard-format table at all
+// ===========================================================================
+//
+// MEASURED BEFORE THE REPAIR: `ToString("o")` emitted the LITERAL "o", `ToString("s")` returned
+// "0" -- reading `s` as SECONDS -- and `"%d"` rendered "%15". A one-character format was silently
+// treated as a CUSTOM specifier where .NET treats it as a STANDARD one.
+//
+// THE TABLE ALREADY EXISTED AND WAS SIMPLY NOT CALLED. `DateTimeFormatInfo::
+// GetAllDateTimePatterns(char)` carries all nineteen specifiers, culture-aware, so this was a
+// WIRING repair rather than a new table -- and what it closed is the two halves of one type
+// disagreeing: #2414 and #1942 gave the PARSE side its table, so `ParseExact(x, "o")` read .NET's
+// roundtrip pattern while `ToString("o")` emitted the letter.
+
+TEST(DateTimeToStringStandard2416Tests, EveryStandardSpecifierResolvesRatherThanEmittingItself) {
+    const System::DateTime d(2024, 6, 15, 12, 0, 0);
+
+    EXPECT_EQ(d.ToString("s"), "2024-06-15T12:00:00");
+    EXPECT_EQ(d.ToString("R"), "Sat, 15 Jun 2024 12:00:00 GMT");
+    EXPECT_EQ(d.ToString("r"), d.ToString("R"));
+    EXPECT_EQ(d.ToString("u"), "2024-06-15 12:00:00Z");
+    EXPECT_EQ(d.ToString("d"), "06/15/2024");
+    EXPECT_EQ(d.ToString("D"), "Saturday, 15 June 2024");
+    EXPECT_EQ(d.ToString("t"), "12:00");
+    EXPECT_EQ(d.ToString("T"), "12:00:00");
+
+    // NONE of these may be the specifier letter itself, which is what the defect looked like and
+    // is the assertion a table-shaped test would omit.
+    for (const char* f : {"d", "D", "f", "F", "g", "G", "m", "M", "o", "O",
+                          "r", "R", "s", "t", "T", "u", "y", "Y"}) {
+        EXPECT_NE(d.ToString(f), std::string(f)) << f;
+    }
+}
+
+// THE ROW THE WHOLE TICKET IS ABOUT: the two halves of one type must agree on what `o` means.
+// Asserting the ROUND TRIP rather than the two tables separately is what makes that a property
+// rather than two literals that happen to match today.
+TEST(DateTimeToStringStandard2416Tests, TheFormatAndParseSidesAgreeOnTheRoundtripPattern) {
+    using System::Globalization::DateTimeStyles;
+    const auto utc = System::DateTime::SpecifyKind(System::DateTime(2024, 6, 15, 12, 0, 0),
+                                                   System::DateTimeKind::Utc);
+
+    const std::string written = utc.ToString("o");
+    EXPECT_EQ(written, "2024-06-15T12:00:00.0000000Z");
+
+    const auto back = System::DateTime::ParseExact(written, "o", nullptr,
+                                                   DateTimeStyles::RoundtripKind);
+    EXPECT_EQ(back, utc);
+    EXPECT_EQ(back.getKindProperty(), System::DateTimeKind::Utc);
+
+    // An UNSPECIFIED value writes no marker and reads back unspecified -- `K` emitting nothing is
+    // the same rule as `K` matching the empty string on the parse side (#1942). One rule, two
+    // halves, and this asserts them together.
+    const System::DateTime naive(2024, 6, 15, 12, 0, 0);
+    EXPECT_EQ(naive.ToString("o"), "2024-06-15T12:00:00.0000000");
+    EXPECT_EQ(System::DateTime::ParseExact(naive.ToString("o"), "o").getKindProperty(),
+              System::DateTimeKind::Unspecified);
+}
+
+// `%d` IS .NET'S SPELLING FOR A SINGLE CUSTOM SPECIFIER, and it exists precisely because a bare
+// `d` is the short-date pattern -- without it there is no way to ask for an unpadded day at all.
+// It used to render "%15", so the percent was emitted as a literal AND the day was read wrong.
+TEST(DateTimeToStringStandard2416Tests, ThePercentEscapeSelectsASingleCustomSpecifier) {
+    const System::DateTime d(2024, 6, 15, 12, 0, 0);
+
+    EXPECT_EQ(d.ToString("%d"), "15");
+    EXPECT_EQ(d.ToString("%y"), "24");
+    EXPECT_EQ(d.ToString("%H"), "12");
+    // ...and the bare letter is the STANDARD reading, so the pair must differ. Asserting only the
+    // escape would pass against a body that ignored the `%` and got `d` right by accident.
+    EXPECT_NE(d.ToString("%d"), d.ToString("d"));
+
+    // `%%` is an error in .NET, and so is any unrecognised single character. Emitting it as a
+    // literal -- which is what this did -- is neither the FormatException .NET raises nor the
+    // ArgumentException GetAllDateTimePatterns raises: two members, two contracts.
+    EXPECT_THROW(d.ToString("%%"), System::FormatException);
+    EXPECT_THROW(d.ToString("q"), System::FormatException);
+    EXPECT_THROW(d.ToString("Z"), System::FormatException);
+}
+
+TEST(DateTimeToStringStandard2416Tests, TheCustomFormatterGainedTheTwoTokensItWasMissing) {
+    // `tt` -- the parse side has read it since #1939 while the format side emitted a literal.
+    EXPECT_EQ(System::DateTime(2024, 6, 15, 12, 0, 0).ToString("hh:mm tt"), "12:00 PM");
+    EXPECT_EQ(System::DateTime(2024, 6, 15, 0, 30, 0).ToString("hh:mm tt"), "12:30 AM");
+    EXPECT_EQ(System::DateTime(2024, 6, 15, 9, 5, 0).ToString("h:mm t"), "9:05 A");
+
+    // `K` -- Utc writes `Z`, Unspecified writes NOTHING. A LOCAL value would need this process's
+    // zone, which `Core.Base` cannot name -- SA-16.1's boundary, here with no parameter to carry
+    // one -- so it is emitted as empty rather than guessed, and that is pinned rather than left
+    // to be discovered.
+    //
+    // ...AND THE SPELLING IS `%K`, NOT `K`. A first cut of this case wrote the bare letter and
+    // threw, because a one-character format is the STANDARD reading and `K` is not one of the
+    // nineteen -- which is the very distinction this ticket exists to introduce. The test tripped
+    // over its own subject, and the row is kept as evidence that the rule bites.
+    const System::DateTime naive(2024, 6, 15, 12, 0, 0);
+    EXPECT_THROW(naive.ToString("K"), System::FormatException);
+    EXPECT_EQ(System::DateTime::SpecifyKind(naive, System::DateTimeKind::Utc).ToString("%K"), "Z");
+    EXPECT_EQ(naive.ToString("%K"), "");
+    EXPECT_EQ(System::DateTime::SpecifyKind(naive, System::DateTimeKind::Local).ToString("%K"), "");
+}
+
+// A MULTI-CHARACTER format is still custom, so the widening did not reach the spelling that
+// already worked -- the regression this repair could most plausibly have caused.
+TEST(DateTimeToStringStandard2416Tests, MultiCharacterFormatsAreStillCustom) {
+    const System::DateTime d(2024, 6, 15, 12, 0, 0);
+    EXPECT_EQ(d.ToString("yyyy-MM-dd"), "2024-06-15");
+    EXPECT_EQ(d.ToString("dd/MM/yyyy HH:mm:ss"), "15/06/2024 12:00:00");
+    EXPECT_EQ(d.ToString("MMMM"), "June");
+    // ...and the no-argument overload is untouched, keeping its space separator.
+    EXPECT_EQ(d.ToString(), "2024-06-15 12:00:00");
+}
