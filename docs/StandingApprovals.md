@@ -71,9 +71,12 @@ Granted 2026-08-17, replacing the per-action regime that #1788 and #1789 establi
 
 **Conditions — all four are mandatory.**
 
-1. **No vtable, mangled-symbol, signature or `noexcept` change** is involved. Adding a virtual
-   member, changing a base class, or altering an exception specification is **outside** this
-   approval and still needs a per-action ask.
+1. **No mangled-symbol, signature or `noexcept` change** is involved. Altering an exception
+   specification is **outside** this approval and still needs a per-action ask.
+   **AMENDED 2026-08-20 BY SA-15.3**: adding a virtual member or changing a base class used to be
+   excluded here and no longer is — it lands under SA-15.3's five conditions, one of which
+   (enumerating every `catch` clause whose meaning changes) exists precisely because a
+   reparenting is invisible to a layout pin.
 2. The **before/after `sizeof` and `alignof` are measured and pinned by a layout test** in the
    same change. A claim without a pin does not satisfy this condition.
 3. A `docs/Migration-*.md` note records the change and the **full-consumer-rebuild requirement**.
@@ -430,6 +433,78 @@ above rest on the corrected versions.
   worse: `CultureInfo("xx-YY")` **succeeds**, `getNameProperty()` returns `"xx-YY"`, and the format
   objects are populated from the **invariant** culture — so the object **claims to be `xx-YY` and
   behaves as invariant**.
+
+---
+
+## 4l. SA-15 — three decisions taken on 2026-08-20
+
+Granted 2026-08-20, after SA-14's work exposed each of them. All three were recommended and all
+three were granted as recommended.
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | how should `DateTime` reach a timezone, given the same cycle #1940 had? | **an abstraction in `Core.Base`** that `TimeZoneInfo` implements — shape **A**, not the move |
+| 2 | what counts as an *unrecognised* culture name in a port with no culture database? | **a syntactic BCP-47 check** — `""`, `"und"` and any well-formed name are accepted; malformed ones throw |
+| 3 | may a **vtable or base-class** change land under a standing approval? | **yes — SA-3 is extended to cover them**, under the conditions below |
+
+### SA-15.1 — the timezone abstraction, and the caveat that came with the grant
+
+**A timezone provider already exists and is good**: `System::TimeZoneInfo` is 968 header lines plus
+328 of implementation, has **190 passing tests**, reads real tzdata, and already offers
+`ConvertTimeToUtc(DateTime)`. The obstacle was never capability; it is that `TimeZone` declares
+`PUBLIC_DEPENDENCIES Core.Base`, so `DateTime` naming `TimeZoneInfo` would be **#1940's cycle
+again**.
+
+Moving it was measured and rejected as the more expensive shape: unlike `DateTimeFormatInfo` it is
+**not header-only**, it carries two exception types and a 270-line private POSIX support header, it
+has four includers outside its own module (one of them a *public* header,
+`threading/System/TimeProvider.hpp`), and it would put **tzdata reading under every consumer of
+`Core.Base`**.
+
+**The caveat was stated before the decision and accepted with it.** .NET's `ToLocalTime()` takes
+**no argument**, so an abstraction in `Core.Base` has nowhere to get its source from. The two ways
+out are a **registration hook** — hidden global state with a static-initialisation-order dependency
+— or an **overload that takes the source explicitly**, which is a deviation from .NET's signature.
+The second is the one consistent with what this repository has already chosen twice: #1940's
+`GetInstance(nullptr)` resolves to the invariant info and tells the caller to *pass the culture*,
+and the port has refused service-locator shapes before. **Whichever is implemented must be recorded
+as a deviation rather than presented as parity.**
+
+### SA-15.2 — the culture-name boundary
+
+**Accepted**: `""`, `"und"`, and any well-formed BCP-47 name (`xx`, `xx-YY`, `xx-Latn-YY`), which
+continue to behave as the invariant culture. **Rejected**: anything malformed — `"process-default"`,
+`"de_DE"`, `"123"`.
+
+**This is deliberately NOT .NET's invariant-globalization behaviour, and that must be said plainly
+in the header rather than implied.** Measured: `CultureData.cs:660-675` with
+`GlobalizationMode.cs:19` shows `PredefinedCulturesOnly` defaulting to `GlobalizationMode.Invariant`,
+so .NET in this port's own mode accepts **only** `""` and `"und"` and throws for **every** other
+name, `"de-DE"` included. The decision takes the *shape* of .NET-without-a-database instead,
+because it catches the accept-and-ignore cases that motivated SA-14 decision 3 without making the
+type unable to represent any named culture at all.
+
+Measured first-party cost: **zero** real sites (only the two existing `"de-DE"`/`"ja-JP"` test
+constructions, which stay legal). Downstream: **zero**.
+
+### SA-15.3 — SA-3 now covers vtable and base-class changes
+
+SA-3's first condition previously read *"no vtable, mangled-symbol, signature or `noexcept` change
+is involved… Adding a virtual member, changing a base class… is **outside** this approval"*. That
+exclusion is **lifted**, under **all** of the following:
+
+1. the before/after `sizeof` **and** the vtable change are **measured and pinned** by a layout test;
+2. a `docs/Migration-*.md` note records the **full-consumer-rebuild** requirement;
+3. the **measured downstream report** of SA-2 condition 5 is produced against both consumers;
+4. **every `catch` clause whose meaning changes is enumerated explicitly** — a reparenting silently
+   changes which handlers fire, and that is the part a `sizeof` pin cannot see;
+5. the **full gate** runs with no test-count regression.
+
+**Immediately unblocked**: **#1980 G-3** (reparenting `AmbiguousImplementationException` and
+introducing `OSPlatformAttribute` as a base) and **#1997 A-4**. Condition 4 exists because of G-3
+specifically: it breaks `catch (const SystemException&)`, which no layout assertion would reveal.
+
+**Still explicitly declined**, unchanged: **#1888, #1889, #1896** are not re-proposed under this.
 
 ---
 

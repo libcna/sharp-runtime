@@ -41,6 +41,77 @@ class CultureInfo : public System::IFormatProvider {
     NumberFormatInfo numberFormat_;
     DateTimeFormatInfo dateTimeFormat_;
 
+    /**
+     * @brief Rejects a culture name that is not a well-formed BCP 47 tag (#2410, SA-15.2).
+     *
+     * @warning **THIS IS DELIBERATELY NOT .NET'S INVARIANT-GLOBALIZATION BEHAVIOUR, and saying so
+     * here rather than implying it is the point.** Measured: `CultureData.cs:660-675` short-circuits
+     * only `""` and `"und"`, and then `GlobalizationMode.cs:19` makes `PredefinedCulturesOnly`
+     * default to `GlobalizationMode.Invariant` -- so .NET **in this port's own mode** accepts those
+     * two names and throws `CultureNotFoundException` for **every** other, `"de-DE"` included.
+     *
+     * This port accepts any well-formed tag instead, and keeps behaving as the invariant culture
+     * for it. The reason is recorded rather than assumed: **this port has no culture database at
+     * all**, so .NET's rule would leave `CultureInfo` unable to represent *any* named culture,
+     * while the accept-anything behaviour it replaces let `CultureInfo("process-default")` succeed
+     * and then report that name while behaving as invariant -- **an object that lied about what it
+     * was**. The syntactic check catches that class and nothing else.
+     *
+     * What a caller must NOT read into an accepted name: it means *this is a well-formed tag*, and
+     * never *this runtime has data for that culture*. It has none for any of them.
+     */
+    static void VerifyCultureName(const std::string& name) {
+        if (name.empty()) return;                       // the invariant culture
+        // CultureData.cs:663-669 -- "und" resolves to invariant, case-insensitively.
+        //
+        // THIS SHORT-CIRCUIT IS A PROVEN EQUIVALENCE HERE and is kept for being .NET's and for
+        // documenting WHY "und" means invariant: "und" is a well-formed three-letter primary
+        // subtag, so the general rule below accepts it anyway, in any casing. Mutation M4 breaks
+        // the case-insensitivity and is NOT caught -- the honest result. It would become
+        // load-bearing the day the primary-subtag rule narrows further.
+        if (name.size() == 3) {
+            const auto lower = [](char c) {
+                return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            };
+            if (lower(name[0]) == 'u' && lower(name[1]) == 'n' && lower(name[2]) == 'd') return;
+        }
+
+        // A tag is subtags separated by '-'. THE PRIMARY SUBTAG MUST BE 2 OR 3 LETTERS and the
+        // rest 1..8 alphanumeric characters.
+        //
+        // THE 2-3 LETTER LIMIT IS A DELIBERATE NARROWING PAST BCP 47, AND IT IS WHAT MAKES THIS
+        // CHECK DELIVER WHAT IT WAS ASKED FOR. RFC 5646 also allows a 5-8 letter *registered*
+        // primary subtag, and under that reading "process-default" is WELL FORMED -- measured, a
+        // first cut of this check accepted it, which would have missed the exact case SA-15.2
+        // names. Restricting the primary subtag to the 2-3 letters every real culture name uses
+        // ("en", "de-DE", "zh-Hant-TW") rejects it. What is lost is the rare registered form; that
+        // is stated here rather than discovered by whoever needs one.
+        //
+        // Deliberately NOT a full RFC 5646 grammar either: this rejects nonsense, it does not
+        // certify a tag, and pretending otherwise would be the same overclaim the old behaviour
+        // made.
+        std::size_t start = 0;
+        bool first = true;
+        while (start <= name.size()) {
+            const std::size_t dash = name.find('-', start);
+            const std::size_t end = (dash == std::string::npos) ? name.size() : dash;
+            const std::size_t length = end - start;
+            if (length == 0 || length > 8) break;
+            if (first && (length < 2 || length > 3)) break;
+            bool wellFormed = true;
+            for (std::size_t i = start; i < end; ++i) {
+                const auto c = static_cast<unsigned char>(name[i]);
+                if (std::isalnum(c) == 0) { wellFormed = false; break; }
+                if (first && std::isalpha(c) == 0) { wellFormed = false; break; }
+            }
+            if (!wellFormed) break;
+            if (dash == std::string::npos) return;      // every subtag was well formed
+            first = false;
+            start = dash + 1;
+        }
+        throw CultureNotFoundException("name", name, "Culture is not supported.");
+    }
+
     CultureInfo(const std::string& name, bool neutral, bool readOnly)
         : name_(name), isNeutral_(neutral), isReadOnly_(readOnly),
           numberFormat_(readOnly ? NumberFormatInfo::ReadOnly(NumberFormatInfo::getInvariantInfoProperty())
@@ -91,7 +162,13 @@ public:
      * C++ counterpart of .NET CultureInfo(string).
      * @param name The culture name (e.g. "en-US").
      */
-    explicit CultureInfo(const std::string& name) : CultureInfo(name, false, false) {}
+    /**
+     * @brief Constructs a culture by name.
+     * @throws CultureNotFoundException if @p name is not a well-formed BCP 47 tag -- see
+     *         `VerifyCultureName`, and note that this port's rule is deliberately wider than
+     *         .NET's invariant-globalization one.
+     */
+    explicit CultureInfo(const std::string& name) : CultureInfo((VerifyCultureName(name), name), false, false) {}
 
     /**
      * @brief Constructs a CultureInfo for the given LCID.
@@ -448,6 +525,10 @@ public:
      * @return A read-only CultureInfo for @p name.
      */
     [[nodiscard]] static CultureInfo GetCultureInfo(const std::string& name) {
+        // BOTH doors, which is SA-14 decision 3's whole point: before #2410 this port threw
+        // CultureNotFoundException only from the LCID path, so one door of one type rejected a
+        // name the other accepted -- #2393's shape.
+        VerifyCultureName(name);
         CultureInfo ci(name, false, true);
         return ci;
     }

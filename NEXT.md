@@ -3,8 +3,8 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-20 — 17,662 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,662 run: 17,662 passed, 0 failed, 0 skipped**, recounted from the
+> **Test-count floor, 2026-08-20 — 17,665 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,665 run: 17,665 passed, 0 failed, 0 skipped**, recounted from the
 > per-executable logs with every executable run separately and continuing past failures, zero build
 > warnings at `--parallel 2`. Every checkpoint below this one ends with *"the gate is not green"*;
 > this one does not. Two of the three historical failure sources were environmental and are simply
@@ -111,7 +111,19 @@
 > 2** and its unapproved timezone provider. That is a *user decision*, not a measurement: #1941's
 > record says a phase-2 approval must name a date-sensitive timezone provider.
 >
-> **What a new context should pick up first**: **#1945** is the one `todo` left in the chain.
+> **SA-15 WAS GRANTED ON 2026-08-20 AND IS THE STATE OF THE QUEUE.** Three decisions, all as
+> recommended, in `docs/StandingApprovals.md`: (1) `DateTime` reaches a timezone through an
+> **abstraction in `Core.Base`** rather than by moving `TimeZoneInfo` — **with the accepted caveat
+> that .NET's `ToLocalTime()` takes no argument**, so the source must come from a hidden hook or an
+> explicit overload, a deviation either way that must be *recorded* as one; (2) the culture-name
+> boundary is a **syntactic BCP 47 check** — landed as **#2410**; (3) **SA-3 now covers vtable and
+> base-class changes**, under five conditions whose fourth (enumerate every `catch` clause whose
+> meaning changes) exists because a reparenting is invisible to a layout pin.
+>
+> **The `todo` queue is #1945, #1980 and #1997.** #1980 G-3 and #1997 A-4 were unblocked by SA-15.3;
+> #1942/#1943/#1944 stay blocked on **#1941 phase 2**, which SA-15.1 has now decided the *shape* of
+> but which nobody has implemented yet — that is the next substantial piece and it unblocks three
+> tickets.
 >
 > **One thing #2406 deliberately did NOT do, so it is not mistaken for parity**: `DisplayAttribute`'s
 > eight fields stay public data members (correct — .NET's are `{ get; set; }`), but their

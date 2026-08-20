@@ -11,6 +11,7 @@
 #include "System/Globalization/SortKey.hpp"
 #include "System/Globalization/CompareInfo.hpp"
 #include "System/Globalization/CultureInfo.hpp"
+#include "System/Globalization/CultureNotFoundException.hpp"
 #include "System/Globalization/CharUnicodeInfo.hpp"
 #include "System/Globalization/DateTimeFormatInfo.hpp"
 #include "System/Globalization/JulianCalendar.hpp"
@@ -355,4 +356,67 @@ TEST_F(CultureDefaultsFixture, AHeldReferenceSurvivesTheDefaultBeingReplaced) {
     EXPECT_EQ(readThroughHeld, "es-ES")
         << "the reference must keep naming the culture it was taken from; it may be stale, but it "
            "must not be invalid";
+}
+
+// ===========================================================================================
+// #2410 (SA-14 decision 3, boundary by SA-15.2) -- an unrecognised culture name is refused
+//
+// Before this, CultureInfo("xx-YY") SUCCEEDED: getNameProperty() returned "xx-YY" while the format
+// objects came from the invariant culture, so the object CLAIMED TO BE xx-YY AND BEHAVED AS
+// INVARIANT. And CultureNotFoundException was already thrown -- but only from the LCID path, never
+// from a name, so one door of one type rejected what the other accepted (#2393's shape).
+//
+// THE BOUNDARY IS DELIBERATELY WIDER THAN .NET'S. Measured, .NET in invariant globalization mode --
+// this port's own mode -- accepts only "" and "und" (CultureData.cs:660-675 with
+// GlobalizationMode.cs:19) and throws for every other name INCLUDING "de-DE". This port has no
+// culture database at all, so that rule would leave CultureInfo unable to represent any named
+// culture whatsoever; the syntactic check catches the lying-object class and nothing else.
+// ===========================================================================================
+
+TEST_F(CultureDefaultsFixture, AWellFormedNameIsAcceptedAndStillBehavesAsInvariant) {
+    for (const char* name : {"de-DE", "ja-JP", "en", "zh-Hant-TW", "und", "UND", ""}) {
+        EXPECT_NO_THROW({
+            CultureInfo culture{std::string(name)};
+            EXPECT_EQ(culture.getNameProperty(), name);
+        }) << "name=[" << name << "]";
+        EXPECT_NO_THROW((void)CultureInfo::GetCultureInfo(std::string(name)))
+            << "name=[" << name << "]";
+    }
+}
+
+TEST_F(CultureDefaultsFixture, AMalformedNameIsRefusedByBOTHDoors) {
+    // Each row is malformed for a different reason: a space, an underscore where BCP 47 uses a
+    // dash, a leading digit, an empty subtag, an over-long subtag, and pure punctuation.
+    // Each row is malformed for a DIFFERENT reason, and the last three exist because a first cut
+    // of this list exercised only the PRIMARY subtag: the over-long and non-alphanumeric checks on
+    // LATER subtags went untested, and mutations removing them were not caught.
+    for (const char* name : {"process-default",  // primary subtag too long (7 letters)
+                             "main thread",      // a space
+                             "de_DE",            // underscore where BCP 47 uses a dash
+                             "123",              // primary subtag not alphabetic
+                             "de-",              // empty trailing subtag
+                             "-de",              // empty leading subtag
+                             "abcdefghi",        // primary subtag far too long
+                             "--", "de--DE",     // empty inner subtag
+                             "en-abcdefghi",     // LATER subtag over eight characters
+                             "en-D.E",           // LATER subtag not alphanumeric
+                             "en-US-x y"}) {     // whitespace inside a later subtag
+        EXPECT_THROW(CultureInfo{std::string(name)},
+                     System::Globalization::CultureNotFoundException)
+            << "the constructor accepted [" << name << "]";
+        EXPECT_THROW((void)CultureInfo::GetCultureInfo(std::string(name)),
+                     System::Globalization::CultureNotFoundException)
+            << "GetCultureInfo accepted [" << name << "]";
+    }
+}
+
+// The deviation itself, pinned so it cannot drift silently in either direction: "de-DE" must stay
+// ACCEPTED even though .NET's invariant mode rejects it, and the header says why.
+TEST_F(CultureDefaultsFixture, TheBoundaryIsWiderThanDotNetsInvariantModeOnPurpose) {
+    EXPECT_NO_THROW(CultureInfo{std::string("de-DE")})
+        << "SA-15.2 chose the syntactic reading; .NET's invariant mode would reject this";
+    // ...and an accepted name still means nothing about available data: the formats are invariant.
+    const CultureInfo german{std::string("de-DE")};
+    EXPECT_EQ(german.getDateTimeFormatProperty().getMonthNamesProperty()[0], "January")
+        << "an accepted name must not be read as 'this runtime has data for that culture'";
 }
