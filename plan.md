@@ -1,159 +1,53 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-20 — branch **`next`**, working tree clean. Gate **17,676 across 38
-executables: 17,676 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs
+*Last verified: 2026-08-20 — branch **`next`**, working tree clean. Gate **17,732 across 38
+executables: 17,732 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs
 with every executable run separately and continuing past failures, zero build warnings at
-`--parallel 2`. Graph **41 / 94** (#2401 added one private edge), seams **3 / 20**, negative
-fixtures **52 / 264** (#2399, #2403, #2405 and #2406 added one each; #2397, #2398, #2401 and #2402
-outlawed no spelling). **BOTH WORK
-QUEUES ARE EMPTY**: `ticket` has 0 `todo` (2,384 done, 9 blocked, 1 needs_user, 5 wontfix) and
-`task` has 0 unclassified. Six tickets were filed and closed by one sweep on 2026-08-19: #2397,
-#2398, #2399, #2400, #2401 and #2402, and two more on 2026-08-20: #2403 and #2404.*
+`--parallel 2`. Graph **41 / 95**, seams **3 / 20**, negative fixtures **53 / 269**.*
 
-***#2403 is the one that shows "has tests" is not "is covered".*** *`component-model` has its own
-test executable, and it still held six attributes publishing a **bare mutable public data member**
-where .NET publishes a get-only property — most with no statics and no equality members at all,
-while four siblings **in the same header** already had the correct shape. Its whole prior coverage
-for those six was constructor round-trips through the public field, so .NET's `Default` values were
-unpinned, including `MergablePropertyAttribute::Default = Yes` where its four siblings are `No`. One
-divergence is deliberate and pinned: .NET's `GetHashCode` here is identity while its `Equals` is
-by value, which breaks the hash contract, and `System/Attribute.hpp` states the opposite rule in
-terms.*
+## Status: the post-audit queue is empty
 
-***#2405 finished that module and #2406 is what it deliberately did not do.*** *Both
-`PropertyChanged`/`PropertyChangingEventArgs` carried a **second, mutable, lossy** `PropertyName`
-beside the private `std::optional` — a field whose own doc-comment described the loss and justified
-itself "for existing consumers that predate the nullable-property port", a reason that measures to
-zero — and `System::ComponentModel::Attribute` was a **phantom** with no .NET counterpart, no
-members, no derived classes and no callers. `DataAnnotations` is split out as **#2406**, the one
-open `todo`, because `DataTypeAttribute` holds an untyped mutable string where .NET has an enum plus
-a separate custom-type constructor and two accessors: adding public surface, not changing an
-accessor. **#2406 then closed the sweep, and its largest half is a declaration**: the eleven
-`ValidationAttribute` subclasses **validate nothing**, and the names — `RequiredAttribute` with a
-settable error message — are exactly what makes that dangerous, because the mistake surfaces as
-validation that silently never happened. It is now a `@warning` and a **pinned** absence, enforced
-by a mutation that adds an `IsValid` and is caught. `DataTypeAttribute` also held one untyped
-mutable string where .NET has an enum and two constructors with different meanings.*
+Measured 2026-08-20, not estimated:
 
-***The latest change is #2397, and what it demonstrates matters more than what it repaired.*** *The
-queues were already empty, so the work was **found by measurement**: the restored reference was
-pointed at `System::Text::RegularExpressions`, a module with **no test sources of its own** whose
-only coverage was a section of one integration file. It held **four divergences from .NET, two of
-them silent data loss through a public member** — `Regex::Split` discarded every matched capture
-group's value and dropped a trailing empty segment, both because the body was one
-`std::sregex_token_iterator(-1)`; `Regex::Escape` used its own metacharacter set, differing in
-**both** directions; and an unsuccessful `Match` reported an `Index` of **-1**, a sentinel .NET
-never produces. Landed under SA-5 with no layout, vtable, signature or `noexcept` change and no
-outlawed spelling. **Zero downstream sites** in both consumers. Nine mutations, eight caught, and
-the ninth a **proven equivalence** measured over 288 (pattern, input) pairs rather than asserted.
-**#2398 then repeated the method on the next such module and found a worse defect**:
-`RandomNumberGenerator` threw `PlatformNotSupportedException` on Emscripten, on a premise
-`Guid.cpp:377-388` had already measured false — `Guid::NewGuid()` has been getting real entropy
-there through the very `getentropy()` call the cryptographic RNG refused to make, and .NET does not
-refuse either. **Its shipped tests could not have caught it**: two cases asserting `buffer.size()`
-after filling a buffer sized before the call. Four platform arms became two, so the arm Emscripten
-takes is now the arm the Linux gate runs. **#2399 finished that module**, giving
-`RNGCryptoServiceProvider` .NET's `sealed` and `[Obsolete]` shape. **The signal common to all three
-is worth more than the module list**: every defect sat under a test that could not fail —
-`EXPECT_EQ(buffer.size(), 24u)` on a buffer sized before the call, twice, and a `Split` suite that
-never used a capturing group.*
+| | |
+|---|---|
+| `ticket` done | **2,406** |
+| `ticket` **todo** | **0** |
+| `ticket` blocked | 3 |
+| `ticket` wontfix | 5 |
+| `task` | fully classified — 1,082 ported, 15,119 ignored |
 
-***#2401 then found the highest-yield question of the five, and it was not a module at all.***
-*Asking #2398's own question once more — #2228 put a real CSPRNG behind `Guid::NewGuid`, so what
-else needs unpredictable bytes? — found `ClientWebSocket` drawing **both** its `Sec-WebSocket-Key`
-nonce and its **per-frame masking key** from `std::random_device`, which the standard permits to be
-deterministic and which this repository's own `Random.cpp:69-70` records as deterministic on
-MinGW-w64, a supported target. RFC 6455 §5.3 requires a strong source of entropy by name. Both now
-use .NET's routes; graph 41/93 → 41/94 for one private edge. **#2402 then closed the sweep by
-recording what is NOT a defect** — `HashCode::GlobalSeed` and unseeded `Random` also call
-`std::random_device` and are **parity**, because .NET has two entropy entry points and deliberately
-uses the non-cryptographic one at both; `docs/EntropySourceSweep.md` has all five sites with
-citations. `NEXT.md` §4b records all three search patterns in order of yield.*
+**The three blocked tickets are not unfinished work; they are work this container lacks the means to
+do.** Each was measured rather than assumed:
 
-*Prior snapshot, retained historically:*
+* **#1773** and **#2381** wait on the `next` → `develop` merge. #2381 is the sharper: `cna` builds
+  against the **sibling checkout on `develop`**, where `DateTimeKind` does not exist at all, so the
+  repair cannot compile before the merge. That is an impossibility, not a decision.
+* **#1962** needs a raw ICMP socket, hence `CAP_NET_RAW`, which this container does not have.
 
-*Last verified: 2026-08-19 — branch **`next`** at `8b08571b`, **pushed and verified on the
-remote**, working tree clean. Gate **17,597 across 38 executables: 17,597 passed, 0 failed, 0
-skipped — GREEN**, recounted from the per-executable logs and reproduced independently on the
-committed state, with zero build warnings. Graph **41 / 93**, seams **3 / 20**, negative fixtures
-**48 / 245**. **BOTH WORK QUEUES ARE EMPTY**: `ticket` has 0 `todo` (2,379 done, 9 blocked, 1
-needs_user, 5 wontfix) and `task` has 0 unclassified. **192 tickets closed since the 2026-08-10
-snapshot below, 43 of them on 2026-08-19.***
+The five `wontfix` entries are recorded decisions with their reasons.
 
-***FOUR ENVIRONMENT CLAIMS IN EVERY OLDER SNAPSHOT BELOW ARE NOW FALSE, and correcting them is
-what unblocked most of those 192 tickets.*** *`/rv/tmp/runtime` is **PRESENT** — a .NET **11
-preview** snapshot, so a behaviour read from it must be reported as .NET 11's rather than as
-timeless parity; this is what **SA-5** rests on. `ccache` is **present** (4.11.2). **Both
-downstream consumers are present and readable**, and SA-2 condition 5 **requires** measuring
-against them — editing either needs a per-action instruction and committing there is never
-authorised. `ping_group_range` is **open**, so the five `PingTests` pass and #1962's gate has
-moved to **`CAP_NET_RAW`**, which this uid does not have. **A ticket whose only recorded gate is
-"`/rv` absent" or "consumers may not be inspected" is therefore not blocked here — re-verify
-before treating it as such.** Standing approvals are `docs/StandingApprovals.md`, **SA-1 … SA-13**
-(rule 14). Maximum compiler parallelism **2 jobs**, in `build/` only.*
+## What closed the queue
 
-***`cna` builds against the sibling checkout `../sharp-runtime`, which is on `develop`*** *and
-does not see `next`, so a repair landed here reaches `cna` at the merge; a spelling that must work
-there has to compile against **both** versions. **`cna` currently holds ten uncommitted files that
-are this programme's work** — eight from #2377 (each derived exception naming its own type) and
-two from #2366 (`{}` rather than `""` for environment-variable removal) — left uncommitted because
-no commit was ever authorised. Its `CnaTests` binary has a 30-second timeout in
-`TwoProcessLoopbackTest.HostMigration…` and segfaults with stdout redirected; **causation was not
-proven**, because proving it means stashing in the user's tree.*
+The date/time chain rooted at **#1940** — #1940, #1941, #1942, #1943, #1944, #1945, #2409, #2410,
+#2412, #2414 — together with **#1997** (all four groups) and three findings made *while working on
+something else*: **#2415** (a gate red for a day behind a green test count, and building into
+`/tmp`), **#2416** (`DateTime::ToString` had no standard-format table, so the two halves of one type
+disagreed about what `o` means), and #1945's `RoundtripKind` limitation, found by one of my own
+tests failing.
 
-***What remains is not implementation work.*** *#1940 is `needs_user` and is the **root of a
-five-ticket chain** (#1942/#1943/#1945 depend on it directly, #1944 through #1943), so one decision
-unblocks five; its three questions are costed by measurement, and the cheapest shape — moving
-`DateTimeFormatInfo` into `Core.Base`, two header files with **not one include line changed** —
-was measured against the ticket's own estimate and found far cheaper. #1980 is down to G-3 alone
-and #1997 to A-2/A-4, all of which SA-3 excludes or the module boundary rejects. #1962 cannot be
-exercised without `CAP_NET_RAW`. #1773 waits on a downstream upgrade and #2381 on the merge to
-`develop`. Full itemisation, including the four environment corrections and the resume procedure,
-is the 2026-08-19 handoff at the top of `NEXT.md`.*
+Standing approvals **SA-14**, **SA-15** and **SA-16** were granted over 2026-08-20 and are recorded
+in `docs/StandingApprovals.md`; SA-16 is the one that unblocked the last four tickets.
 
-*Prior snapshot, retained historically — **its environment claims are stale**:*
+## Downstream
 
-*Last verified: 2026-08-10 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
-harness-designated branch, at `a53efe1`, **pushed and verified on the remote**. This batch closed
-the **Core `ArgumentOutOfRangeException` guard-domain slice** (#2253 review, #2254), completed the
-**`AppContext` named-data design** (#2255 approval, #2256 compatible), closed the **`Property<T>`
-empty-getter defect** (#2247), and opened **#2257**, the scope-checked next singleton. **Two
-findings and one post-audit defect: SR-AUD-091 remediated, SR-AUD-102 design-completed and still
-`confirmed`, #2247 closed.** Audit **197 remediated / 111 confirmed / 56 confirmed
-(design-complete) / 364 total**, recounted **by finding identifier**; **no `SR-AUD-*` created —
-numbering frozen at 364.** `modules/core` open **49 → 48**. Gate **16,801 across 38 executables:
-16,793 passing, 2 skipped, 6 failing** for the same two inherited causes — **+45 exactly, this
-batch's own tests, so no regression anywhere**, which mattered here because
-`ArgumentOutOfRangeException.hpp` is included by **404** translation units. Graph **41 / 92**, seams
-**3 / 20**; negative fixtures **14 / 120 → 15 / 126**. SR-AUD-091's compile domain went from **99 OK
-/ 99 FAIL** to **135 OK / 63 FAIL** over 22 types × 9 guards, with **zero** previously accepted pairs
-regressed and **zero** remaining rejections reported inside libstdc++. Four premise corrections to
-SR-AUD-091 (its rejected surface includes `enum class`, `std::string`, `std::string_view` and every
-pointer type; 14 of its 99 failures are a legitimately absent operator, not the defect; an unscoped
-enumeration already compiled while a scoped one did not; and the unary guards silently require a
-default-constructible `T`), and one to #2247's own acceptance criterion (`ReadOnlyProperty` exists,
-in a file spelling the second word with a lowercase `o`, and is *not* unaffected). An `operator<<`
-formatter branch was **rejected on a measurement** — `<sstream>` costs +2,819 preprocessed lines per
-dependent unit — in favour of an ADL `to_string` extension point costing +0. **No CCF minted,
-extended or closed**: CCF-011 stays closed, CCF-019 open and unextended, CCF-021/#2131 and
-CCF-022/#2109 unminted. #2246, #2250, #2215, #2228, #1773, #1962 and every other inherited
-blocked/`needs_user` ticket are exactly as inherited. Doxygen, `ccache` and `/rv` absent. Maximum
-compiler parallelism **2 jobs**. See `docs/CoreArgumentOutOfRangeGuardDomainPlan.md` and
-`docs/CoreAppContextNamedDataDesign.md`.*
+`cna` carries the two repairs this work required — **#2377** (seven exception types naming their own
+type rather than inheriting a message naming their base) and **#2366** (`""` no longer meaning
+*remove*) — committed and pushed to `develop` as `77f8dae7f`, working tree clean.
 
-*Prior snapshot, retained historically:*
-
-*Last verified: 2026-08-10 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
-harness-designated branch, at `09461f2`, **pushed and verified on the remote**. This batch reviewed
-and **closed the bounded Core text input-boundary family** (#2223 review, #2224/#2225/#2226/#2227):
-**four findings, four remediated, none blocked**, and opened **#2228** — the SR-AUD-050 design
-ticket — **blocked** on a real platform-behaviour decision. Audit **185 remediated / 124 confirmed /
-55 confirmed (design-complete) / 364 total**, recounted **by finding identifier**; **no `SR-AUD-*`
-created — numbering frozen at 364.** `modules/core` open **64 → 60**. Gate **16,692 across 38
-executables: 16,684 passing, 2 skipped, 6 failing** for the same two inherited causes — **+27
-exactly, this batch's own tests, no regression**. Graph **41 / 92**, seams **3 / 20**. **CCF-015's
-sole member is now remediated**; CCF-019 open; CCF-021/#2131 and CCF-022/#2109 unminted. Doxygen,
-`ccache` and `/rv` absent. Maximum compiler parallelism **2 jobs**.*
+**Its graphics tests need a virtual display.** Under `xvfb-run` the suite reads **6,332 tests,
+0 failed**; without one, `Texture2DCacheReconstructionTest` fails for display reasons unrelated to
+any change under test.
 
 ## 2026-08-20 — #1944: multi-format `ParseExact` — **the last open post-audit ticket**
 

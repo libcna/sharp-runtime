@@ -3,141 +3,81 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-20 — 17,676 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,676 run: 17,676 passed, 0 failed, 0 skipped**, recounted from the
+> **Test-count floor, 2026-08-20 — 17,732 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,732 run: 17,732 passed, 0 failed, 0 skipped**, recounted from the
 > per-executable logs with every executable run separately and continuing past failures, zero build
-> warnings at `--parallel 2`. Every checkpoint below this one ends with *"the gate is not green"*;
-> this one does not. Two of the three historical failure sources were environmental and are simply
-> absent in this container; the third was a real repair (#2351).
+> warnings at `--parallel 2`. Graph **41 / 95**, seams **3 / 20**, negative fixtures **53 / 269**.
 >
-> **The queues were empty and the work was found by measurement instead (#2397, then #2398).**
-> With `ticket` at 0 `todo` and `task` fully classified, the next move was **not** to stop but to
-> point the restored reference at the modules with **no test sources of their own**. Two have now
-> been measured and both held real defects.
+> ---
 >
-> **#2397 — `System::Text::RegularExpressions`.** Four divergences, **two of them silent data loss
-> through a public member**: `Regex::Split` discarded every matched capture group's value *and*
-> dropped a trailing empty segment, both because the body was a single
-> `std::sregex_token_iterator(-1)`.
+> ## THE POST-AUDIT QUEUE IS EMPTY
 >
-> **#2398 — `System::Security::Cryptography::RandomNumberGenerator`.** It **threw
-> `PlatformNotSupportedException` on Emscripten**, on a premise **this repository had already
-> measured false**: `Guid.cpp:377-388` records #2228's finding that Emscripten's `getentropy()` is
-> `__wasi_random_get()`, so `Guid::NewGuid()` has been getting real entropy there through the very
-> call the cryptographic RNG refused to make. .NET does not refuse either. **And its shipped tests
-> could not have caught it** — two cases asserting `buffer.size()` after filling a buffer whose size
-> was fixed before the call, both of which pass against a generator that writes nothing.
+> Measured 2026-08-20: `ticket` is **2,406 done, 0 todo, 3 blocked, 5 wontfix**, and `task` is fully
+> classified (1,082 ported, 15,119 ignored). **There is no remaining implementation work that this
+> container can do.**
 >
-> **#2401 — `ClientWebSocket`'s entropy.** Found by asking #2398's question **once more** rather
-> than by opening another module: *#2228 put a real CSPRNG behind `Guid::NewGuid` — what else needs
-> unpredictable bytes, and where does it get them?* `ClientWebSocket` drew **both** its
-> `Sec-WebSocket-Key` nonce and its **per-frame masking key** from `std::random_device`, which the
-> standard permits to be deterministic and which **`Random.cpp:69-70` already records as
-> deterministic on MinGW-w64**, a supported target. RFC 6455 §5.3 requires the mask to come from a
-> strong source of entropy by name.
+> **The three blocked tickets are not unfinished work; they are work this container lacks the means
+> to do**, and each was measured rather than assumed:
 >
-> **#2402 closed the entropy sweep by recording what is NOT a defect** — the half a sweep usually
-> leaves out. Five sites need random bytes; two were repaired and **two are parity and look exactly
-> like the defect**, because `HashCode::GlobalSeed` and unseeded `Random` both call
-> `std::random_device`. .NET has **two** entropy entry points and deliberately uses the
-> **non**-cryptographic one at both. `docs/EntropySourceSweep.md` records all five with citations,
-> so nobody re-opens them.
+> * **#1773** and **#2381** wait on the `next` → `develop` merge. #2381 is the sharper of the two:
+>   `cna` builds against the **sibling checkout on `develop`**, where `DateTimeKind` does not exist
+>   at all, so the repair cannot compile before the merge — not a decision, an impossibility.
+> * **#1962** needs a raw ICMP socket, hence `CAP_NET_RAW`, which this container does not have.
 >
-> **Three patterns worth carrying forward, in order of yield.** (1) **Ask a repaired subsystem's
-> question of its neighbours** — that alone found #2398 and #2401, and #2402 closed it out. (2) **A
-> module with no test sources** is where an undetected divergence survives. (3) **A test that cannot
-> fail** is how it survives there: **every** defect this sweep found sat under one, **four** of them
-> literally — two `EXPECT_EQ(buffer.size(), N)` on a buffer sized before the call, a case whose name
-> claimed "DiffersAcrossProcesses" while its body only checked within one, and
-> `EXPECT_NO_THROW(System::ComponentModel::Attribute{})`, which asserted that an empty type can be
-> default-constructed. §4b has the remaining candidates.
+> The five `wontfix` entries are recorded decisions with their reasons, not oversights.
 >
-> **#2403 — `System::ComponentModel`, and the pattern that found it is pattern (2) below.** Six
-> attributes published a **bare mutable public data member** where .NET publishes a get-only
-> property, most with **no statics and no equality members at all** — while four siblings **in the
-> same header** already had the correct shape. The module's whole prior coverage for those six was
-> constructor round-trips through the public field, so .NET's `Default` values — the actual contract
-> of a metadata attribute — were unpinned, and `MergablePropertyAttribute::Default` is `Yes` where
-> its four siblings are `No`.
+> ---
 >
-> **#2405 finished the `component-model` pass**: the two `PropertyChanged`/`PropertyChanging`
-> event-args types each carried a **second, mutable, lossy** copy of `PropertyName` beside the
-> private `std::optional` — a field whose own doc-comment described the loss and kept it "for
-> existing consumers", a reason that measures to **zero** — and `System::ComponentModel::Attribute`
-> turned out to be a **phantom**: no .NET counterpart, no members, no derived classes, no callers.
+> ## HOW THE LAST STRETCH WENT, AND WHAT IS WORTH CARRYING FORWARD
 >
-> **#2406 closed the `component-model` sweep, and its largest half is a DECLARATION.** The eleven
-> `ValidationAttribute` subclasses — `Required`, `Range`, `StringLength`, `RegularExpression`,
-> `EmailAddress` and the rest — **validate nothing**; .NET has `IsValid`/`Validate`/
-> `FormatErrorMessage`/`RequiresValidationContext` and this port has none of them. The **names** are
-> what make that dangerous: a caller who writes `RequiredAttribute` and sets an error message has
-> every reason to think something checks it, and the mistake surfaces as *validation that silently
-> never happened*. It is now a `@warning` on the base class and a pinned absence — **mutation M7
-> adds an `IsValid` and is caught**, so the declaration is enforced.
+> The queue was emptied by the date/time chain rooted at **#1940**, plus three findings made **while
+> working on something else**. That second category is the one worth naming, because none of the
+> three was on any list:
 >
-> **SA-14 WAS GRANTED ON 2026-08-20 AND UNBLOCKS THE DATE/TIME CHAIN.** Three decisions, all as
-> recommended, recorded in `docs/StandingApprovals.md`: (1) the provider reaches the parser by
-> **moving `DateTimeFormatInfo` into `Core.Base`** — measured at two files and **zero changed include
-> lines**, against 34 files across eight modules for the new-component shape #1940's own wording
-> implied; (2) the **culture-concurrency** defect is repaired **separately and first** — that is
-> **#2409, now done**; (3) an unrecognised culture **name** throws from **both** doors.
+> * **#2415 — a gate had been RED for a day behind a green test count.**
+>   `scripts/check_selective_components.sh` failed on a fixture #1889 had legitimately invalidated,
+>   **and nothing ran the script**, so CLAUDE.md rule 2's green reading said nothing about it. It
+>   also **built eight trees into `/tmp`**, the one place the build policy exists to keep builds out
+>   of — a mechanism (`build-tmp/`) that was designed and never wired up. It now runs last in
+>   `local_ci_check.sh`, at a measured ~10 minutes, deliberately **not** behind an opt-out: *a check
+>   that can be skipped is the check that rotted.*
+> * **#2416 — the two halves of one type disagreed about what `o` means.** A probe taken to check
+>   something else measured that `DateTime::ToString` had **no standard-format table at all**:
+>   `ToString("o")` emitted the literal `"o"`, `"s"` returned `"0"` by reading it as *seconds*. The
+>   table already existed on `DateTimeFormatInfo` and was simply never called.
+> * **A limitation found by a test of mine FAILING** (#1945): `RoundtripKind` could not carry a kind
+>   across a string, because nothing wrote a marker and nothing read one. It was declared and
+>   pinned, and SA-16.3 later closed it — with the pin **inverted rather than deleted**.
 >
-> **#2410 IS `needs_user` AND IT IS THE ONE THING HELD OPEN DELIBERATELY.** Decision 3 is granted,
-> but its **boundary** is not: measured, .NET in invariant globalization mode — this port's own mode
-> — accepts **only `""` and `"und"`** and throws for **every** other name, *including `"de-DE"`*
-> (`CultureData.cs:660-675`, `GlobalizationMode.cs:19`). The two readings (invariant-mode-exact vs a
-> syntactic BCP-47 check) differ enormously in blast radius, so the choice was put to the user and
-> **not made unilaterally**. **#1940 does not depend on it** and can proceed.
+> **Three recurring process lessons, each of which cost real time this stretch:**
 >
-> **#1940 IS CLOSED AND THE DATE/TIME CHAIN IS OPEN.** It was the root: **#1942, #1943 and #1945
-> are now `todo`**, and **#1944** follows through #1943. The blocker turned out to be **two** things
-> where the ticket recorded one — the component cycle *and* the fact that **nothing in this runtime
-> implemented `IFormatProvider` at all**, so there was nobody for `DateTime` to ask. Shape C's
-> measured claim held exactly: two renames, **zero changed include lines**, graph still 41/94.
+> 1. **A mis-passed `-k` is worse than none, because it looks like success.** It appeared twice:
+>    once as CMake printing a usage banner and exiting, once as ninja rejecting `-k` without a
+>    number. Both reported *zero errors*. Check the **exit code**, never the error count alone.
+> 2. **A restore that reverts to the wrong baseline invalidates every verdict after it.** Using
+>    `git checkout` on a file whose change was still **uncommitted** produced five consecutive
+>    BUILD FAILED readings that were a harness state, not five findings. So did an anchor that
+>    matched **twice**, and one that matched **nothing**. *An ambiguous or absent anchor is a
+>    harness result, not a mutation result.*
+> 3. **A segfault is not a verdict.** Undefined behaviour must never be read as a mutation passing;
+>    reformulate the mutation into a realistic defect and re-run.
 >
-> `ticket` has **3 `todo`** (#1942, #1943, #1945 — the newly unblocked chain); `task` has **0**
-> unclassified (14,979 ignored / 1,082 ported / 140 ignore). Ticket totals: **2,394 done, 3 todo, 6
-> blocked, 2 needs_user, 5 wontfix**. Graph **41 / 94**, negative fixtures **52 / 264**. Seventeen
-> tickets were filed or closed by this sweep: #2397–#2402 on 2026-08-19, #2403–#2409, #2411 and
-> #1940 on 2026-08-20.
+> **And one operational fact about the downstream consumer, learned the hard way:** `cna`'s graphics
+> tests need a **virtual display**. Without one, `Texture2DCacheReconstructionTest` fails for
+> display reasons unrelated to any change under test. Run its suite under `xvfb-run`; it then reads
+> **6,332 tests, 0 failed**. A first attempt to attribute that failure compared a *filtered* run
+> against a *full* one, which is not a like-for-like measurement and proved nothing.
 >
-> **#1942 AND #1943 LISTED EACH OTHER, AND #2412 TOOK THE HALF THAT SEPARATES.** #1942 waited for
-> an overload taking a `DateTimeStyles` (there was none, measured) and #1943 waited for #1942.
-> `DateOnly`/`TimeOnly` **have no `DateTimeKind`**, so .NET rejects every kind-affecting style
-> outright — **the styles that would need a timezone contract are exactly the styles that are
-> illegal there** — and that half needed no approval. It is landed as **#2412**.
+> ---
 >
-> **Both tickets are back to `blocked`, on their `DateTime` halves alone**, which need **#1941 phase
-> 2** and its unapproved timezone provider. That is a *user decision*, not a measurement: #1941's
-> record says a phase-2 approval must name a date-sensitive timezone provider.
+> ## IF WORK IS WANTED AND THE QUEUES ARE STILL EMPTY
 >
-> **SA-15 WAS GRANTED ON 2026-08-20 AND IS THE STATE OF THE QUEUE.** Three decisions, all as
-> recommended, in `docs/StandingApprovals.md`: (1) `DateTime` reaches a timezone through an
-> **abstraction in `Core.Base`** rather than by moving `TimeZoneInfo` — **with the accepted caveat
-> that .NET's `ToLocalTime()` takes no argument**, so the source must come from a hidden hook or an
-> explicit overload, a deviation either way that must be *recorded* as one; (2) the culture-name
-> boundary is a **syntactic BCP 47 check** — landed as **#2410**; (3) **SA-3 now covers vtable and
-> base-class changes**, under five conditions whose fourth (enumerate every `catch` clause whose
-> meaning changes) exists because a reparenting is invisible to a layout pin.
->
-> **#1941 PHASE 2 IS LANDED AND THE DATE/TIME CHAIN IS FULLY OPEN.** `DateTime` converts by its
-> `Kind` against an `ILocalTimeZone` the caller passes. **The recorded blocker looked at the wrong
-> type**: `TimeZoneInfo` is date-INsensitive by its own documentation, while
-> `System::TimeZone::CurrentTimeZone()` is per-date — and that is exactly the zone these
-> conversions need, so the model was present all along.
->
-> **#1980 IS CLOSED** — G-3 landed as the first change under SA-15.3, and G-1/G-2/G-4/G-5 landed
-> 2026-08-19. **Four `todo`**: #1942, #1943, #1944 (unblocked by #1941 phase 2), #1945, plus #1997
-> (unblocked by SA-15.3, A-2/A-4 remaining). **Only three tickets remain blocked**, none of them on
-> a decision this repository can take: #1773 and #2381 wait on downstream or merge events, #1962 on
-> `CAP_NET_RAW`.
->
-> **One thing #2406 deliberately did NOT do, so it is not mistaken for parity**: `DisplayAttribute`'s
-> eight fields stay public data members (correct — .NET's are `{ get; set; }`), but their
-> **nullability** still diverges (`string?`, `int?`, `bool?` with `GetOrder()`/
-> `GetAutoGenerateField()`), which is the #2295 shape across eight signatures. What remains *blocked* needs the user or an external event,
-> and each is itemised in §2 below. **§4b says where to look next, and the method that found all
-> three of today's tickets.**
+> The method that produced #2397, #2398, #2415 and #2416 is recorded because it keeps working:
+> **point the reference at what has no coverage of its own, and at assertions that cannot fail.**
+> Concretely — modules with no dedicated test executable; tests whose assertion is satisfied by the
+> defect they claim to pin (five were found this way); and the question *"what else in this runtime
+> asks this same question, and does it get the same answer?"*, which is what found #2401 from #2398
+> and #2416 from #1945.
 
 ## 2026-08-20 — #1944: multi-format `ParseExact` — **the last open post-audit ticket**
 
