@@ -33,6 +33,9 @@
 #include "System/Runtime/CompilerServices/StateMachineAttribute.hpp"
 #include "System/Runtime/GCSettings.hpp"
 #include "System/Runtime/AmbiguousImplementationException.hpp"
+#include "System/SystemException.hpp"
+#include "System/Exception.hpp"
+#include <exception>
 #include "System/Runtime/InteropServices/InteropAttributes.hpp"
 #include "System/Runtime/InteropServices/ExternalException.hpp"
 #include "System/Runtime/Versioning/VersioningAttributes.hpp"
@@ -1324,4 +1327,128 @@ TEST(MarshalAsFieldTypeTests, Decl1980G5_TheTwoTypeValuedMembersStayOutOfScope) 
     static_assert(std::is_same_v<decltype(MarshalAsAttribute(UnmanagedType::LPStr).MarshalTypeRef),
                                   std::string>);
     static_assert(std::is_final_v<MarshalAsAttribute>, ".NET's MarshalAsAttribute is sealed");
+}
+
+// ===========================================================================================
+// #1980 G-3 (SA-15.3) -- the hierarchy change SA-3 used to exclude
+//
+// SA-15.3 lifted SA-3's exclusion of vtable and base-class changes under five conditions. The
+// fourth exists for THIS ticket: a reparenting silently changes which handlers fire, and no
+// layout assertion would reveal it.
+// ===========================================================================================
+
+TEST(RuntimeG3Tests, AmbiguousImplementationExceptionHasDotNetsShape) {
+    using System::Runtime::AmbiguousImplementationException;
+    // AmbiguousImplementationException.cs -- `public sealed class ... : Exception`.
+    static_assert(std::is_final_v<AmbiguousImplementationException>);
+    static_assert(std::is_base_of_v<System::Exception, AmbiguousImplementationException>);
+    static_assert(!std::is_base_of_v<System::SystemException, AmbiguousImplementationException>,
+                  "#1980 G-3: .NET derives this from Exception, not SystemException");
+
+    // The constructor SR-AUD-158 recorded as missing.
+    const AmbiguousImplementationException withInner("outer", std::exception_ptr{});
+    EXPECT_EQ(std::string(withInner.getMessageProperty()), "outer");
+    // ...and every constructor still carries COR_E_AMBIGUOUSIMPLEMENTATION, which the reparenting
+    // must not have dropped along with the old base.
+    EXPECT_EQ(AmbiguousImplementationException().getHResultProperty(),
+              static_cast<SharpRuntime::intcs>(0x8013106Au));
+    EXPECT_EQ(AmbiguousImplementationException("m").getHResultProperty(),
+              static_cast<SharpRuntime::intcs>(0x8013106Au));
+    EXPECT_EQ(withInner.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x8013106Au));
+}
+
+// SA-15.3's FIRST CONDITION: the layout AND the vtable change, measured and pinned. Every figure
+// here was measured after the change rather than predicted before it -- #1958's lesson, where a
+// predicted 104 was asserted and the build rejected it.
+//
+// NOTHING GREW. AmbiguousImplementationException stays 168 because SystemException adds no members
+// of its own over Exception, so reparenting moved the type sideways rather than shrinking it. The
+// five attributes stay exactly where they were because their platformName_ moved INTO the new base
+// rather than being duplicated beside it -- which is the whole point of the base. A consumer must
+// still rebuild, because the VTABLE moved even where sizeof did not, and that is what the migration
+// note records.
+TEST(RuntimeG3Tests, TheLayoutsAreMeasuredAndUnchanged) {
+    using namespace System::Runtime::Versioning;
+    EXPECT_EQ(sizeof(System::Exception), 168u);
+    EXPECT_EQ(sizeof(System::SystemException), 168u)
+        << "SystemException adding no members is WHY the reparenting costs no bytes";
+    EXPECT_EQ(sizeof(System::Runtime::AmbiguousImplementationException), 168u);
+
+    EXPECT_EQ(sizeof(System::Attribute), 8u);
+    EXPECT_EQ(sizeof(OSPlatformAttribute), 40u);
+    // The base is Attribute plus one std::string, and the derived ones add only their own extras.
+    EXPECT_EQ(sizeof(SupportedOSPlatformAttribute), sizeof(OSPlatformAttribute));
+    EXPECT_EQ(sizeof(SupportedOSPlatformGuardAttribute), sizeof(OSPlatformAttribute));
+    EXPECT_EQ(sizeof(UnsupportedOSPlatformGuardAttribute), sizeof(OSPlatformAttribute));
+    // These two carry a message of their own, so they are larger -- asserted as a RELATIONSHIP so a
+    // later member cannot hide behind a hand-updated literal.
+    EXPECT_EQ(sizeof(UnsupportedOSPlatformAttribute), sizeof(OSPlatformAttribute) + sizeof(std::string));
+    EXPECT_GT(sizeof(ObsoletedOSPlatformAttribute), sizeof(UnsupportedOSPlatformAttribute));
+
+    // The vtable half: every one of these is polymorphic, which is what forces the rebuild.
+    static_assert(std::is_polymorphic_v<System::Runtime::AmbiguousImplementationException>);
+    static_assert(std::is_polymorphic_v<OSPlatformAttribute>);
+}
+
+// SA-15.3's FOURTH CONDITION, as an assertion rather than a claim: the clause whose meaning moved
+// is `catch (const SystemException&)`, and the ones that did not move are asserted beside it so a
+// future reparenting cannot quietly take them too.
+TEST(RuntimeG3Tests, WhichCatchClausesChangedMeaning) {
+    using System::Runtime::AmbiguousImplementationException;
+
+    bool caughtAsSystemException = false;
+    try { throw AmbiguousImplementationException(); }
+    catch (const System::SystemException&) { caughtAsSystemException = true; }
+    catch (const System::Exception&) {}
+    EXPECT_FALSE(caughtAsSystemException)
+        << "this is the clause that changed: it used to catch this type and must no longer";
+
+    bool caughtAsException = false;
+    try { throw AmbiguousImplementationException(); }
+    catch (const System::Exception&) { caughtAsException = true; }
+    EXPECT_TRUE(caughtAsException) << "catch (const Exception&) must be unaffected";
+
+    bool caughtExactly = false;
+    try { throw AmbiguousImplementationException(); }
+    catch (const AmbiguousImplementationException&) { caughtExactly = true; }
+    EXPECT_TRUE(caughtExactly) << "catching the type itself must be unaffected";
+}
+
+// SR-AUD-163: before G-3 the five platform attributes each derived from System::Attribute and
+// EACH CARRIED ITS OWN COPY of platformName_ and getPlatformNameProperty() -- five duplicates of
+// one fact, and no type through which a caller could handle "any platform attribute".
+TEST(RuntimeG3Tests, TheFivePlatformAttributesShareOneBase) {
+    using namespace System::Runtime::Versioning;
+    static_assert(std::is_base_of_v<OSPlatformAttribute, SupportedOSPlatformAttribute>);
+    static_assert(std::is_base_of_v<OSPlatformAttribute, UnsupportedOSPlatformAttribute>);
+    static_assert(std::is_base_of_v<OSPlatformAttribute, SupportedOSPlatformGuardAttribute>);
+    static_assert(std::is_base_of_v<OSPlatformAttribute, UnsupportedOSPlatformGuardAttribute>);
+    static_assert(std::is_base_of_v<OSPlatformAttribute, ObsoletedOSPlatformAttribute>);
+    // .NET seals every derived one (PlatformAttributes.cs:35,69,100,135,185,211).
+    static_assert(std::is_final_v<SupportedOSPlatformAttribute>);
+    static_assert(std::is_final_v<UnsupportedOSPlatformAttribute>);
+    static_assert(std::is_final_v<ObsoletedOSPlatformAttribute>);
+    // ...and the base is still an Attribute, which the reparenting must not have cost.
+    static_assert(std::is_base_of_v<System::Attribute, OSPlatformAttribute>);
+
+    // THE BASE IS WHAT THE CHANGE BUYS: one handle for any platform attribute. A `static_assert`
+    // alone would pass against a base nothing can be used through.
+    const SupportedOSPlatformAttribute supported("linux");
+    const UnsupportedOSPlatformAttribute unsupported("browser");
+    const OSPlatformAttribute& asBase = supported;
+    EXPECT_EQ(asBase.getPlatformNameProperty(), "linux");
+    const OSPlatformAttribute* names[] = {&supported, &unsupported};
+    EXPECT_EQ(names[0]->getPlatformNameProperty(), "linux");
+    EXPECT_EQ(names[1]->getPlatformNameProperty(), "browser");
+}
+
+// PlatformAttributes.cs:12 -- the constructor is `private protected`, so the base cannot be
+// created on its own. C++ has no `private protected`; `protected` carries the half that matters
+// and the header says which half is not expressible.
+TEST(RuntimeG3Tests, TheBaseCannotBeConstructedOnItsOwn) {
+    using System::Runtime::Versioning::OSPlatformAttribute;
+    static_assert(!std::is_constructible_v<OSPlatformAttribute, std::string>,
+                  "#1980 G-3: .NET's constructor is private protected");
+    static_assert(!std::is_default_constructible_v<OSPlatformAttribute>);
+    SUCCEED();
 }

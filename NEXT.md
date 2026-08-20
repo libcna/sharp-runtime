@@ -3,8 +3,8 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-20 — 17,671 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,671 run: 17,671 passed, 0 failed, 0 skipped**, recounted from the
+> **Test-count floor, 2026-08-20 — 17,676 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,676 run: 17,676 passed, 0 failed, 0 skipped**, recounted from the
 > per-executable logs with every executable run separately and continuing past failures, zero build
 > warnings at `--parallel 2`. Every checkpoint below this one ends with *"the gate is not green"*;
 > this one does not. Two of the three historical failure sources were environmental and are simply
@@ -126,9 +126,11 @@
 > `System::TimeZone::CurrentTimeZone()` is per-date — and that is exactly the zone these
 > conversions need, so the model was present all along.
 >
-> **Six `todo`**: #1942, #1943, #1944 (unblocked by phase 2), #1945, and #1980 / #1997 (unblocked by
-> SA-15.3). **Only three tickets remain blocked**, none of them on a decision this repository can
-> take: #1773 and #2381 wait on downstream/merge events, #1962 on `CAP_NET_RAW`.
+> **#1980 IS CLOSED** — G-3 landed as the first change under SA-15.3, and G-1/G-2/G-4/G-5 landed
+> 2026-08-19. **Four `todo`**: #1942, #1943, #1944 (unblocked by #1941 phase 2), #1945, plus #1997
+> (unblocked by SA-15.3, A-2/A-4 remaining). **Only three tickets remain blocked**, none of them on
+> a decision this repository can take: #1773 and #2381 wait on downstream or merge events, #1962 on
+> `CAP_NET_RAW`.
 >
 > **One thing #2406 deliberately did NOT do, so it is not mistaken for parity**: `DisplayAttribute`'s
 > eight fields stay public data members (correct — .NET's are `{ get; set; }`), but their

@@ -27,35 +27,67 @@ namespace System::Runtime::Versioning {
     };
 
     /** Indicates that an API is supported on the specified OS platform. */
-    class SupportedOSPlatformAttribute : public System::Attribute {
+    /**
+     * @brief The base every platform-name attribute shares. `PlatformAttributes.cs:1-18`.
+     *
+     * C++ counterpart of .NET `System.Runtime.Versioning.OSPlatformAttribute`, which is
+     * `abstract class OSPlatformAttribute : Attribute` with a `private protected` constructor and
+     * a get-only `public string PlatformName`.
+     *
+     * @note **Introduced by #1980 G-3 under SA-15.3**, the approval that lifted SA-3's exclusion of
+     * base-class changes. Before it, the five platform attributes each derived from
+     * `System::Attribute` directly and **each carried its own copy of `platformName_` and its own
+     * `getPlatformNameProperty()`** — five duplicates of one fact, and no type through which a
+     * caller could handle "any platform attribute" at all, which is what SR-AUD-163 named.
+     *
+     * @note **`protected`, not `private protected`.** C++ has no equivalent of C#'s
+     * `private protected` (accessible to derived classes *in the same assembly only*), and this
+     * port has no assembly boundary to express the second half of it. `protected` keeps the class
+     * unconstructible from outside the hierarchy, which is the part that carries meaning here; the
+     * assembly restriction is not expressible and is not pretended.
+     *
+     * @note **`TargetPlatformAttribute` is .NET's sixth derived type and is absent here**, and that
+     * is stated so a later reader does not mistake five for the whole set. Adding it is additive
+     * and outside G-3, whose wording is "introduce `OSPlatformAttribute` and reparent five
+     * attributes".
+     */
+    class OSPlatformAttribute : public System::Attribute {
         std::string platformName_;
-    public:
-        /** @param platformName Platform identifier (e.g. "windows", "linux10.0"). */
-        explicit SupportedOSPlatformAttribute(const std::string& platformName)
+
+    protected:
+        explicit OSPlatformAttribute(const std::string& platformName)
             : platformName_(platformName) {}
 
-        /** @return The platform identifier. */
+    public:
+        /** @return The platform name this attribute names. `PlatformAttributes.cs:17`. */
         [[nodiscard]] const std::string& getPlatformNameProperty() const { return platformName_; }
     };
 
+    class SupportedOSPlatformAttribute final : public OSPlatformAttribute {
+    public:
+        /** @param platformName Platform identifier (e.g. "windows", "linux10.0"). */
+        explicit SupportedOSPlatformAttribute(const std::string& platformName)
+            : OSPlatformAttribute(platformName) {}
+
+        /** @return The platform identifier. */
+    };
+
     /** Indicates that an API is not supported on the specified OS platform. */
-    class UnsupportedOSPlatformAttribute : public System::Attribute {
-        std::string platformName_;
+    class UnsupportedOSPlatformAttribute final : public OSPlatformAttribute {
         std::string message_;
     public:
         /** @param platformName Platform identifier (e.g. "windows"). */
         explicit UnsupportedOSPlatformAttribute(const std::string& platformName)
-            : platformName_(platformName) {}
+            : OSPlatformAttribute(platformName) {}
 
         /**
          * @param platformName Platform identifier (e.g. "windows").
          * @param message      Optional message explaining the lack of support.
          */
         UnsupportedOSPlatformAttribute(const std::string& platformName, const std::string& message)
-            : platformName_(platformName), message_(message) {}
+            : OSPlatformAttribute(platformName), message_(message) {}
 
         /** @return The platform identifier. */
-        [[nodiscard]] const std::string& getPlatformNameProperty() const { return platformName_; }
 
         /** @return The explanatory message, or empty if not provided. */
         [[nodiscard]] const std::string& getMessageProperty() const { return message_; }
@@ -65,35 +97,30 @@ namespace System::Runtime::Versioning {
      * Annotates a custom guard field, property, or method with a supported platform name, for use
      * in conditionals/asserts that guard calls to platform-specific APIs.
      */
-    class SupportedOSPlatformGuardAttribute : public System::Attribute {
-        std::string platformName_;
+    class SupportedOSPlatformGuardAttribute final : public OSPlatformAttribute {
     public:
         /** @param platformName Platform identifier the guard indicates support for. */
         explicit SupportedOSPlatformGuardAttribute(const std::string& platformName)
-            : platformName_(platformName) {}
+            : OSPlatformAttribute(platformName) {}
 
         /** @return The platform identifier. */
-        [[nodiscard]] const std::string& getPlatformNameProperty() const { return platformName_; }
     };
 
     /**
      * Annotates a custom guard field, property, or method with an unsupported platform name, for
      * use in conditionals/asserts that guard against calling unsupported platform-specific APIs.
      */
-    class UnsupportedOSPlatformGuardAttribute : public System::Attribute {
-        std::string platformName_;
+    class UnsupportedOSPlatformGuardAttribute final : public OSPlatformAttribute {
     public:
         /** @param platformName Platform identifier the guard indicates lack of support for. */
         explicit UnsupportedOSPlatformGuardAttribute(const std::string& platformName)
-            : platformName_(platformName) {}
+            : OSPlatformAttribute(platformName) {}
 
         /** @return The platform identifier. */
-        [[nodiscard]] const std::string& getPlatformNameProperty() const { return platformName_; }
     };
 
     /** Indicates that an API has been obsoleted on the specified OS platform. */
-    class ObsoletedOSPlatformAttribute : public System::Attribute {
-        std::string platformName_;
+    class ObsoletedOSPlatformAttribute final : public OSPlatformAttribute {
         std::string message_;
         std::string url_;
     public:
@@ -110,10 +137,9 @@ namespace System::Runtime::Versioning {
          */
         explicit ObsoletedOSPlatformAttribute(const std::string& platformName,
                                                const std::string& message = {})
-            : platformName_(platformName), message_(message) {}
+            : OSPlatformAttribute(platformName), message_(message) {}
 
         /** @return The platform identifier. */
-        [[nodiscard]] const std::string& getPlatformNameProperty() const { return platformName_; }
 
         /** @return The deprecation message, or empty if not provided. */
         [[nodiscard]] const std::string& getMessageProperty()      const { return message_; }
