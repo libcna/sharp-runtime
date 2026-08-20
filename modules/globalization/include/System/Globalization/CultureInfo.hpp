@@ -2,8 +2,11 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <atomic>
 #include <cctype>
 #include <functional>
+#include <memory>
+#include <optional>
 #include <string>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
@@ -23,7 +26,11 @@ namespace System::Globalization {
  * (EnglishName, NativeName, DisplayName) fall back to the name itself, and
  * TwoLetterISOLanguageName is derived heuristically from the name's leading subtag --
  * documented on each property rather than silently claiming full parity.
- * CurrentCulture and CurrentUICulture return InvariantCulture as stubs.
+ * **CurrentCulture and CurrentUICulture are per-thread since #2409**, with .NET's process-wide
+ * `DefaultThreadCurrentCulture` fallback beneath them and the invariant culture last. They used
+ * to be process-wide statics -- a set on one thread changed what every other thread read, and a
+ * concurrent get/set was a data race -- while this very comment and the accessors' own
+ * doc-comments already said *thread*.
  */
 class CultureInfo {
     std::string name_;
@@ -286,15 +293,60 @@ public:
     }
 
     /**
-     * @brief Gets the CultureInfo representing the current thread's culture.
+     * @brief Gets the CultureInfo representing the current **thread's** culture.
      *
-     * C++ counterpart of .NET CultureInfo.CurrentCulture. Defaults to InvariantCulture
-     * (this runtime has no OS-locale detection); use setCurrentCultureProperty() to
-     * override, matching .NET's settable CurrentCulture property.
-     * @return A const reference to the current culture.
+     * C++ counterpart of .NET `CultureInfo.CurrentCulture` (`CultureInfo.cs:358-366`), whose
+     * resolution chain is transcribed here:
+     * `s_currentThreadCulture ?? s_DefaultThreadCurrentCulture ?? s_userDefaultCulture`.
+     *
+     * @note **Until #2409 this was process-wide, and the doc-comment already said otherwise.** The
+     * two current-culture members were plain `static`, so a set on one thread changed what every
+     * other thread read, and a concurrent get/set was an unsynchronised read/write of a non-atomic
+     * object -- a data race rather than merely a surprising value. .NET's is `[ThreadStatic]`
+     * (`CultureInfo.cs:111-112`).
+     *
+     * @note **Why the process-wide setting did not simply go away.** Making the members
+     * `thread_local` alone would have fixed the race and **silently removed** the process-wide
+     * behaviour this port accidentally had, with no replacement and no diagnostic. .NET's own
+     * answer is the second property, `DefaultThreadCurrentCulture` (`:407-413`), so that is what
+     * this port grew: a thread with no setting of its own falls back to it, and only then to the
+     * invariant culture.
+     *
+     * @return A const reference to the current culture. The reference stays valid even if another
+     *         thread swaps the process-wide default immediately afterwards -- see
+     *         `currentCultureHold_`.
      */
     [[nodiscard]] static const CultureInfo& getCurrentCultureProperty() {
-        return currentCulture_;
+        if (currentCulture_.has_value()) return *currentCulture_;
+        // Park the loaded pointer in this thread's own holder before dereferencing it: another
+        // thread may store a different default the instant after the load, and the caller holds a
+        // REFERENCE. The holder keeps the object alive for as long as this thread can use it.
+        currentCultureHold_ = defaultThreadCurrentCulture_.load(std::memory_order_acquire);
+        if (currentCultureHold_) return *currentCultureHold_;
+        return getInvariantCultureProperty();
+    }
+
+    /**
+     * @brief The culture a thread uses when it has set none of its own.
+     *
+     * C++ counterpart of .NET `CultureInfo.DefaultThreadCurrentCulture` (`CultureInfo.cs:407-413`),
+     * added by #2409. `std::nullopt` means "no process-wide default", in which case
+     * `getCurrentCultureProperty()` falls through to the invariant culture, exactly as .NET's
+     * `null` does.
+     */
+    [[nodiscard]] static std::optional<CultureInfo> getDefaultThreadCurrentCultureProperty() {
+        const std::shared_ptr<const CultureInfo> value =
+            defaultThreadCurrentCulture_.load(std::memory_order_acquire);
+        if (!value) return std::nullopt;
+        return *value;
+    }
+
+    /** @brief Sets the process-wide fallback culture. `CultureInfo.cs:407-413`. */
+    static void setDefaultThreadCurrentCultureProperty(const std::optional<CultureInfo>& value) {
+        defaultThreadCurrentCulture_.store(
+            value.has_value() ? std::make_shared<const CultureInfo>(*value)
+                              : std::shared_ptr<const CultureInfo>{},
+            std::memory_order_release);
     }
 
     /**
@@ -302,6 +354,13 @@ public:
      *
      * C++ counterpart of .NET CultureInfo.CurrentCulture (setter).
      * @param value The culture to make current.
+     */
+    /**
+     * @brief Sets **this thread's** culture. `CultureInfo.cs:367-374`.
+     *
+     * @note Since #2409 this is visible to the calling thread only. A caller that wants every
+     *       thread to see it wants `setDefaultThreadCurrentCultureProperty` instead -- which is
+     *       .NET's answer to the same question, not this port's invention.
      */
     static void setCurrentCultureProperty(const CultureInfo& value) {
         currentCulture_ = value;
@@ -314,8 +373,31 @@ public:
      * use setCurrentUICultureProperty() to override.
      * @return A const reference to the current UI culture.
      */
+    /** @copydoc getCurrentCultureProperty */
     [[nodiscard]] static const CultureInfo& getCurrentUICultureProperty() {
-        return currentUICulture_;
+        if (currentUICulture_.has_value()) return *currentUICulture_;
+        currentUICultureHold_ = defaultThreadCurrentUICulture_.load(std::memory_order_acquire);
+        if (currentUICultureHold_) return *currentUICultureHold_;
+        return getInvariantCultureProperty();
+    }
+
+    /**
+     * @brief The UI culture a thread uses when it has set none of its own.
+     * C++ counterpart of .NET `CultureInfo.DefaultThreadCurrentUICulture`.
+     */
+    [[nodiscard]] static std::optional<CultureInfo> getDefaultThreadCurrentUICultureProperty() {
+        const std::shared_ptr<const CultureInfo> value =
+            defaultThreadCurrentUICulture_.load(std::memory_order_acquire);
+        if (!value) return std::nullopt;
+        return *value;
+    }
+
+    /** @brief Sets the process-wide fallback UI culture. */
+    static void setDefaultThreadCurrentUICultureProperty(const std::optional<CultureInfo>& value) {
+        defaultThreadCurrentUICulture_.store(
+            value.has_value() ? std::make_shared<const CultureInfo>(*value)
+                              : std::shared_ptr<const CultureInfo>{},
+            std::memory_order_release);
     }
 
     /**
@@ -324,6 +406,7 @@ public:
      * C++ counterpart of .NET CultureInfo.CurrentUICulture (setter).
      * @param value The UI culture to make current.
      */
+    /** @brief Sets **this thread's** UI culture. See `setCurrentCultureProperty`. */
     static void setCurrentUICultureProperty(const CultureInfo& value) {
         currentUICulture_ = value;
     }
@@ -378,13 +461,40 @@ public:
     }
 
 private:
-    static CultureInfo currentCulture_;
-    static CultureInfo currentUICulture_;
+    // #2409. THREE PIECES OF STATE PER CULTURE, AND EACH ONE EARNS ITS PLACE.
+    //
+    //  * `current*_`      -- `thread_local`, and ABSENT by default. This is .NET's
+    //                        `[ThreadStatic] s_currentThreadCulture`. Absent rather than
+    //                        invariant-valued because "this thread has not chosen" and "this
+    //                        thread chose the invariant culture" are different facts, and only
+    //                        the first may fall through to the process-wide default.
+    //  * `defaultThread*_` -- the process-wide fallback, .NET's `DefaultThreadCurrentCulture`.
+    //                        An `atomic<shared_ptr<const CultureInfo>>` rather than a plain
+    //                        static: it is genuinely shared, so it must be swapped atomically,
+    //                        and `CultureInfo` holds `NumberFormatInfo` and `DateTimeFormatInfo`
+    //                        BY VALUE, so a per-read deep copy would be paid on every formatting
+    //                        call. A pointer swap costs a refcount bump.
+    //  * `*Hold_`          -- `thread_local`. The getters return `const CultureInfo&`, so the
+    //                        loaded pointer must outlive the load: without this holder another
+    //                        thread's store could drop the last reference while the caller still
+    //                        held the reference, which would have moved the race one level down
+    //                        rather than removing it.
+    static thread_local std::optional<CultureInfo> currentCulture_;
+    static thread_local std::optional<CultureInfo> currentUICulture_;
+    static std::atomic<std::shared_ptr<const CultureInfo>> defaultThreadCurrentCulture_;
+    static std::atomic<std::shared_ptr<const CultureInfo>> defaultThreadCurrentUICulture_;
+    static thread_local std::shared_ptr<const CultureInfo> currentCultureHold_;
+    static thread_local std::shared_ptr<const CultureInfo> currentUICultureHold_;
 };
 
-// Default value matches InvariantCulture: name "", not neutral (real .NET's invariant
-// culture has IsNeutralCulture == false, CultureData.cs), read-only until explicitly set.
-inline CultureInfo CultureInfo::currentCulture_{"", false, true};
-inline CultureInfo CultureInfo::currentUICulture_{"", false, true};
+// Absent by default: a thread that has chosen nothing falls through to the process-wide default
+// and then to the invariant culture, which is .NET's chain
+// (`s_currentThreadCulture ?? s_DefaultThreadCurrentCulture ?? s_userDefaultCulture`).
+inline thread_local std::optional<CultureInfo> CultureInfo::currentCulture_{};
+inline thread_local std::optional<CultureInfo> CultureInfo::currentUICulture_{};
+inline std::atomic<std::shared_ptr<const CultureInfo>> CultureInfo::defaultThreadCurrentCulture_{};
+inline std::atomic<std::shared_ptr<const CultureInfo>> CultureInfo::defaultThreadCurrentUICulture_{};
+inline thread_local std::shared_ptr<const CultureInfo> CultureInfo::currentCultureHold_{};
+inline thread_local std::shared_ptr<const CultureInfo> CultureInfo::currentUICultureHold_{};
 
 } // namespace System::Globalization

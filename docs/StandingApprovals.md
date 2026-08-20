@@ -377,6 +377,62 @@ is **one-directional** — this port can only be too permissive, never too stric
 
 ---
 
+## 4k. SA-14 — three decisions taken on 2026-08-20, unblocking the date/time chain (#1940)
+
+Granted 2026-08-20. **#1940 is the root of the remaining date/time chain** — #1942, #1943 and #1945
+list it as a dependency and #1944 depends on #1943 — so these three answers unblock **five** tickets.
+All three were recommended and all three were granted as recommended.
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | how should the provider reach the parser, given that `Core.Base -> Globalization` is a cycle? | **C, then A**: move `DateTimeFormatInfo` into `Core.Base`, then add the provider overloads on top |
+| 2 | may the culture-concurrency defect be repaired separately and first? | **yes** — its own ticket, ahead of #1940, using the **two-property** model |
+| 3 | what should an unrecognised culture *name* do? | **throw `CultureNotFoundException` from BOTH doors** — the constructor and `GetCultureInfo` |
+
+**Why C is cheap, and it is measured rather than estimated.**
+`System/Globalization/DateTimeFormatInfo.hpp` is **header-only** (no `.cpp`), does **not name
+`CultureInfo`**, and its only non-`Core.Base` include is the enum header `CalendarWeekRule.hpp`. It
+has **four** includers, all inside Globalization, which already depends on `Core.Base`. And
+`validate_module_boundaries.py` assigns ownership by **logical path uniqueness**, not directory
+prefix, so the header keeps the path `System/Globalization/DateTimeFormatInfo.hpp` and **not one
+include line anywhere changes**. Two files move; the graph stays **41 / 94**.
+
+The alternative the ticket's own wording implied — shape **B**, a new component holding
+`DateTime`/`DateOnly`/`TimeOnly` — was measured at **34 including files across eight modules**
+(`core`, `globalization`, `io`, `net`, `threading`, `timers`, `time-zone`, `xml`). *"An explicit
+component plus an ABI transition"* is true of B and measurably false of C.
+
+**Two consequences were stated before the decision and accepted with it.**
+
+*Decision 2 adds public surface, and the naive repair is wrong.* This port's `currentCulture_` and
+`currentUICulture_` are **static members**, so they are process-wide: a set on one thread changes
+what every other thread reads, and a concurrent get/set is an unsynchronised write to a non-atomic
+object — while the type's own doc-comment says *"the current **thread's** culture"*. Simply making
+them `thread_local` would fix the race and **silently remove the process-wide setting the port
+accidentally has today, with no replacement**. .NET's chain is
+`s_currentThreadCulture ?? s_DefaultThreadCurrentCulture ?? s_userDefaultCulture`
+(`CultureInfo.cs:358-366`), and `DefaultThreadCurrentCulture` is a real public static property
+(`:407-413`). The faithful repair is therefore a **two-property model**, and that new surface is
+part of what was granted.
+
+*Decision 3 is a narrowing: code that compiles and runs today will start throwing.* It needs a
+migration note and a measured downstream report, like any SA-5 narrowing.
+
+**Two premises on the #1940 record were re-measured on 2026-08-20 and found WRONG**; the decisions
+above rest on the corrected versions.
+
+- The note said *"this port has no `CultureNotFoundException` anywhere in `modules/`"*. **It does** —
+  `modules/globalization/include/System/Globalization/CultureNotFoundException.hpp`, deriving from
+  `ArgumentException` — and it is **already thrown**, but only from the **LCID** path
+  (`ValidateLcidStub`, five specific numeric values), never from a name. So decision 3 does not
+  invent an exception type; it makes **two doors of one type consistent**, which is #2393's shape.
+- The note described the unknown-name behaviour as *"resolves to InvariantCulture"*. Measured, it is
+  worse: `CultureInfo("xx-YY")` **succeeds**, `getNameProperty()` returns `"xx-YY"`, and the format
+  objects are populated from the **invariant** culture — so the object **claims to be `xx-YY` and
+  behaves as invariant**.
+
+---
+
 ## 4d. SA-7 — the `NotifyFilters` → inotify mapping (ticket #2346)
 
 > Answer the five priced questions of `docs/SystemIONamespaceReviewPlan.md` §21.11 as

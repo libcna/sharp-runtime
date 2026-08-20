@@ -3,8 +3,8 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-20 — 17,646 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,646 run: 17,646 passed, 0 failed, 0 skipped**, recounted from the
+> **Test-count floor, 2026-08-20 — 17,651 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,651 run: 17,651 passed, 0 failed, 0 skipped**, recounted from the
 > per-executable logs with every executable run separately and continuing past failures, zero build
 > warnings at `--parallel 2`. Every checkpoint below this one ends with *"the gate is not green"*;
 > this one does not. Two of the three historical failure sources were environmental and are simply
@@ -75,10 +75,24 @@
 > never happened*. It is now a `@warning` on the base class and a pinned absence — **mutation M7
 > adds an `IsValid` and is caught**, so the declaration is enforced.
 >
-> **BOTH WORK QUEUES ARE EMPTY AGAIN.** Twelve tickets were filed and closed by this sweep:
-> #2397–#2402 on 2026-08-19, #2403–#2408 on 2026-08-20. `ticket` has **0 `todo`**; `task` has **0**
-> unclassified (14,979 ignored / 1,082 ported / 140 ignore). Ticket totals: **2,391 done, 9 blocked,
-> 1 needs_user, 5 wontfix**. Graph **41 / 94**, negative fixtures **52 / 264**.
+> **SA-14 WAS GRANTED ON 2026-08-20 AND UNBLOCKS THE DATE/TIME CHAIN.** Three decisions, all as
+> recommended, recorded in `docs/StandingApprovals.md`: (1) the provider reaches the parser by
+> **moving `DateTimeFormatInfo` into `Core.Base`** — measured at two files and **zero changed include
+> lines**, against 34 files across eight modules for the new-component shape #1940's own wording
+> implied; (2) the **culture-concurrency** defect is repaired **separately and first** — that is
+> **#2409, now done**; (3) an unrecognised culture **name** throws from **both** doors.
+>
+> **#2410 IS `needs_user` AND IT IS THE ONE THING HELD OPEN DELIBERATELY.** Decision 3 is granted,
+> but its **boundary** is not: measured, .NET in invariant globalization mode — this port's own mode
+> — accepts **only `""` and `"und"`** and throws for **every** other name, *including `"de-DE"`*
+> (`CultureData.cs:660-675`, `GlobalizationMode.cs:19`). The two readings (invariant-mode-exact vs a
+> syntactic BCP-47 check) differ enormously in blast radius, so the choice was put to the user and
+> **not made unilaterally**. **#1940 does not depend on it** and can proceed.
+>
+> `ticket` has **0 `todo`**; `task` has **0** unclassified (14,979 ignored / 1,082 ported / 140
+> ignore). Ticket totals: **2,393 done, 9 blocked, 2 needs_user, 5 wontfix**. Graph **41 / 94**,
+> negative fixtures **52 / 264**. Fifteen tickets were filed and closed by this sweep: #2397–#2402 on
+> 2026-08-19, #2403–#2409 and #2411 on 2026-08-20.
 >
 > **One thing #2406 deliberately did NOT do, so it is not mistaken for parity**: `DisplayAttribute`'s
 > eight fields stay public data members (correct — .NET's are `{ get; set; }`), but their
