@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Xml/XmlConvert.hpp"
+#include "System/DateTimeKind.hpp"
+#include "System/TimeZone.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -465,14 +467,104 @@ namespace System::Xml {
     std::string XmlConvert::ToString(const System::TimeSpan& value) {
         return FormatXsdDuration(value);
     }
+
+namespace {
+
+    // ---------------------------------------------------------------------------
+    // #1945 -- the DateTimeKind matrix, and where this module can reach a zone
+    // ---------------------------------------------------------------------------
+    //
+    // FOUR MEMBERS OF THIS CLASS ACCEPTED A SECOND ARGUMENT AND DISCARDED IT: two `format`
+    // parameters and two `XmlDateTimeSerializationMode` parameters, each spelled `/*format*/` or
+    // `/*mode*/`. A caller could hand `ToDateTime(s, "HH:mm:ss")` a date and get it back, because
+    // the value was parsed by an entirely different grammar with no diagnostic -- the SR-AUD-168
+    // shape, four times over.
+    //
+    // THE MODE HALF CARRIED A PREMISE THAT HAD STOPPED BEING TRUE. Its comment read "System::
+    // DateTime does not track DateTimeKind (see its own doc-comment), so Local/Utc/Unspecified/
+    // RoundtripKind cannot be distinguished here". #1941 phase 1 gave `DateTime` a `Kind` and
+    // phase 2 made it convert by that kind, so the sentence describes a runtime that no longer
+    // exists.
+    //
+    // AND THIS MODULE CAN REACH A ZONE WHERE `Core.Base` CANNOT, which is the whole reason #1942
+    // stays blocked while this does not. #1941 phase 2 had to take an `ILocalTimeZone` as a
+    // PARAMETER, because `Core.Base` cannot name a time zone and .NET reaches `TimeZoneInfo.Local`
+    // internally. `modules/xml` is under no such constraint: `TimeZone` depends on `Core.Base`
+    // alone, so taking it as a PRIVATE dependency is not a cycle, and
+    // `System::TimeZone::CurrentTimeZone()` is already an `ILocalTimeZone`. So the deviation
+    // #1941 recorded is resolved HERE, by the module that can actually name the zone, and
+    // `XmlConvert`'s signatures stay exactly .NET's -- no zone parameter, because none is needed.
+
+    /** @brief .NET's `SwitchToLocalTime` (`XmlConvert.cs`), transcribed cell by cell. */
+    System::DateTime switchToLocalTime(const System::DateTime& value) {
+        switch (value.getKindProperty()) {
+            case System::DateTimeKind::Local:       return value;
+            // STAMP, not convert: an unspecified value is DECLARED local, its ticks untouched.
+            case System::DateTimeKind::Unspecified:
+                return System::DateTime::SpecifyKind(value, System::DateTimeKind::Local);
+            // CONVERT: this is one of only two cells in the whole matrix that moves the ticks.
+            case System::DateTimeKind::Utc:
+                return value.ToLocalTime(System::TimeZone::CurrentTimeZone());
+            default:                                return value;
+        }
+    }
+
+    /** @brief .NET's `SwitchToUtcTime`. Mirror of the above, and NOT its inverse cell for cell. */
+    System::DateTime switchToUtcTime(const System::DateTime& value) {
+        switch (value.getKindProperty()) {
+            case System::DateTimeKind::Utc:         return value;
+            case System::DateTimeKind::Unspecified:
+                return System::DateTime::SpecifyKind(value, System::DateTimeKind::Utc);
+            case System::DateTimeKind::Local:
+                return value.ToUniversalTime(System::TimeZone::CurrentTimeZone());
+            default:                                return value;
+        }
+    }
+
+    /**
+     * @brief The four-way mode switch shared by `ToString(value, mode)` and `ToDateTime(s, mode)`.
+     *
+     * ONE DEFINITION, because .NET writes the same switch twice and two copies of one matrix is
+     * how the two doors come to disagree. The `default:` arm's message is .NET's verbatim
+     * (`Sch_InvalidDateTimeOption`), and it is reachable only by casting a value in from outside
+     * the enumeration -- which is exactly why it needs a test.
+     */
+    System::DateTime applyDateTimeMode(const System::DateTime& value,
+                                       System::Xml::XmlDateTimeSerializationMode mode) {
+        using System::Xml::XmlDateTimeSerializationMode;
+        switch (mode) {
+            case XmlDateTimeSerializationMode::Local:  return switchToLocalTime(value);
+            case XmlDateTimeSerializationMode::Utc:    return switchToUtcTime(value);
+            // STRIPS the kind while keeping the ticks -- `new DateTime(value.Ticks, Unspecified)`.
+            case XmlDateTimeSerializationMode::Unspecified:
+                return System::DateTime::SpecifyKind(value, System::DateTimeKind::Unspecified);
+            // The one arm that does NOTHING, which is what "roundtrip" means: the kind survives.
+            //
+            // THIS ARM AND `Unspecified` ARE CURRENTLY INDISTINGUISHABLE THROUGH THE PUBLIC
+            // SURFACE, and #1945 proved it rather than assuming it: this runtime's
+            // `DateTime::ToString()` emits no kind marker where .NET's `XsdDateTime` emits a `Z`,
+            // and `DateTime::Parse` sets no kind from one -- so nothing a caller can observe
+            // carries a kind across a string. Measured over every input kind and both doors
+            // (`Decl1945_RoundtripKindCannotRoundtripThroughAString`), the two modes agree
+            // everywhere, which is why #1945's mutations M4 and M6 are equivalences rather than
+            // uncaught defects. The arms are kept apart because they are .NET's and because they
+            // SEPARATE the day #1942 teaches `Parse` to read a `Z`.
+            case XmlDateTimeSerializationMode::RoundtripKind: return value;
+        }
+        throw System::ArgumentException(
+            "The '" + std::to_string(static_cast<int>(mode)) + "' value for the 'dateTimeOption' "
+            "parameter is not an allowed value for the 'XmlDateTimeSerializationMode' enumeration.",
+            "dateTimeOption");
+    }
+
+} // namespace
+
     std::string XmlConvert::ToString(const System::DateTime& value) { return value.ToString(); }
     std::string XmlConvert::ToString(const System::DateTime& value, const std::string& format) { return value.ToString(format); }
 
-    std::string XmlConvert::ToString(const System::DateTime& value, XmlDateTimeSerializationMode /*mode*/) {
-        // System::DateTime does not track DateTimeKind (see its own doc-comment), so Local/Utc/
-        // Unspecified/RoundtripKind cannot be distinguished here; all modes use the same
-        // round-trip ISO 8601 format.
-        return value.ToString();
+    std::string XmlConvert::ToString(const System::DateTime& value,
+                                     XmlDateTimeSerializationMode mode) {
+        return applyDateTimeMode(value, mode).ToString();
     }
 
     std::string XmlConvert::ToString(const System::DateTimeOffset& value) { return value.ToString(); }
@@ -563,10 +655,32 @@ namespace System::Xml {
         return System::TimeSpan::FromTicks(ticks);
     }
     System::DateTime XmlConvert::ToDateTime(const std::string& s) { return System::DateTime::Parse(s); }
-    System::DateTime XmlConvert::ToDateTime(const std::string& s, const std::string& /*format*/) { return System::DateTime::Parse(s); }
-    System::DateTime XmlConvert::ToDateTime(const std::string& s, XmlDateTimeSerializationMode /*mode*/) { return System::DateTime::Parse(s); }
+    System::DateTime XmlConvert::ToDateTime(const std::string& s, const std::string& format) {
+        // .NET is `DateTime.ParseExact(s, format, CultureInfo.InvariantCulture)`. The overload it
+        // needs did not exist on this port's DateTime at all until #2414.
+        return System::DateTime::ParseExact(s, format);
+    }
+    System::DateTime XmlConvert::ToDateTime(const std::string& s, XmlDateTimeSerializationMode mode) {
+        return applyDateTimeMode(System::DateTime::Parse(s), mode);
+    }
     System::DateTimeOffset XmlConvert::ToDateTimeOffset(const std::string& s) { return System::DateTimeOffset::Parse(s); }
-    System::DateTimeOffset XmlConvert::ToDateTimeOffset(const std::string& s, const std::string& /*format*/) { return System::DateTimeOffset::Parse(s); }
+    System::DateTimeOffset XmlConvert::ToDateTimeOffset(const std::string& s,
+                                                        const std::string& format) {
+        // .NET is `DateTimeOffset.ParseExact(s, format, CultureInfo.InvariantCulture,
+        // DateTimeStyles.None)`, and THIS PORT HAS NO `DateTimeOffset::ParseExact` -- an exact
+        // DateTimeOffset needs a zone, and `Core.Base` cannot name one, which is #1943's
+        // remaining half.
+        //
+        // COMPOSING IT HERE IS NOT A SECOND GRAMMAR. It is .NET's own semantics spelled out: with
+        // no zone token in the format -- and this port's exact grammar has none at all -- .NET's
+        // DateTimeStyles.None gives the result the LOCAL offset, so parsing with the one exact
+        // grammar and attaching the local zone's offset is what .NET computes, not an
+        // approximation of it. A later `DateTimeOffset::ParseExact` should absorb this body
+        // rather than sit beside it.
+        const System::DateTime parsed = System::DateTime::ParseExact(s, format);
+        return System::DateTimeOffset(parsed,
+                                      System::TimeZone::CurrentTimeZone().GetUtcOffset(parsed));
+    }
     System::Guid XmlConvert::ToGuid(const std::string& s) { return System::Guid::Parse(s); }
 
 } // namespace System::Xml

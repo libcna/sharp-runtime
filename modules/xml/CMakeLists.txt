@@ -22,8 +22,8 @@ sharp_runtime_register_module(
     TARGET sharp_runtime_xml
     TYPE STATIC
     PUBLIC_DEPENDENCIES Core.Base Uri
-    PRIVATE_DEPENDENCIES Diagnostics
-    TEST_DEPENDENCIES Xml.Linq
+    PRIVATE_DEPENDENCIES Diagnostics TimeZone
+    TEST_DEPENDENCIES Xml.Linq TimeZone
     SETUP _sharp_runtime_setup_xml
 )
 

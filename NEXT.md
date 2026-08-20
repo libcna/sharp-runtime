@@ -139,6 +139,48 @@
 > and each is itemised in §2 below. **§4b says where to look next, and the method that found all
 > three of today's tickets.**
 
+## 2026-08-20 — #1945: four `XmlConvert` arguments accepted and discarded
+
+**Gate: 17,700 / 38, 0 failed, 0 skipped** (+6, `Xml` 518 → 524). Graph **41/94 → 41/95**,
+catalogue regenerated.
+
+Two `format` parameters and two `XmlDateTimeSerializationMode` parameters were spelled
+`/*format*/` and `/*mode*/` and thrown away, so `ToDateTime("2024-06-15", "HH:mm:ss")` **succeeded**
+— the value parsed by an entirely different grammar, with no diagnostic. The SR-AUD-168 shape four
+times over. **The mode half carried a premise that had stopped being true**: its comment said
+`System::DateTime` does not track a `DateTimeKind`; #1941 phase 1 gave it one and phase 2 made it
+convert by it.
+
+**Why this landed while #1942 stays blocked: `modules/xml` can reach a zone where `Core.Base`
+cannot.** Phase 2 had to take an `ILocalTimeZone` as a *parameter*; here `TimeZone` depends on
+`Core.Base` alone, so a private dependency is no cycle and `TimeZone::CurrentTimeZone()` already
+*is* an `ILocalTimeZone`. The deviation #1941 recorded is resolved by the module that can name the
+zone, and `XmlConvert`'s signatures stay exactly .NET's.
+
+**A limitation found by one of my tests failing, declared rather than hidden.** `RoundtripKind`
+exists to carry a kind *through a string* and here it cannot — `DateTime::ToString()` emits no kind
+marker and `Parse` reads none. So **through the parse door `Local` and `Utc` always stamp and never
+convert**, while through the format door they convert; and **`RoundtripKind` and `Unspecified` are
+observationally identical**, measured over every input kind and both doors. That is #2414's
+no-zone-token boundary one level up; closing it is **#1942's** work, and the pin fails the day it
+lands.
+
+Seven mutations: five caught, **M4 and M6 proven equivalences** (they swap the two indistinguishable
+arms, so no assertion could catch them). Two were **invalid as first written and reformulated**:
+M2's first spelling was a **no-op**, M7's was rejected by `-Werror`.
+
+**A mistake of my own, recorded because it is the second occurrence:** `cat >>` to a path that did
+not exist created a stray untracked test file with no includes — exactly what #2412 recorded. Twice
+is a pattern, not a slip.
+
+**Found on the way and filed rather than passed over: #2415.**
+`scripts/check_selective_components.sh` has been **red since 2026-08-19** — verified red on a clean
+tree — because #1889 legitimately gave `Text.Json` a public `Collections.Core` dependency while
+`forbidden_text_json_collections` still asserts the opposite. It sat behind a green test count
+because that script is not part of rule 2's gate.
+
+`docs/Migration-XmlConvertDateTimeFormatAndMode.md`. Downstream zero sites.
+
 ## 2026-08-20 — #1997 group A-2: `Uri::CheckHostName`, and the move that made it possible — **#1997 CLOSED**
 
 **Gate: 17,694 / 38, 0 failed, 0 skipped** (+5, `Uri` 314 → 319; **`Net` unchanged at 340**, which

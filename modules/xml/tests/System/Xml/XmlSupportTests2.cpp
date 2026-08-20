@@ -14,6 +14,11 @@
 #include "System/Xml/IXmlNamespaceResolver.hpp"
 #include "System/Xml/NameTable.hpp"
 #include "System/Xml/XmlConvert.hpp"
+#include "System/DateTime.hpp"
+#include "System/DateTimeKind.hpp"
+#include "System/DateTimeOffset.hpp"
+#include "System/TimeZone.hpp"
+#include "System/Xml/XmlDateTimeSerializationMode.hpp"
 #include "System/Xml/XmlException.hpp"
 #include "System/Xml/XmlNodeChangedEventArgs.hpp"
 #include "System/Xml/XmlQualifiedName.hpp"
@@ -311,4 +316,193 @@ TEST(XmlConvertTests, ToTimeSpan_DayCountBeyondRange_Throws_1836) {
     EXPECT_THROW((void)XmlConvert::ToTimeSpan("P2147483647DT0H0M0S"), System::FormatException);
     // ...and the wrapped value is not produced under any spelling.
     EXPECT_THROW((void)XmlConvert::ToTimeSpan("P999999999999999999999D"), System::FormatException);
+}
+
+// ===========================================================================
+// #1945 -- the four XmlConvert arguments that were accepted and discarded
+// ===========================================================================
+//
+// Two `format` parameters and two `XmlDateTimeSerializationMode` parameters were spelled
+// `/*format*/` and `/*mode*/` and thrown away, so a caller could hand `ToDateTime(s, "HH:mm:ss")`
+// a date and get it back -- parsed by an entirely different grammar, with no diagnostic. That is
+// the SR-AUD-168 shape four times over.
+//
+// The mode half additionally carried a premise that had STOPPED BEING TRUE: its comment said
+// `System::DateTime` does not track a `DateTimeKind`. #1941 phase 1 gave it one and phase 2 made
+// it convert by that kind.
+
+TEST(XmlConvertDateTimeMode1945Tests, TheFormatIsHonouredRatherThanDiscarded) {
+    using System::Xml::XmlConvert;
+
+    EXPECT_EQ(XmlConvert::ToDateTime("2024-06-15 13:45:30", "yyyy-MM-dd HH:mm:ss"),
+              System::DateTime(2024, 6, 15, 13, 45, 30));
+
+    // THE ROW THAT SEPARATES "HONOURED" FROM "DISCARDED": a string the general parser accepts but
+    // the FORMAT does not. Before this it returned a value; now it throws. A test that only
+    // asserted a matching pair would pass against the discarding body.
+    EXPECT_THROW(XmlConvert::ToDateTime("2024-06-15", "HH:mm:ss"), System::FormatException);
+    EXPECT_THROW(XmlConvert::ToDateTime("2024-06-15T13:45:30", "yyyy-MM-dd"),
+                 System::FormatException);
+}
+
+TEST(XmlConvertDateTimeMode1945Tests, TheModeMatrixStampsTwiceAndConvertsTwice) {
+    using System::Xml::XmlConvert;
+    using System::Xml::XmlDateTimeSerializationMode;
+    using System::DateTimeKind;
+
+    const System::DateTime unspecified(2024, 6, 15, 12, 0, 0);
+    ASSERT_EQ(unspecified.getKindProperty(), DateTimeKind::Unspecified);
+    const auto utc   = System::DateTime::SpecifyKind(unspecified, DateTimeKind::Utc);
+    const auto local = System::DateTime::SpecifyKind(unspecified, DateTimeKind::Local);
+
+    // STAMPING cells: the kind changes and THE TICKS DO NOT. A body that converted here instead
+    // would move an unspecified value by the local offset, which is wrong in .NET too.
+    EXPECT_EQ(XmlConvert::ToDateTime(unspecified.ToString(),
+                                     XmlDateTimeSerializationMode::Utc).getTicksProperty(),
+              unspecified.getTicksProperty());
+    EXPECT_EQ(XmlConvert::ToDateTime(unspecified.ToString(),
+                                     XmlDateTimeSerializationMode::Utc).getKindProperty(),
+              DateTimeKind::Utc);
+    EXPECT_EQ(XmlConvert::ToDateTime(unspecified.ToString(),
+                                     XmlDateTimeSerializationMode::Local).getKindProperty(),
+              DateTimeKind::Local);
+
+    // IDENTITY cells: same kind in, unchanged out.
+    EXPECT_EQ(XmlConvert::ToString(utc, XmlDateTimeSerializationMode::Utc),
+              XmlConvert::ToString(utc, XmlDateTimeSerializationMode::RoundtripKind));
+    EXPECT_EQ(XmlConvert::ToString(local, XmlDateTimeSerializationMode::Local),
+              XmlConvert::ToString(local, XmlDateTimeSerializationMode::RoundtripKind));
+
+    // UNSPECIFIED strips the kind while keeping the ticks -- `new DateTime(Ticks, Unspecified)`.
+    EXPECT_EQ(XmlConvert::ToString(utc, XmlDateTimeSerializationMode::Unspecified),
+              XmlConvert::ToString(unspecified, XmlDateTimeSerializationMode::RoundtripKind));
+}
+
+// THE TWO CELLS THAT ACTUALLY MOVE THE TICKS, and the reason this ticket could land while #1942
+// stays blocked: `Core.Base` cannot name a time zone, so #1941 phase 2 had to take one as a
+// parameter -- but `modules/xml` CAN, `TimeZone` depending on `Core.Base` alone. So XmlConvert's
+// signatures stay exactly .NET's, with no zone parameter, because none is needed here.
+TEST(XmlConvertDateTimeMode1945Tests, UtcAndLocalConvertAgainstThisProcessZone) {
+    using System::Xml::XmlConvert;
+    using System::Xml::XmlDateTimeSerializationMode;
+    using System::DateTimeKind;
+
+    const System::DateTime base(2024, 6, 15, 12, 0, 0);
+    const auto utc    = System::DateTime::SpecifyKind(base, DateTimeKind::Utc);
+    const auto offset = System::TimeZone::CurrentTimeZone().GetUtcOffset(base);
+
+    // Utc -> Local is a CONVERSION: the rendered text moves by this zone's offset, where the
+    // identity cell does not. Comparing the two RENDERINGS is what makes the conversion visible
+    // without a literal -- a fixed expectation would be the tzdata mistake #2351 repaired, and
+    // this way the case is also correct in a UTC container, where both strings simply agree.
+    const auto asLocalText = XmlConvert::ToString(utc, XmlDateTimeSerializationMode::Local);
+    const auto identity    = XmlConvert::ToString(utc, XmlDateTimeSerializationMode::RoundtripKind);
+    const auto shifted     = XmlConvert::ToString(
+        System::DateTime::SpecifyKind(base.AddTicks(offset.getTicksProperty()),
+                                      DateTimeKind::Local),
+        XmlDateTimeSerializationMode::RoundtripKind);
+    EXPECT_EQ(asLocalText, shifted);
+    if (offset.getTicksProperty() != 0) { EXPECT_NE(asLocalText, identity); }
+
+    // ...and Local -> Utc is its inverse, so the pair returns to the instant it started from.
+    // A one-directional cell cannot show that.
+    const auto local = System::DateTime::SpecifyKind(
+        base.AddTicks(offset.getTicksProperty()), DateTimeKind::Local);
+    EXPECT_EQ(XmlConvert::ToString(local, XmlDateTimeSerializationMode::Utc), identity);
+}
+
+// A LIMITATION FOUND BY THE TEST ABOVE FAILING, AND DECLARED RATHER THAN HIDDEN.
+//
+// `RoundtripKind` exists to carry a kind THROUGH A STRING, and in this port it cannot: this
+// runtime's `DateTime::ToString()` emits no kind marker -- no trailing `Z`, no offset -- where
+// .NET's `XsdDateTime` does, and `DateTime::Parse` sets no kind from one either. So every value
+// that comes back from `ToDateTime` is `Unspecified`, whatever it was when it was written.
+//
+// The consequence is precise and worth stating: through the PARSE door, `Local` and `Utc` always
+// STAMP and never CONVERT, because a parsed value is always unspecified. Through the FORMAT door
+// -- where the caller hands over a `DateTime` that still has its kind -- they convert, which is
+// what the case above asserts.
+//
+// This is the same no-zone-token boundary #2414 recorded one level down, surfacing here. Closing
+// it means making `DateTime::Parse` set a kind from a `Z`, which is #1942's `RoundtripKind` work
+// and needs the zone decision that ticket is waiting on. Pinned so the day it lands, this fails.
+TEST(XmlConvertDateTimeMode1945Tests, Decl1945_RoundtripKindCannotRoundtripThroughAString) {
+    using System::Xml::XmlConvert;
+    using System::Xml::XmlDateTimeSerializationMode;
+    using System::DateTimeKind;
+
+    const System::DateTime base(2024, 6, 15, 12, 0, 0);
+    const auto utc = System::DateTime::SpecifyKind(base, DateTimeKind::Utc);
+
+    const std::string written = XmlConvert::ToString(utc, XmlDateTimeSerializationMode::RoundtripKind);
+    EXPECT_EQ(written.find('Z'), std::string::npos) << "no kind marker is emitted: " << written;
+
+    const auto readBack = XmlConvert::ToDateTime(written, XmlDateTimeSerializationMode::RoundtripKind);
+    EXPECT_EQ(readBack.getKindProperty(), DateTimeKind::Unspecified);
+
+    // ...and therefore the parse door STAMPS where the format door CONVERTS. Both halves in one
+    // case, so the asymmetry reads as a stated consequence rather than two unrelated facts.
+    EXPECT_EQ(XmlConvert::ToDateTime(written, XmlDateTimeSerializationMode::Local).getTicksProperty(),
+              utc.getTicksProperty());
+    EXPECT_EQ(XmlConvert::ToDateTime(written, XmlDateTimeSerializationMode::Local).getKindProperty(),
+              DateTimeKind::Local);
+
+    // THE SECOND CONSEQUENCE, MEASURED RATHER THAN REASONED: with no kind marker in the rendering
+    // and every parsed value unspecified, `RoundtripKind` and `Unspecified` are OBSERVATIONALLY
+    // IDENTICAL through both public doors -- for every input kind, not only for this one. That is
+    // why #1945's mutations M4 and M6, which swap the two arms' bodies, are PROVEN EQUIVALENCES
+    // rather than gaps in this file: an assertion that could catch them would have to distinguish
+    // two modes this port cannot distinguish, and both mutations preserve the equality below.
+    //
+    // The arms are kept apart because they are .NET's and because they SEPARATE the day #1942
+    // teaches `DateTime::Parse` to set a kind from a `Z`. When that lands, this loop fails.
+    for (auto kind : {DateTimeKind::Unspecified, DateTimeKind::Utc, DateTimeKind::Local}) {
+        const auto value = System::DateTime::SpecifyKind(base, kind);
+        EXPECT_EQ(XmlConvert::ToString(value, XmlDateTimeSerializationMode::RoundtripKind),
+                  XmlConvert::ToString(value, XmlDateTimeSerializationMode::Unspecified))
+            << "format door, kind " << static_cast<int>(kind);
+
+        const auto text = XmlConvert::ToString(value, XmlDateTimeSerializationMode::RoundtripKind);
+        EXPECT_EQ(XmlConvert::ToDateTime(text, XmlDateTimeSerializationMode::RoundtripKind),
+                  XmlConvert::ToDateTime(text, XmlDateTimeSerializationMode::Unspecified))
+            << "parse door, kind " << static_cast<int>(kind);
+    }
+}
+
+// The `default:` arm is reachable ONLY by casting a value in from outside the enumeration, which
+// is exactly why it needs its own case -- no ordinary call can reach it.
+TEST(XmlConvertDateTimeMode1945Tests, AnUndefinedModeRaisesDotNetsOwnMessage) {
+    using System::Xml::XmlConvert;
+    using System::Xml::XmlDateTimeSerializationMode;
+
+    const auto bogus = static_cast<XmlDateTimeSerializationMode>(99);
+    const System::DateTime value(2024, 6, 15, 12, 0, 0);
+
+    EXPECT_THROW(XmlConvert::ToString(value, bogus), System::ArgumentException);
+    EXPECT_THROW(XmlConvert::ToDateTime("2024-06-15T12:00:00", bogus), System::ArgumentException);
+
+    try {
+        XmlConvert::ToString(value, bogus);
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        const std::string what = e.what();
+        EXPECT_NE(what.find("XmlDateTimeSerializationMode"), std::string::npos) << what;
+        EXPECT_NE(what.find("dateTimeOption"), std::string::npos) << what;
+        EXPECT_EQ(e.getParamNameProperty(), "dateTimeOption");
+    }
+}
+
+TEST(XmlConvertDateTimeMode1945Tests, ToDateTimeOffsetHonoursItsFormatToo) {
+    using System::Xml::XmlConvert;
+
+    const auto parsed = XmlConvert::ToDateTimeOffset("2024-06-15 13:45:30",
+                                                     "yyyy-MM-dd HH:mm:ss");
+    EXPECT_EQ(parsed.getDateTimeProperty(), System::DateTime(2024, 6, 15, 13, 45, 30));
+    // With no zone token in the format -- and this port's exact grammar has none at all -- .NET's
+    // DateTimeStyles.None gives the result the LOCAL offset. Asserted against the zone rather
+    // than a literal, for the same reason as above.
+    EXPECT_EQ(parsed.getOffsetProperty(),
+              System::TimeZone::CurrentTimeZone().GetUtcOffset(parsed.getDateTimeProperty()));
+
+    EXPECT_THROW(XmlConvert::ToDateTimeOffset("2024-06-15", "HH:mm:ss"), System::FormatException);
 }
