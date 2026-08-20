@@ -1,6 +1,22 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(SHARP_RUNTIME LANGUAGES CXX C)
+project(SHARP_RUNTIME VERSION 0.1.0 LANGUAGES CXX C)
+
+# --- Release identity (docs/releasing.md) --------------------------------------------------
+# project(VERSION) accepts numeric components only, so the Semantic Versioning pre-release
+# identifier lives beside it and is joined back on here. Deliberately a normal variable and not
+# a cache entry: the version identifies the release, it is not a per-build knob, and a cached
+# copy would keep an already-configured build directory reporting the previous release after a
+# bump -- exactly the kind of stale claim a release must not make. SHARP_RUNTIME_VERSION_STRING
+# is the single spelling the rest of the build reads. Do not re-derive it elsewhere.
+set(SHARP_RUNTIME_VERSION_PRERELEASE "alpha.1")
+if(SHARP_RUNTIME_VERSION_PRERELEASE)
+    set(SHARP_RUNTIME_VERSION_STRING "${PROJECT_VERSION}-${SHARP_RUNTIME_VERSION_PRERELEASE}")
+else()
+    set(SHARP_RUNTIME_VERSION_STRING "${PROJECT_VERSION}")
+endif()
+message(STATUS "Sharp Runtime: version ${SHARP_RUNTIME_VERSION_STRING}")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Version.cmake")
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -45,6 +61,14 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/SharpRuntimeModules.cmake")
 # is the shared headers surface every component and consumer links transitively.
 target_compile_definitions(sharp_runtime_headers INTERFACE
         SHARP_RUNTIME_HAS_NATIVE_INT128=${SHARP_RUNTIME_NATIVE_INT128_VALUE})
+
+# The generated release identity (SharpRuntime/Version.hpp, cmake/Version.cmake) rides the same
+# carrier for the same reason: it is a fact about the build that every component and consumer
+# may ask about, and this interface target is the one surface all of them link transitively. A
+# consumer writes #include "SharpRuntime/Version.hpp" without knowing which include root
+# resolves it.
+target_include_directories(sharp_runtime_headers INTERFACE
+        "$<BUILD_INTERFACE:${SHARP_RUNTIME_GENERATED_INCLUDE_DIR}>")
 
 if(NOT DEFINED SHARP_RUNTIME_COMPONENTS
         OR SHARP_RUNTIME_COMPONENTS STREQUAL "")

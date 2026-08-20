@@ -3,10 +3,24 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-20 — 17,732 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,732 run: 17,732 passed, 0 failed, 0 skipped**, recounted from the
-> per-executable logs with every executable run separately and continuing past failures, zero build
-> warnings at `--parallel 2`. Graph **41 / 95**, seams **3 / 20**, negative fixtures **53 / 269**.
+> **Test-count floor, 2026-08-20 — 17,738 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,738 run: 17,738 passed, 0 failed, 0 skipped**, zero build warnings
+> at `--parallel 2` over a **full** rebuild. Graph **41 / 95**, seams **3 / 20**, negative fixtures
+> **53 / 269**.
+>
+> **+6** on the 17,732 below, in `SharpRuntimeTests_Core_Base` (6,148 → 6,154), from the
+> **release-identity** change that gives this repository a version for the first time —
+> **`v0.1.0-alpha.1`**, decided in one place (`project(SHARP_RUNTIME VERSION 0.1.0)` plus
+> `SHARP_RUNTIME_VERSION_PRERELEASE`) and rendered into `SharpRuntime/Version.hpp`. **No production
+> statement changed**, and no other executable's count moved. See `docs/releasing.md`.
+>
+> **One pre-existing red gate was found on the way and is NOT fixed here**:
+> `scripts/check_doxygen_warnings.sh` emits **2,675** warnings against a baseline maximum of
+> **1,942** measured 2026-07-25. Measured twice, with and without this change's `Doxyfile` edit, the
+> count is **identical**, so it is not caused by it — and `*/tests/*` is excluded, so the new test
+> file is not scanned either. It runs in `.github/workflows/components.yml` but **not** in
+> `scripts/local_ci_check.sh`: **#2415's shape exactly**, a check nothing local runs. Re-baselining
+> it is a deliberate decision for the owner, not a side effect of a release ticket.
 >
 > ---
 >

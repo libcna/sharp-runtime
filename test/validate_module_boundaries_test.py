@@ -75,6 +75,11 @@ class FixtureRepository:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(textwrap.dedent(content), encoding="utf-8")
 
+    def write_test(self, module: str, relative_path: str, content: str = "") -> None:
+        path = self.root / "modules" / module / "tests" / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(textwrap.dedent(content), encoding="utf-8")
+
     def finish(self) -> None:
         cmake_dir = self.root / "cmake"
         cmake_dir.mkdir(exist_ok=True)
@@ -120,6 +125,42 @@ class ModuleBoundaryValidatorTests(unittest.TestCase):
         self.assertEqual([], report.problems)
         self.assertEqual(2, report.module_count)
         self.assertEqual(1, report.dependency_edge_count)
+
+    def test_build_generated_header_resolves_without_an_owning_module(self) -> None:
+        # SharpRuntime/Version.hpp is rendered by cmake/Version.cmake into the build tree and
+        # published on SharpRuntime::Headers, so no module directory owns it and no module
+        # declares an edge for it. Both the implementation scan and the test scan must accept it.
+        self.fixture.add_module("core", "Core")
+        self.fixture.write_header("core", "System/Object.hpp")
+        self.fixture.write_source(
+            "core",
+            "System/Object.cpp",
+            '#include "SharpRuntime/Version.hpp"\n',
+        )
+        self.fixture.write_test(
+            "core",
+            "SharpRuntime/VersionTests.cpp",
+            '#include "SharpRuntime/Version.hpp"\n',
+        )
+        report = self.validate()
+        self.assertEqual([], report.problems)
+
+    def test_unknown_sharp_runtime_header_still_fails(self) -> None:
+        # The exception is one named path, not the SharpRuntime/ prefix: a typo or a header that
+        # was never generated must still be reported, or the generated-header allowance would
+        # silently disable ownership checking for everything under that prefix.
+        self.fixture.add_module("core", "Core")
+        self.fixture.write_header("core", "System/Object.hpp")
+        self.fixture.write_source(
+            "core",
+            "System/Object.cpp",
+            '#include "SharpRuntime/Versions.hpp"\n',
+        )
+        report = self.validate()
+        self.assertTrue(
+            any("SharpRuntime/Versions.hpp" in problem for problem in report.problems),
+            report.problems,
+        )
 
     def test_unregistered_physical_module_fails(self) -> None:
         self.fixture.add_module("core", "Core")

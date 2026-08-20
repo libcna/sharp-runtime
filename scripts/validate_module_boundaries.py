@@ -8,7 +8,8 @@ configured build directory. It verifies:
 
 * every physical module directory is registered exactly once;
 * public include spellings are unique;
-* project-local includes resolve to an owned header;
+* project-local includes resolve to an owned header, or to a build-generated one
+  named in ``GENERATED_INCLUDE_PATHS``;
 * cross-module includes have a declared dependency with correct visibility;
 * declared dependencies are used (or have a documented allow-list entry);
 * the module dependency graph is acyclic.
@@ -38,6 +39,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 MODULE_LIST_PATH = Path("cmake/SharpRuntimeModules.cmake")
 ALLOWLIST_PATH = Path("cmake/SharpRuntimeModuleDependencyAllowlist.json")
 PROJECT_INCLUDE_PREFIXES = ("System/", "SharpRuntime/")
+# Public headers that no module directory owns because the BUILD generates them. The release
+# identity is rendered by cmake/Version.cmake into <build>/generated/include and published on
+# SharpRuntime::Headers, the interface target every component and consumer links transitively --
+# so it exists only in a configured build tree, while this checker deliberately runs without one,
+# and there is no module edge to declare because nothing has to opt into that target. Naming the
+# exception here keeps "every project-local include resolves to an owned header" true for
+# everything else rather than loosening the rule for the whole SharpRuntime/ prefix.
+GENERATED_INCLUDE_PATHS = frozenset({"SharpRuntime/Version.hpp"})
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl"}
 HEADER_SUFFIXES = {".h", ".hh", ".hpp", ".hxx", ".inl"}
 MODULE_SINGLE_VALUE_FIELDS = {"NAME", "TARGET", "TYPE", "SETUP"}
@@ -476,7 +485,8 @@ def validate_repository(root: Path) -> ValidationReport:
                                 [],
                             ).append(_display(source, root))
                         continue
-                    if include.startswith(PROJECT_INCLUDE_PREFIXES):
+                    if (include.startswith(PROJECT_INCLUDE_PREFIXES)
+                            and include not in GENERATED_INCLUDE_PATHS):
                         report.problems.append(
                             f"{_display(source, root)} includes unresolved "
                             f"project header '{include}'"
@@ -610,7 +620,8 @@ def validate_repository(root: Path) -> ValidationReport:
             for include in INCLUDE_RE.findall(content):
                 owner = header_owners.get(include)
                 if owner is None:
-                    if include.startswith(PROJECT_INCLUDE_PREFIXES):
+                    if (include.startswith(PROJECT_INCLUDE_PREFIXES)
+                            and include not in GENERATED_INCLUDE_PATHS):
                         report.problems.append(
                             f"{_display(source, root)} includes unresolved "
                             f"project header '{include}'"

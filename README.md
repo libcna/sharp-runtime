@@ -42,6 +42,17 @@ C++. The implementation uses RAII, standard-library ownership types, and
 fixed-width aliases such as `SharpRuntime::intcs` for .NET-sized integral API
 values.
 
+## Version
+
+Current release: **0.1.0-alpha.1** (pre-release — the public API may still change; see
+[`CHANGELOG.md`](CHANGELOG.md) for what the release contains and
+[`docs/releasing.md`](docs/releasing.md) for how versions are managed). Compiled code reads its
+own version from `SharpRuntime::getVersionString()` in `SharpRuntime/Version.hpp`, a header the
+build generates from the one place the version is decided.
+
+Note that `System::Version` is the ported .NET *type* for representing version numbers and is
+unrelated to this library's release.
+
 ## Quick start
 
 Requirements:
