@@ -3,8 +3,8 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-20 — 17,637 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,637 run: 17,637 passed, 0 failed, 0 skipped**, recounted from the
+> **Test-count floor, 2026-08-20 — 17,640 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,640 run: 17,640 passed, 0 failed, 0 skipped**, recounted from the
 > per-executable logs with every executable run separately and continuing past failures, zero build
 > warnings at `--parallel 2`. Every checkpoint below this one ends with *"the gate is not green"*;
 > this one does not. Two of the three historical failure sources were environmental and are simply
@@ -46,10 +46,11 @@
 > **Three patterns worth carrying forward, in order of yield.** (1) **Ask a repaired subsystem's
 > question of its neighbours** — that alone found #2398 and #2401, and #2402 closed it out. (2) **A
 > module with no test sources** is where an undetected divergence survives. (3) **A test that cannot
-> fail** is how it survives there: **every** defect this sweep found sat under one, three of them
-> literally — two `EXPECT_EQ(buffer.size(), N)` on a buffer sized before the call, and a case whose
-> name claimed "DiffersAcrossProcesses" while its body only checked within one. §4b has the
-> remaining candidates.
+> fail** is how it survives there: **every** defect this sweep found sat under one, **four** of them
+> literally — two `EXPECT_EQ(buffer.size(), N)` on a buffer sized before the call, a case whose name
+> claimed "DiffersAcrossProcesses" while its body only checked within one, and
+> `EXPECT_NO_THROW(System::ComponentModel::Attribute{})`, which asserted that an empty type can be
+> default-constructed. §4b has the remaining candidates.
 >
 > **#2403 — `System::ComponentModel`, and the pattern that found it is pattern (2) below.** Six
 > attributes published a **bare mutable public data member** where .NET publishes a get-only
@@ -59,11 +60,19 @@
 > of a metadata attribute — were unpinned, and `MergablePropertyAttribute::Default` is `Yes` where
 > its four siblings are `No`.
 >
-> **BOTH WORK QUEUES ARE EMPTY AGAIN.** Eight tickets were filed and closed by this sweep — #2397,
-> #2398, #2399, #2400, #2401, #2402 on 2026-08-19, then #2403 and #2404 on 2026-08-20. `ticket` has
-> **0 `todo`**; `task` has **0** unclassified (14,979 ignored / 1,082 ported / 140 ignore). Ticket
-> totals: **2,387 done, 9 blocked, 1 needs_user, 5 wontfix**. Graph **41 / 94** (#2401 added one
-> private edge), negative fixtures **50 / 256** (#2399 and #2403 added one each). What remains *blocked* needs the user or an external event,
+> **#2405 finished the `component-model` pass**: the two `PropertyChanged`/`PropertyChanging`
+> event-args types each carried a **second, mutable, lossy** copy of `PropertyName` beside the
+> private `std::optional` — a field whose own doc-comment described the loss and kept it "for
+> existing consumers", a reason that measures to **zero** — and `System::ComponentModel::Attribute`
+> turned out to be a **phantom**: no .NET counterpart, no members, no derived classes, no callers.
+>
+> **THE `todo` QUEUE HAS ONE ITEM: #2406**, `System::ComponentModel::DataAnnotations`. It was split
+> out rather than bundled because `DataTypeAttribute` holds an untyped mutable **string** where .NET
+> has an **enum** plus a separate custom-type constructor and two accessors — closing it means
+> **adding public surface**, not changing an accessor. Ten tickets were filed and closed by this
+> sweep: #2397–#2402 on 2026-08-19, #2403–#2405 and #2407 on 2026-08-20. `task` has **0**
+> unclassified (14,979 ignored / 1,082 ported / 140 ignore). Ticket totals: **2,389 done, 1 todo, 9
+> blocked, 1 needs_user, 5 wontfix**. Graph **41 / 94**, negative fixtures **51 / 260**. What remains *blocked* needs the user or an external event,
 > and each is itemised in §2 below. **§4b says where to look next, and the method that found all
 > three of today's tickets.**
 

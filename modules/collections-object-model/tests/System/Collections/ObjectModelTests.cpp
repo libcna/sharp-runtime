@@ -453,7 +453,12 @@ TEST(ObservableCollectionTests, RemoveAt_TriggersCollectionChanged) {
 TEST(ObservableCollectionTests, Add_And_Remove_FirePropertyChanged) {
     ObservableCollection<int> oc;
     std::vector<std::string> names;
-    oc.PropertyChanged.push_back([&](void*, const auto& args) { names.push_back(args.PropertyName); });
+    // #2405 removed the duplicated public `PropertyName` field; the accessor is the one .NET has
+    // and it keeps `std::nullopt` distinct from `""`. `ObservableCollection` always names a
+    // property, so `value()` is the right read here -- and it asserts that, because it would throw
+    // if the collection ever raised the all-properties (`nullopt`) notification instead.
+    oc.PropertyChanged.push_back(
+        [&](void*, const auto& args) { names.push_back(args.getPropertyNameProperty().value()); });
     oc.Add(1);
     ASSERT_EQ(names.size(), 2u);
     EXPECT_EQ(names[0], "Count");

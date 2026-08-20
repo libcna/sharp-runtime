@@ -1,11 +1,11 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-20 — branch **`next`**, working tree clean. Gate **17,637 across 38
-executables: 17,637 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs
+*Last verified: 2026-08-20 — branch **`next`**, working tree clean. Gate **17,640 across 38
+executables: 17,640 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs
 with every executable run separately and continuing past failures, zero build warnings at
 `--parallel 2`. Graph **41 / 94** (#2401 added one private edge), seams **3 / 20**, negative
-fixtures **50 / 256** (#2399 and #2403 added one each; #2397, #2398, #2401 and #2402 outlawed no
-spelling). **BOTH WORK
+fixtures **51 / 260** (#2399, #2403 and #2405 added one each; #2397, #2398, #2401 and #2402 outlawed
+no spelling). **BOTH WORK
 QUEUES ARE EMPTY**: `ticket` has 0 `todo` (2,384 done, 9 blocked, 1 needs_user, 5 wontfix) and
 `task` has 0 unclassified. Six tickets were filed and closed by one sweep on 2026-08-19: #2397,
 #2398, #2399, #2400, #2401 and #2402, and two more on 2026-08-20: #2403 and #2404.*
@@ -19,6 +19,16 @@ unpinned, including `MergablePropertyAttribute::Default = Yes` where its four si
 divergence is deliberate and pinned: .NET's `GetHashCode` here is identity while its `Equals` is
 by value, which breaks the hash contract, and `System/Attribute.hpp` states the opposite rule in
 terms.*
+
+***#2405 finished that module and #2406 is what it deliberately did not do.*** *Both
+`PropertyChanged`/`PropertyChangingEventArgs` carried a **second, mutable, lossy** `PropertyName`
+beside the private `std::optional` — a field whose own doc-comment described the loss and justified
+itself "for existing consumers that predate the nullable-property port", a reason that measures to
+zero — and `System::ComponentModel::Attribute` was a **phantom** with no .NET counterpart, no
+members, no derived classes and no callers. `DataAnnotations` is split out as **#2406**, the one
+open `todo`, because `DataTypeAttribute` holds an untyped mutable string where .NET has an enum plus
+a separate custom-type constructor and two accessors: adding public surface, not changing an
+accessor.*
 
 ***The latest change is #2397, and what it demonstrates matters more than what it repaired.*** *The
 queues were already empty, so the work was **found by measurement**: the restored reference was

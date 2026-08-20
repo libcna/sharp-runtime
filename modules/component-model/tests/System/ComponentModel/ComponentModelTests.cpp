@@ -6,14 +6,16 @@
 #include <any>
 #include <exception>
 #include <optional>
+#include <type_traits>
 #include <stdexcept>
+#include "System/Attribute.hpp"
+#include "System/EventArgs.hpp"
 #include "System/IServiceProvider.hpp"
 #include "System/ComponentModel/CancelEventArgs.hpp"
 #include "System/ComponentModel/AsyncCompletedEventArgs.hpp"
 #include "System/ComponentModel/IChangeTracking.hpp"
 #include "System/ComponentModel/IEditableObject.hpp"
 #include "System/ComponentModel/IRevertibleChangeTracking.hpp"
-#include "System/ComponentModel/Attribute.hpp"
 #include "System/ComponentModel/DefaultValueAttribute.hpp"
 #include "System/ComponentModel/DescriptionAttribute.hpp"
 #include "System/ComponentModel/CategoryAttribute.hpp"
@@ -46,12 +48,35 @@ using System::ComponentModel::INotifyPropertyChanging;
 using System::ComponentModel::PropertyChangedEventArgs;
 using System::ComponentModel::PropertyChangingEventArgs;
 
-// ===========================================================================
-// ComponentModel::Attribute (base stub)
-// ===========================================================================
+// ===========================================================================================
+// #2405 REMOVED System::ComponentModel::Attribute, and this case with it.
+//
+// There is no System.ComponentModel.Attribute in .NET -- measured, no such file anywhere under
+// the reference tree. .NET's ComponentModel attributes derive from System.Attribute, and so do
+// this port's: 20 from System::Attribute and 11 from ValidationAttribute, and ZERO from the
+// removed type. It had no members, no derived classes and no callers.
+//
+// The case that stood here was `EXPECT_NO_THROW(System::ComponentModel::Attribute{})` -- an
+// assertion that an empty type can be default-constructed, which is the "cannot fail for the
+// property it claims" shape this sweep has now met four times. What replaces it asserts the fact
+// that actually matters: the attributes in this namespace derive from System::Attribute, which is
+// what makes them usable wherever a System::Attribute is expected.
+// ===========================================================================================
 
-TEST(ComponentModelAttributeTests, DefaultCtor_NoThrow) {
-    EXPECT_NO_THROW(System::ComponentModel::Attribute{});
+TEST(ComponentModelAttribute2405Tests, TheseAttributesDeriveFromSystemAttribute) {
+    static_assert(std::is_base_of_v<System::Attribute, ReadOnlyAttribute>);
+    static_assert(std::is_base_of_v<System::Attribute, BrowsableAttribute>);
+    static_assert(std::is_base_of_v<System::Attribute, CategoryAttribute>);
+    static_assert(std::is_base_of_v<System::Attribute, DescriptionAttribute>);
+    static_assert(std::is_base_of_v<System::Attribute, DisplayNameAttribute>);
+    static_assert(std::is_base_of_v<System::Attribute, RefreshPropertiesAttribute>);
+
+    // ...and it is a usable base, not merely a declared one: dispatch through it reaches the
+    // override. A `static_assert` alone would pass against a base nothing can call through.
+    const ReadOnlyAttribute readOnly(true);
+    const System::Attribute& asBase = readOnly;
+    EXPECT_TRUE(asBase.Equals(ReadOnlyAttribute::Yes));
+    EXPECT_FALSE(asBase.getIsDefaultAttributeProperty());
 }
 
 // ===========================================================================
@@ -942,4 +967,51 @@ TEST(IRevertibleChangeTrackingTests, InheritsIChangeTracking) {
 
 TEST(IRevertibleChangeTrackingTests, IsAbstractInterface) {
     EXPECT_TRUE(std::is_abstract_v<System::ComponentModel::IRevertibleChangeTracking>);
+}
+
+// ===========================================================================================
+// #2405 -- PropertyName is get-only and nullable on both event-args types
+//
+// These types used to carry a SECOND, public `std::string PropertyName` beside the private
+// `std::optional`, snapshotted in the constructor. Its own doc-comment described the defect --
+// "empty when getPropertyNameProperty() has no value" -- and it was mutable besides, so a
+// subscriber could retarget the args object mid-dispatch and the field and the accessor would
+// then DISAGREE. .NET's is four lines: `public virtual string? PropertyName { get; }`.
+// ===========================================================================================
+
+TEST(PropertyNameNullability2405Tests, AnAbsentNameAndAnEmptyNameAreDifferentStates) {
+    const PropertyChangedEventArgs absent(std::nullopt);
+    const PropertyChangedEventArgs empty(std::string{});
+
+    EXPECT_FALSE(absent.getPropertyNameProperty().has_value())
+        << "the all-properties notification (.NET's null) collapsed into an empty name";
+    ASSERT_TRUE(empty.getPropertyNameProperty().has_value());
+    EXPECT_EQ(empty.getPropertyNameProperty().value(), "");
+
+    // The same, one type over: PropertyChangingEventArgs had a byte-for-byte identical shape, so
+    // repairing only one of the two would have left the port disagreeing with itself.
+    const PropertyChangingEventArgs absentChanging(std::nullopt);
+    const PropertyChangingEventArgs emptyChanging(std::string{});
+    EXPECT_FALSE(absentChanging.getPropertyNameProperty().has_value());
+    ASSERT_TRUE(emptyChanging.getPropertyNameProperty().has_value());
+    EXPECT_EQ(emptyChanging.getPropertyNameProperty().value(), "");
+}
+
+TEST(PropertyNameNullability2405Tests, ANamedPropertyRoundTrips) {
+    const PropertyChangedEventArgs named(std::string("Count"));
+    ASSERT_TRUE(named.getPropertyNameProperty().has_value());
+    EXPECT_EQ(named.getPropertyNameProperty().value(), "Count");
+
+    const PropertyChangingEventArgs namedChanging(std::string("Item[]"));
+    ASSERT_TRUE(namedChanging.getPropertyNameProperty().has_value());
+    EXPECT_EQ(namedChanging.getPropertyNameProperty().value(), "Item[]");
+}
+
+// There is exactly ONE representation now. A second one is what let the object contradict itself,
+// so the pin is on the size: `EventArgs` plus one `std::optional<std::string>` and nothing else.
+// A reinstated `std::string` field would grow both types and this is what would notice.
+TEST(PropertyNameNullability2405Tests, ThereIsOnlyOneRepresentationOfTheName) {
+    struct OneOptional : System::EventArgs { std::optional<std::string> only; };
+    EXPECT_EQ(sizeof(PropertyChangedEventArgs), sizeof(OneOptional));
+    EXPECT_EQ(sizeof(PropertyChangingEventArgs), sizeof(OneOptional));
 }
