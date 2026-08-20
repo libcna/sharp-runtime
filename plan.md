@@ -155,6 +155,44 @@ exactly, this batch's own tests, no regression**. Graph **41 / 92**, seams **3 /
 sole member is now remediated**; CCF-019 open; CCF-021/#2131 and CCF-022/#2109 unminted. Doxygen,
 `ccache` and `/rv` absent. Maximum compiler parallelism **2 jobs**.*
 
+## 2026-08-20 — #1943 (TimeSpan half): `TimeSpan` had no `ParseExact` in any spelling
+
+**Gate: 17,708 / 38, 0 failed, 0 skipped** (+8, `Core_Base` 6,118 → 6,126). Graph 41/95, catalogue
+regenerated.
+
+`TimeSpanStyles` existed in `modules/globalization` with **nothing able to consume it** — #1997
+A-3's shape. It moved into `Core.Base`: **#1940's shape C for the third time**, again with **not one
+`#include` line changed**.
+
+**The obvious implementation — reuse the date/time scanner — would be wrong in a way that passes
+most tests.** .NET keeps `TryParseByFormat` apart from `DateTimeParse`, and the token table shows
+why: **an unquoted literal is an ERROR here**, so `"hh:mm"` is *not* a valid `TimeSpan` format and
+the colon must be quoted or escaped — the date/time scanner *matches* an unquoted literal, so a
+shared scanner would silently **accept a format .NET rejects**. There is also **no sign token at
+all**; each component may appear once; **`d`'s digit rule is not the others'** (one specifier means
+1..8 digits, more means exactly that many — a uniform rule gets days wrong and passes every
+hour/minute/second row); and **`f` requires its digits where `F` does not**.
+
+So **`AssumeNegative` is the only route to a negative result** — `ParseExact("-01:30", "hh':'mm")`
+**fails** — which is what makes the style load-bearing rather than decorative. The standard formats
+ignore it, as .NET does. **Bounds are per component**, so `"25"` against `"hh"` fails rather than
+carrying into days.
+
+`c`/`t`/`T` implemented; **`g` and `G` pinned absent** — the *localized* formats, needing a culture
+decimal separator this port has no database for **and** optional components the custom scanner
+cannot express.
+
+Nine mutations, all caught. **Two were invalid as first written and reformulated rather than
+counted**: M2's anchor never matched the file (an absent anchor is a harness state, not a finding),
+M9's was rejected by `-Werror`.
+
+`docs/Migration-TimeSpanParseExact.md`. Downstream zero sites.
+
+**#1943 still has `DateTimeOffset::ParseExact`**, which needs a zone for the *no-offset* case.
+**An offset is not a time zone** — a format carrying an explicit offset would need none at all — so
+adding an offset token to the exact grammar is the route; it is recorded rather than taken because
+the default still needs #1942's answer.
+
 ## 2026-08-20 — #2415: the selective-component gate was red, and building into `/tmp`
 
 **Gate unchanged at 17,700 / 38** — no production code was touched. This repairs a *gate*, and the

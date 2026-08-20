@@ -6,6 +6,8 @@
 //
 
 #include "System/TimeSpan.hpp"
+#include "System/detail/ExactTimeSpanParser.hpp"
+#include "System/ArgumentException.hpp"
 
 #include <iomanip>
 
@@ -653,4 +655,92 @@ namespace System {
 
 
     TimeSpan operator*(double factor, const TimeSpan &timeSpan) { return timeSpan * factor; }
+
+// ---------------------------------------------------------------------------
+// ParseExact / TryParseExact -- ticket #1943
+// ---------------------------------------------------------------------------
+
+    namespace {
+
+        /**
+         * @brief .NET's `TimeSpanStyles` validation, transcribed.
+         *
+         * `AssumeNegative` is the only flag, so anything outside {0, 1} is undefined.
+         */
+        void validateTimeSpanStyles(System::Globalization::TimeSpanStyles styles) {
+            const int raw = static_cast<int>(styles);
+            if (raw != 0 && raw != 1) {
+                throw System::ArgumentException(
+                    "An undefined TimeSpanStyles value is being used.", "styles");
+            }
+        }
+
+    } // namespace
+
+    bool TimeSpan::TryParseExact(const std::string& input, const std::string& format,
+                                 TimeSpan& result) {
+        return TryParseExact(input, format, nullptr,
+                             System::Globalization::TimeSpanStyles::None, result);
+    }
+
+    bool TimeSpan::TryParseExact(const std::string& input, const std::string& format,
+                                 const System::IFormatProvider* provider,
+                                 System::Globalization::TimeSpanStyles styles, TimeSpan& result) {
+        // .NET raises here rather than returning false -- a Try* method that throws. Validation
+        // runs BEFORE the result is written, so a rejected style leaves the caller's variable
+        // untouched; that is two claims and both are asserted.
+        validateTimeSpanStyles(styles);
+        (void)provider;   // the grammar reads no culture-driven token; see the header on g/G
+
+        result = TimeSpan(static_cast<longcs>(0));
+
+        // An EMPTY format is a bad format specifier, not merely a mismatch -- .NET's
+        // `SetBadFormatSpecifierFailure` (TimeSpanParse.cs:1230-1233).
+        if (format.empty()) return false;
+
+        if (format.size() == 1) {
+            switch (format[0]) {
+                // `c`, `t` and `T` are the INVARIANT constant format, which is exactly what this
+                // port's general `TryParse` already accepts -- so they delegate rather than grow
+                // a second grammar for the same text. They also ignore `styles`, as .NET does:
+                // the constant format carries its own sign.
+                case 'c': case 't': case 'T':
+                    return TryParse(input, result);
+                // `g` and `G` are the LOCALIZED standard formats and are deliberately absent;
+                // the header records why. A one-character format that is not one of the five is
+                // a bad format specifier in either case.
+                default:
+                    return false;
+            }
+        }
+
+        detail::ExactTimeSpanFields fields;
+        if (!detail::MatchExactTimeSpanFormat(input, format, fields)) return false;
+
+        // The sign comes ENTIRELY from the style, because the custom grammar has no sign token.
+        const longcs sign =
+            (styles == System::Globalization::TimeSpanStyles::AssumeNegative) ? -1 : 1;
+
+        const longcs ticks =
+            sign * (static_cast<longcs>(fields.days)    * TicksPerDay +
+                    static_cast<longcs>(fields.hours)   * TicksPerHour +
+                    static_cast<longcs>(fields.minutes) * TicksPerMinute +
+                    static_cast<longcs>(fields.seconds) * TicksPerSecond +
+                    static_cast<longcs>(fields.fractionTicks));
+
+        result = TimeSpan(ticks);
+        return true;
+    }
+
+    TimeSpan TimeSpan::ParseExact(const std::string& input, const std::string& format,
+                                  const System::IFormatProvider* provider,
+                                  System::Globalization::TimeSpanStyles styles) {
+        TimeSpan result;
+        // The style is validated by TryParseExact below, which raises for an illegal one exactly
+        // as .NET's does; a PARSE failure is what becomes the FormatException here.
+        if (!TryParseExact(input, format, provider, styles, result))
+            throw FormatException("String was not recognized as a valid TimeSpan: " + input);
+        return result;
+    }
+
 }

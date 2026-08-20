@@ -67,7 +67,7 @@ for maintainers and are not part of the consumer include surface.
 | `Security` | `modules/security` | interface | `Core.Base` | — | — | — | `System/Security/Authentication/AuthenticationException.hpp` |
 | `Security.Cryptography` | `modules/security-cryptography` | static | `Core.Base` | — | — | — | `System/Security/Cryptography/AuthenticationTagMismatchException.hpp` |
 | `Security.Cryptography.Random` | `modules/security-cryptography-random` | static | `Core.Base` | — | — | `bcrypt` on Windows (private) | `System/Security/Cryptography/RNGCryptoServiceProvider.hpp` |
-| `Xml` | `modules/xml` | static | `Core.Base`, `Uri` | `Diagnostics`, `TimeZone` | `Xml.Linq` | vendored tinyxml2 (public) | `System/Xml/ConformanceLevel.hpp` |
+| `Xml` | `modules/xml` | static | `Core.Base`, `Uri` | `Diagnostics`, `TimeZone` | `TimeZone`, `Xml.Linq` | vendored tinyxml2 (public) | `System/Xml/ConformanceLevel.hpp` |
 | `Xml.Linq` | `modules/xml-linq` | static | `Core.Base`, `Xml` | — | — | — | `System/Xml/Linq/Extensions.hpp` |
 
 ## Compatibility components

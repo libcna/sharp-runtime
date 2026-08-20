@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "System/IFormatProvider.hpp"
+#include "System/Globalization/TimeSpanStyles.hpp"
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -448,6 +450,58 @@ namespace System {
 
         /** Tries to parse a TimeSpan string; returns false without throwing on failure. */
         static bool TryParse(const std::string& s, TimeSpan& result);
+
+        /**
+         * @brief Parses @p input against exactly @p format.
+         *
+         * C++ counterpart of .NET `TimeSpan.ParseExact(string, string, IFormatProvider,
+         * TimeSpanStyles)`, added by #1943.
+         *
+         * @note **THE CUSTOM GRAMMAR HAS NO SIGN TOKEN**, which is not an omission but .NET's
+         *       design: a negative result comes only from `TimeSpanStyles::AssumeNegative`. So
+         *       `ParseExact("-01:30", "hh':'mm")` **fails** -- the `-` matches nothing -- while
+         *       `ParseExact("01:30", "hh':'mm", nullptr, AssumeNegative)` is minus ninety minutes.
+         *
+         * @note **AN UNQUOTED LITERAL IS AN ERROR**, unlike in a `DateTime` exact format:
+         *       `"hh:mm"` is rejected and the colon must be written `"hh':'mm"` or `"hh\:mm"`.
+         *       .NET's `TryParseByFormat` ends its `switch` in `default: SetInvalidStringFailure`,
+         *       so this is the reference's rule rather than this port's strictness.
+         *
+         * @note **`g` AND `G` ARE DELIBERATELY NOT IMPLEMENTED AND ARE PINNED ABSENT.** They are
+         *       .NET's *localized* standard formats, and two things stop them here: they need a
+         *       culture's decimal separator, which this port has no database for (#2410's
+         *       boundary), and their grammars have **optional components** (`g` is
+         *       `[-][d':']h':'mm':'ss[.FFFFFFF]`) that the custom-format scanner cannot express --
+         *       each would need its own hand-written arm. `c`, `t` and `T` are implemented,
+         *       and they are the formats that round-trip `ToString()`.
+         *
+         * @param input The string to parse.
+         * @param format A standard specifier (`c`, `t`, `T`) or a custom format string.
+         * @param provider Reserved for parity; the grammar reads no culture-driven token.
+         * @param styles `AssumeNegative` to make the result negative.
+         * @throws System::FormatException if @p input does not match @p format.
+         * @throws System::ArgumentException if @p styles is not a defined value.
+         */
+        [[nodiscard]] static TimeSpan ParseExact(
+            const std::string& input, const std::string& format,
+            const System::IFormatProvider* provider = nullptr,
+            System::Globalization::TimeSpanStyles styles =
+                System::Globalization::TimeSpanStyles::None);
+
+        /**
+         * @brief Non-throwing counterpart of ParseExact.
+         *
+         * @note **AN ILLEGAL STYLE STILL THROWS**, which is .NET's own shape for a `Try*` method:
+         *       a parse *failure* returns false, but an invalid style is a programming error and
+         *       is raised. Validation runs BEFORE @p result is written.
+         */
+        static bool TryParseExact(const std::string& input, const std::string& format,
+                                  TimeSpan& result);
+
+        /** @brief Non-throwing counterpart of ParseExact, with a provider and styles. */
+        static bool TryParseExact(const std::string& input, const std::string& format,
+                                  const System::IFormatProvider* provider,
+                                  System::Globalization::TimeSpanStyles styles, TimeSpan& result);
 
     public:
         /** Unary minus: returns the negated TimeSpan. */

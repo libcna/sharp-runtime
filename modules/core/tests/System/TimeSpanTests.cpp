@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "System/Globalization/TimeSpanStyles.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
@@ -678,4 +679,162 @@ TEST(TimeSpanTests, Parse_MalformedInputsKeepFormatException_1836) {
               12 * TimeSpan::TicksPerHour + 34 * TimeSpan::TicksPerMinute +
               56 * TimeSpan::TicksPerSecond);
     EXPECT_THROW(TimeSpan::Parse(""), System::FormatException);
+}
+
+// ===========================================================================
+// #1943 -- TimeSpan::ParseExact, which the type did not have in any spelling
+// ===========================================================================
+
+TEST(TimeSpanParseExact1943Tests, TheCustomGrammarBindsEachComponentAtMostOnce) {
+    using System::TimeSpan;
+
+    EXPECT_EQ(TimeSpan::ParseExact("01:30", "hh':'mm"), TimeSpan::FromMinutes(90));
+    EXPECT_EQ(TimeSpan::ParseExact("3.04:05:06", "d'.'hh':'mm':'ss"),
+              TimeSpan::FromDays(3) + TimeSpan::FromHours(4) + TimeSpan::FromMinutes(5) +
+                  TimeSpan::FromSeconds(6));
+
+    // Each component may appear ONCE -- .NET tracks five `seen*` flags, and a format naming one
+    // twice is rejected rather than reading it twice.
+    TimeSpan unused;
+    EXPECT_FALSE(TimeSpan::TryParseExact("0101", "hhhh", unused));
+    EXPECT_FALSE(TimeSpan::TryParseExact("01:01", "hh':'hh", unused));
+}
+
+// THE ROW THAT SEPARATES THIS GRAMMAR FROM THE DATE/TIME ONE. .NET's `TryParseByFormat` ends its
+// switch in `default: SetInvalidStringFailure`, so an UNQUOTED literal is an ERROR here where the
+// date/time scanner would match it against the input. A shared scanner would silently accept
+// formats the reference rejects, which is why the two are separate files.
+TEST(TimeSpanParseExact1943Tests, AnUnquotedLiteralIsAnErrorNotACharacterToMatch) {
+    using System::TimeSpan;
+    TimeSpan unused;
+
+    EXPECT_FALSE(TimeSpan::TryParseExact("01:30", "hh:mm", unused));
+    // ...and both escape forms are accepted, so what is rejected is the SPELLING rather than the
+    // colon itself.
+    EXPECT_TRUE(TimeSpan::TryParseExact("01:30", "hh':'mm", unused));
+    EXPECT_TRUE(TimeSpan::TryParseExact("01:30", "hh\"" ":" "\"mm", unused));
+    EXPECT_TRUE(TimeSpan::TryParseExact("01:30", "hh\\:mm", unused));
+}
+
+// THE SIGN COMES ENTIRELY FROM THE STYLE, because the custom grammar has NO sign token -- no `-`
+// and no `+`. That is what makes TimeSpanStyles load-bearing rather than decorative, and it is
+// the property a reader most expects to be wrong.
+TEST(TimeSpanParseExact1943Tests, TheOnlyRouteToANegativeResultIsAssumeNegative) {
+    using System::TimeSpan;
+    using System::Globalization::TimeSpanStyles;
+    TimeSpan unused;
+
+    EXPECT_FALSE(TimeSpan::TryParseExact("-01:30", "hh':'mm", unused));
+    EXPECT_EQ(TimeSpan::ParseExact("01:30", "hh':'mm", nullptr, TimeSpanStyles::AssumeNegative),
+              TimeSpan::FromMinutes(-90));
+    EXPECT_EQ(TimeSpan::ParseExact("01:30", "hh':'mm", nullptr, TimeSpanStyles::None),
+              TimeSpan::FromMinutes(90));
+
+    // The STANDARD formats ignore the style, as .NET does -- the constant format carries its own
+    // sign, so AssumeNegative must not flip a value that already said what it was.
+    EXPECT_EQ(TimeSpan::ParseExact("-01:30:00", "c", nullptr, TimeSpanStyles::AssumeNegative),
+              TimeSpan::FromMinutes(-90));
+    EXPECT_EQ(TimeSpan::ParseExact("01:30:00", "c", nullptr, TimeSpanStyles::AssumeNegative),
+              TimeSpan::FromMinutes(90));
+}
+
+TEST(TimeSpanParseExact1943Tests, TheDigitWidthRulesAreNotUniformAcrossTokens) {
+    using System::TimeSpan;
+    TimeSpan unused;
+
+    // `hh` is EXACTLY two digits; `h` exactly one.
+    EXPECT_TRUE(TimeSpan::TryParseExact("01", "hh", unused));
+    EXPECT_FALSE(TimeSpan::TryParseExact("1", "hh", unused));
+    EXPECT_FALSE(TimeSpan::TryParseExact("01", "%h", unused));
+
+    // `d` is the exception and its rule is NOT the others': one specifier means 1..8 digits,
+    // more than one means exactly that many. A scanner written "exactly tokenLen" everywhere
+    // gets days wrong and passes every hour/minute/second row.
+    EXPECT_EQ(TimeSpan::ParseExact("7", "%d"), TimeSpan::FromDays(7));
+    EXPECT_EQ(TimeSpan::ParseExact("1234567", "%d"), TimeSpan::FromDays(1234567));
+    EXPECT_TRUE(TimeSpan::TryParseExact("0007", "dddd", unused));
+    EXPECT_FALSE(TimeSpan::TryParseExact("7", "dddd", unused));
+
+    // `f` REQUIRES its digits where `F` makes them optional. .NET calls the same reader for both
+    // and ignores the result for `F`, so the pair differs by one discarded return value.
+    EXPECT_TRUE(TimeSpan::TryParseExact("01:30.5", "hh':'mm'.'f", unused));
+    EXPECT_FALSE(TimeSpan::TryParseExact("01:30.", "hh':'mm'.'f", unused));
+    EXPECT_TRUE(TimeSpan::TryParseExact("01:30.", "hh':'mm'.'F", unused));
+
+    // ...and the fraction scales by its WIDTH, so the same digit means different things.
+    EXPECT_EQ(TimeSpan::ParseExact("5", "%f").getTicksProperty(), 5000000);
+    EXPECT_EQ(TimeSpan::ParseExact("0000005", "fffffff").getTicksProperty(), 5);
+}
+
+TEST(TimeSpanParseExact1943Tests, TheBoundsArePerComponentRatherThanTotal) {
+    using System::TimeSpan;
+    TimeSpan unused;
+
+    // .NET's own constants: days <= 10675199, hours <= 23, minutes <= 59, seconds <= 59. They
+    // bound each COMPONENT, so "25" against "hh" FAILS rather than carrying into days -- which is
+    // the reading a total-range check would give.
+    EXPECT_TRUE(TimeSpan::TryParseExact("23", "hh", unused));
+    EXPECT_FALSE(TimeSpan::TryParseExact("24", "hh", unused));
+    EXPECT_FALSE(TimeSpan::TryParseExact("25", "hh", unused));
+    EXPECT_TRUE(TimeSpan::TryParseExact("59", "mm", unused));
+    EXPECT_FALSE(TimeSpan::TryParseExact("60", "mm", unused));
+    EXPECT_TRUE(TimeSpan::TryParseExact("59", "ss", unused));
+    EXPECT_FALSE(TimeSpan::TryParseExact("60", "ss", unused));
+    EXPECT_TRUE(TimeSpan::TryParseExact("10675199", "dddddddd", unused));
+
+    // The input must be consumed ENTIRELY -- .NET's `tokenizer.EOL`.
+    EXPECT_FALSE(TimeSpan::TryParseExact("01:30junk", "hh':'mm", unused));
+}
+
+TEST(TimeSpanParseExact1943Tests, StandardSpecifiersAndTheOnesThatAreDeliberatelyAbsent) {
+    using System::TimeSpan;
+    TimeSpan unused;
+
+    // `c`, `t` and `T` are one format under three names, and all three must work -- a switch
+    // handling only `c` passes every round-trip test written with ToString().
+    for (const char* f : {"c", "t", "T"}) {
+        EXPECT_TRUE(TimeSpan::TryParseExact("01:30:00", f, unused)) << f;
+        EXPECT_EQ(unused, TimeSpan::FromMinutes(90)) << f;
+    }
+
+    // `g` and `G` are the LOCALIZED standard formats and are pinned ABSENT: they need a culture's
+    // decimal separator this port has no database for, and their grammars have OPTIONAL
+    // components the custom scanner cannot express. A later ticket adding them trips this.
+    EXPECT_FALSE(TimeSpan::TryParseExact("01:30:00", "g", unused));
+    EXPECT_FALSE(TimeSpan::TryParseExact("0:01:30:00.0000000", "G", unused));
+
+    // Any other single character is a bad format specifier, and so is an empty format.
+    EXPECT_FALSE(TimeSpan::TryParseExact("01:30:00", "x", unused));
+    EXPECT_FALSE(TimeSpan::TryParseExact("01:30:00", "", unused));
+    EXPECT_THROW(TimeSpan::ParseExact("01:30:00", ""), System::FormatException);
+}
+
+// A Try* METHOD THAT THROWS, which is .NET's own shape: a parse failure returns false, but an
+// illegal STYLE is a programming error and is raised. Validation runs BEFORE the result is
+// written, and that is a second claim needing its own assertion.
+TEST(TimeSpanParseExact1943Tests, AnIllegalStyleThrowsAndLeavesTheOutParameterAlone) {
+    using System::TimeSpan;
+    using System::Globalization::TimeSpanStyles;
+
+    TimeSpan sentinel = TimeSpan::FromHours(7);
+    const auto bogus = static_cast<TimeSpanStyles>(99);
+
+    EXPECT_THROW(TimeSpan::TryParseExact("01:30", "hh':'mm", nullptr, bogus, sentinel),
+                 System::ArgumentException);
+    EXPECT_EQ(sentinel, TimeSpan::FromHours(7));
+
+    EXPECT_THROW(TimeSpan::ParseExact("01:30", "hh':'mm", nullptr, bogus),
+                 System::ArgumentException);
+}
+
+// The `%` and `\` escapes have edge cases .NET rejects explicitly, and both are the kind an
+// `i + 1 < size()` guard alone gets wrong in one direction.
+TEST(TimeSpanParseExact1943Tests, TheEscapeEdgeCasesAreRejectedAsDotNetRejectsThem) {
+    using System::TimeSpan;
+    TimeSpan unused;
+
+    EXPECT_FALSE(TimeSpan::TryParseExact("1", "%%", unused));      // "%%" is an error
+    EXPECT_FALSE(TimeSpan::TryParseExact("1", "%", unused));       // trailing '%' is an error
+    EXPECT_FALSE(TimeSpan::TryParseExact("1", "hh\\", unused));    // trailing '\' is an error
+    EXPECT_FALSE(TimeSpan::TryParseExact("01:30", "hh':'mm'", unused));  // unterminated quote
 }
