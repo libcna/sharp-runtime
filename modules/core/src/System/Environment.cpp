@@ -83,7 +83,10 @@ namespace {
         // getenv("") is unspecified by POSIX. Real .NET returns null for an empty name, which
         // this runtime represents as an unsuccessful lookup and an empty public return value.
         if (name.empty()) return false;
-#if defined(_WIN32)
+// _dupenv_s is an MSVC CRT extension. MinGW-w64 targets Windows but does not export it, so
+// `defined(_WIN32)` selects a branch that cannot link there -- a CNA D3D11 cross-build fails with
+// "undefined reference to `__imp__dupenv_s'". getenv is the correct fallback for that toolchain.
+#if defined(_MSC_VER)
         char* rawValue = nullptr;
         std::size_t valueLength = 0;
         if (_dupenv_s(&rawValue, &valueLength, name.c_str()) != 0 || rawValue == nullptr) {
