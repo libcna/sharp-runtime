@@ -3,12 +3,17 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-22 — 17,778 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,778 run: 17,778 passed, 0 failed, 0 skipped**, zero build warnings
-> at `--parallel 2` over a cache-disabled **clean** rebuild. Graph **41 / 95**, seams **5 / 22**,
+> **Test-count floor, 2026-08-22 — 17,781 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,781 run: 17,781 passed, 0 failed, 0 skipped**, zero build warnings
+> at `--parallel 2` over a cache-disabled full repository build. Graph **41 / 95**, seams **5 / 22**,
 > negative fixtures **55 / 284**.
 >
-> **+37** on the 17,741 below, all final-audit regressions: `Collections_Blocking` 8 → 10,
+> **+3** on the 17,778 final-reconciliation checkpoint: `Core_Base` 6,154 → 6,156 adds two
+> guarded Half/BFloat16 integral-conversion edge tests, and `Net_WebSockets` 107 → 108 adds the
+> zero-length receive-buffer regression. No other executable moved.
+>
+> The 17,778 checkpoint was **+37** on the 17,741 below, all final-audit regressions:
+> `Collections_Blocking` 8 → 10,
 > `Diagnostics` 232 → 233, `Globalization` 691 → 704, `IO` 697 → 700, `Net_Sockets` 132 → 137,
 > `Runtime` 204 → 207, `Security` 38 → 41, `Text_Json` 306 → 307 and `Timers` 38 → 44.
 > No executable lost a case. The audit is now **343 remediated, 19 accepted-deviation,
@@ -33,15 +38,15 @@
 >
 > ---
 >
-> ## THE FINAL RECONCILIATION IMPLEMENTATION IS COMPLETE; FINAL VERIFICATION IS ACTIVE
+> ## CURRENT-SCOPE CLOSE-OUT IS COMPLETE; MAINTENANCE MODE IS READY
 >
-> Measured 2026-08-22: `ticket` is **2,406 done, 1 doing (#2417), 0 todo, 3 blocked, 5 wontfix**,
-> and `task` is fully classified (**1,087 ported, 140 ignore, 14,980 ignored**). The implementation,
-> clean build and full 17,778-test gate are complete; #2417 remains `doing` only until the
-> sanitizer and complete local-CI evidence is recorded in the final checkpoint.
+> Measured 2026-08-22: `ticket` is **2,407 done, 0 doing, 0 todo, 3 blocked, 5 wontfix**, and
+> `task` is fully classified (**1,087 ported, 140 ignore, 14,980 ignored**). Ticket #2417 is done:
+> implementation, reconciliation, sanitizer verification and the complete local-CI gate are all
+> recorded. No actionable current-scope correctness or gate work remains in this checkout.
 >
-> **The three blocked tickets are not unfinished work; they are work this container lacks the means
-> to do**, and each was measured rather than assumed:
+> **The three blocked tickets are the only remaining planned work, and all three depend on external
+> prerequisites this container lacks**, as measured rather than assumed:
 >
 > * **#1773** and **#2381** wait on the `next` → `develop` merge. #2381 is the sharper of the two:
 >   `cna` builds against the **sibling checkout on `develop`**, where `DateTimeKind` does not exist
@@ -59,8 +64,12 @@
 > left as forgotten work. SR-AUD-071/071b now consistently records its repaired disposed getter
 > and accepted non-owning-view contract. The final diff review additionally closed residual
 > lifetime/order holes in `Socket`, `System::Timers::Timer` and parameterless
-> `Process::WaitForExit()`. The Doxygen 1.9.8 baseline remains 2,675 and runs in both local and
-> GitHub gates. `docs/AuditFindingsReconciliation.md` records every final disposition.
+> `Process::WaitForExit()`. The close-out sanitizer sweep then repaired defined float-to-integral
+> lowering for Half/BFloat16 and zero-byte WebSocket copies, plus two test-harness defects. Its
+> evidence is ASan+UBSan+LSan **12,793 tests across 22 relevant executables**, strict
+> `float-cast-overflow` UBSan **6,156 Core.Base tests**, and targeted TSan **57/57**. The Doxygen
+> 1.9.8 baseline remains 2,675 and runs in both local and GitHub gates.
+> `docs/AuditFindingsReconciliation.md` records every final disposition and the close-out gate.
 >
 > ---
 >

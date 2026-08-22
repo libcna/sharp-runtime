@@ -128,6 +128,25 @@ is now stated consistently in IMemoryOwner, MemoryPool, its migration note, and 
 
 ## Repository policy and external work
 
+The close-out sanitizer pass after the index reconciliation found two additional in-scope UB
+classes before ticket #2417 was closed. Half and BFloat16 integral conversions now avoid native
+out-of-range floating-to-integral casts while matching the current .NET runtime's unchecked
+lowering, and ClientWebSocket no longer passes null `vector::data()` pointers to zero-byte
+`memcpy`. Permanent regressions cover both. The same pass corrected a member-initialization-order
+bug in a diagnostics test helper, an owned-enumerator leak in a runtime test, and two socket tests
+whose immediate `Task::IsCompleted` assertion raced terminal-state publication even though the
+raw-`this` lifetime boundary had already been crossed; the Socket production boundary itself did
+not need widening.
+
+Final verification is reproducible from the repository gates: a cache-disabled two-job build was
+warning-free; all **17,781 tests across 38 executables** passed with no failure or skip; all ten
+selective components passed; and module, catalogue, audit, planning, inventory, Unicode, temporary
+path, seam, and negative-fixture checks passed. ASan+UBSan+LSan covered **12,793 relevant tests
+across 22 executables**, strict `float-cast-overflow` UBSan covered all **6,156 Core.Base tests**,
+and three repeated targeted TSan groups passed **57/57** without a report. The audit distribution
+remains 343/19/2 because these late defects were fixed before closure rather than hidden in a new
+open status.
+
 The checked Doxygen ceiling remains 2,675 warnings and runs in both GitHub CI and
 `scripts/local_ci_check.sh`; this reconciliation does not re-baseline historical
 warnings upward. Audit/index consistency is now a local gate as well.

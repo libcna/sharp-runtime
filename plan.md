@@ -1,26 +1,27 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-22 — branch **`next`**. Gate **17,778 across 38 executables: 17,778
+*Last verified: 2026-08-22 — branch **`next`**. Gate **17,781 across 38 executables: 17,781
 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs with every executable
-run separately and continuing past failures, zero build warnings over a cache-disabled clean build
+run separately and continuing past failures, zero build warnings over a cache-disabled full build
 at `--parallel 2`. Graph **41 / 95**, seams **5 / 22**, negative fixtures **55 / 284**. Final
-sanitizer/local-CI recording remains active under #2417; no implementation item remains open.*
+sanitizers and the complete local-CI gate passed under #2417; no current-scope implementation or
+gate item remains open.*
 
-## Status: implementation complete; final verification active
+## Status: current scope complete; maintenance mode ready
 
 Measured 2026-08-22, not estimated:
 
 | | |
 |---|---|
-| `ticket` done | **2,406** |
-| `ticket` doing | **1** — #2417 final gate/recording |
+| `ticket` done | **2,407** |
+| `ticket` doing | **0** |
 | `ticket` **todo** | **0** |
 | `ticket` blocked | 3 |
 | `ticket` wontfix | 5 |
 | `task` | fully classified — 1,087 ported, 140 ignore, 14,980 ignored |
 
-**The three blocked tickets are not unfinished work; they are work this container lacks the means to
-do.** Each was measured rather than assumed:
+**The three blocked tickets are the only remaining planned work, and all three depend on external
+prerequisites this container lacks.** Each was measured rather than assumed:
 
 * **#1773** and **#2381** wait on the `next` → `develop` merge. #2381 is the sharper: `cna` builds
   against the **sibling checkout on `develop`**, where `DateTimeKind` does not exist at all, so the
@@ -28,6 +29,14 @@ do.** Each was measured rather than assumed:
 * **#1962** needs a raw ICMP socket, hence `CAP_NET_RAW`, which this container does not have.
 
 The five `wontfix` entries are recorded decisions with their reasons.
+
+Ticket #2417's final evidence is a warning-free full build; **17,781/17,781** tests across 38
+executables; all ten selective component configurations; Doxygen **2,675/2,675**; graph 41/95;
+seams 5/22; and negative fixtures 55/284. The relevant sanitizer sweep passed **12,793** tests
+across 22 ASan+UBSan+LSan executables, all **6,156** Core.Base tests with strict
+`float-cast-overflow` UBSan, and **57/57** repeated targeted TSan cases. The sweep repaired
+Half/BFloat16 out-of-range conversion UB, zero-byte WebSocket copy UB, and two test-harness
+defects before closure.
 
 ## 2026-08-22 — final audit reconciliation
 
