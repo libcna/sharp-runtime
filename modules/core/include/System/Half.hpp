@@ -33,7 +33,10 @@ namespace System {
      *     ported. `checked` conversion operators have no C++ language counterpart, and this
      *     runtime does not define the .NET `nint`, `nuint`, `decimal`, `Int128` or `UInt128`
      *     conversion surface here. The .NET-implicit byte/sbyte constructors are explicit in
-     *     C++ to avoid ambiguous integer conversions (ticket #2395).
+     *     C++ to avoid ambiguous integer conversions (ticket #2395). Integral destinations match
+     *     the current .NET runtime's unchecked lowering: NaN becomes zero, 32/64-bit destinations
+     *     saturate, and 8/16-bit destinations narrow the saturated int32 result. Direct C++
+     *     floating-to-integral casts would otherwise have undefined behavior at those edges.
      *   - The `System.MathF`-mirroring static surface supported by this runtime is ported by
      *     widening to `float` and narrowing back to Half (ticket #2384).
      *   - Generic math interface conformance (INumber&lt;Half&gt;, IFloatingPointIeee754&lt;Half&gt;,
@@ -228,24 +231,24 @@ namespace System {
         explicit Half(double value) noexcept : Half(FromDouble(value)) {}
 
         /** @brief Converts to `char16_t`, truncating toward zero. .NET: `explicit operator char(Half)`. */
-        explicit operator SharpRuntime::charcs()  const noexcept { return static_cast<SharpRuntime::charcs>(ToSingle()); }
+        explicit operator SharpRuntime::charcs()  const noexcept { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::charcs>(ToSingle()); }
         /** @brief Converts to an 8-bit unsigned value, truncating toward zero. */
-        explicit operator SharpRuntime::bytecs()  const noexcept { return static_cast<SharpRuntime::bytecs>(ToSingle()); }
+        explicit operator SharpRuntime::bytecs()  const noexcept { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::bytecs>(ToSingle()); }
         /** @brief Converts to an 8-bit signed value, truncating toward zero. */
-        explicit operator SharpRuntime::sbytecs() const noexcept { return static_cast<SharpRuntime::sbytecs>(ToSingle()); }
+        explicit operator SharpRuntime::sbytecs() const noexcept { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::sbytecs>(ToSingle()); }
         /** @brief Converts to a 16-bit signed value, truncating toward zero. */
-        explicit operator SharpRuntime::shortcs() const noexcept { return static_cast<SharpRuntime::shortcs>(ToSingle()); }
+        explicit operator SharpRuntime::shortcs() const noexcept { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::shortcs>(ToSingle()); }
         /** @brief Converts to a 16-bit unsigned value, truncating toward zero. */
-        explicit operator SharpRuntime::ushortcs() const noexcept { return static_cast<SharpRuntime::ushortcs>(ToSingle()); }
+        explicit operator SharpRuntime::ushortcs() const noexcept { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::ushortcs>(ToSingle()); }
         /** @brief Converts to a 32-bit signed value, truncating toward zero. */
-        explicit operator SharpRuntime::intcs()   const noexcept { return static_cast<SharpRuntime::intcs>(ToSingle()); }
+        explicit operator SharpRuntime::intcs()   const noexcept { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::intcs>(ToSingle()); }
         /** @brief Converts to a 32-bit unsigned value, truncating toward zero. */
-        explicit operator SharpRuntime::uintcs()  const noexcept { return static_cast<SharpRuntime::uintcs>(ToSingle()); }
+        explicit operator SharpRuntime::uintcs()  const noexcept { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::uintcs>(ToSingle()); }
         /** @brief Converts to a 64-bit signed value, truncating toward zero. Also serves .NET's
          *  `nint` conversion, which is the same C++ type here. */
-        explicit operator SharpRuntime::longcs()  const noexcept { return static_cast<SharpRuntime::longcs>(ToSingle()); }
+        explicit operator SharpRuntime::longcs()  const noexcept { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::longcs>(ToSingle()); }
         /** @brief Converts to a 64-bit unsigned value, truncating toward zero. Also serves `nuint`. */
-        explicit operator SharpRuntime::ulongcs() const noexcept { return static_cast<SharpRuntime::ulongcs>(ToSingle()); }
+        explicit operator SharpRuntime::ulongcs() const noexcept { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::ulongcs>(ToSingle()); }
 
         explicit operator float() const noexcept { return ToSingle(); }
         /** @brief Explicit conversion to a 64-bit double. */

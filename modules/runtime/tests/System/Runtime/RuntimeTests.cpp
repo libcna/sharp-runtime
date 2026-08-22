@@ -961,7 +961,8 @@ TEST(ConditionalWeakTableTests, ScalarKeys_UseControlBlockIdentityNotValueEquali
 TEST(ConditionalWeakTableTests, ScalarKeys_StillExpireWhenTheLastOwnerDrops) {
     // weak_ptr<int> has the expiry semantics the table depends on, which is the substantive
     // claim behind refusing to adopt the managed constraint.
-    ConditionalWeakTable<int, int> table;
+    using ScalarTable = ConditionalWeakTable<int, int>;
+    ScalarTable table;
     {
         auto key = std::make_shared<int>(5);
         table.Add(key, std::make_shared<int>(99));
@@ -969,7 +970,8 @@ TEST(ConditionalWeakTableTests, ScalarKeys_StillExpireWhenTheLastOwnerDrops) {
         ASSERT_TRUE(table.TryGetValue(key, actual));
     }
     int enumerated = 0;
-    auto e = table.GetEnumerator();
+    std::unique_ptr<System::Collections::Generic::IEnumerator<ScalarTable::Pair>>
+        e(table.GetEnumerator());
     while (e->MoveNext()) ++enumerated;
     EXPECT_EQ(enumerated, 0) << "an expired scalar key was still enumerated";
 }

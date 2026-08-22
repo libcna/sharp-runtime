@@ -36,7 +36,10 @@ using SharpRuntime::intcs;
  *   - Tickets #2382 and #2384 added the practical conversion and static-math surface: the
  *     integral and floating-point constructors/operators below, plus the `System::MathF`
  *     forwarding families. Those members intentionally widen through `float`, matching the
- *     representation and arithmetic model of this type.
+ *     representation and arithmetic model of this type. Integral destinations match the current
+ *     .NET runtime's unchecked lowering: NaN becomes zero, 32/64-bit destinations saturate, and
+ *     8/16-bit destinations narrow the saturated int32 result instead of entering C++'s undefined
+ *     floating-to-integral conversion.
  *   - Conversions whose source or destination has no direct sharp-runtime C++ counterpart
  *     (`Decimal`, `Int128`, `UInt128`, and C# `checked` conversion operators) remain absent.
  *   - Generic-math interface conformance is out of scope, consistent with this codebase's
@@ -236,23 +239,23 @@ public:
      */
     explicit BFloat16(double value) : bits_(fromFloat(static_cast<float>(value))) {}
 
-    explicit operator SharpRuntime::charcs()  const { return static_cast<SharpRuntime::charcs>(toFloat(bits_)); }
+    explicit operator SharpRuntime::charcs()  const { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::charcs>(toFloat(bits_)); }
     /** @brief Converts to an 8-bit unsigned value, truncating toward zero. */
-    explicit operator SharpRuntime::bytecs()  const { return static_cast<SharpRuntime::bytecs>(toFloat(bits_)); }
+    explicit operator SharpRuntime::bytecs()  const { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::bytecs>(toFloat(bits_)); }
     /** @brief Converts to an 8-bit signed value, truncating toward zero. */
-    explicit operator SharpRuntime::sbytecs() const { return static_cast<SharpRuntime::sbytecs>(toFloat(bits_)); }
+    explicit operator SharpRuntime::sbytecs() const { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::sbytecs>(toFloat(bits_)); }
     /** @brief Converts to a 16-bit signed value, truncating toward zero. */
-    explicit operator SharpRuntime::shortcs() const { return static_cast<SharpRuntime::shortcs>(toFloat(bits_)); }
+    explicit operator SharpRuntime::shortcs() const { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::shortcs>(toFloat(bits_)); }
     /** @brief Converts to a 16-bit unsigned value, truncating toward zero. */
-    explicit operator SharpRuntime::ushortcs() const { return static_cast<SharpRuntime::ushortcs>(toFloat(bits_)); }
+    explicit operator SharpRuntime::ushortcs() const { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::ushortcs>(toFloat(bits_)); }
     /** @brief Converts to a 32-bit signed value, truncating toward zero. */
-    explicit operator SharpRuntime::intcs()   const { return static_cast<SharpRuntime::intcs>(toFloat(bits_)); }
+    explicit operator SharpRuntime::intcs()   const { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::intcs>(toFloat(bits_)); }
     /** @brief Converts to a 32-bit unsigned value, truncating toward zero. */
-    explicit operator SharpRuntime::uintcs()  const { return static_cast<SharpRuntime::uintcs>(toFloat(bits_)); }
+    explicit operator SharpRuntime::uintcs()  const { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::uintcs>(toFloat(bits_)); }
     /** @brief Converts to a 64-bit signed value, truncating toward zero. Also serves `nint`. */
-    explicit operator SharpRuntime::longcs()  const { return static_cast<SharpRuntime::longcs>(toFloat(bits_)); }
+    explicit operator SharpRuntime::longcs()  const { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::longcs>(toFloat(bits_)); }
     /** @brief Converts to a 64-bit unsigned value, truncating toward zero. Also serves `nuint`. */
-    explicit operator SharpRuntime::ulongcs() const { return static_cast<SharpRuntime::ulongcs>(toFloat(bits_)); }
+    explicit operator SharpRuntime::ulongcs() const { return SharpRuntime::detail::uncheckedFloatToInteger<SharpRuntime::ulongcs>(toFloat(bits_)); }
 
     explicit operator float()  const { return toFloat(bits_); }
     /** Converts to double. */

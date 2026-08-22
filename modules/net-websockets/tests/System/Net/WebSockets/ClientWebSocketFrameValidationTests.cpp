@@ -343,6 +343,31 @@ TEST(ClientWebSocketFrameValidationTests, AZeroLengthDataFrameIsStillAccepted) {
         });
 }
 
+TEST(ClientWebSocketFrameValidationTests, ZeroLengthReceiveBufferPreservesTheWholeFrame) {
+    // UBSan found that all three zero-copy paths still called memcpy with data() == nullptr.
+    // C++ requires valid pointer arguments even when the count is zero. Exercise both the first
+    // frame and leftover paths with an actually empty vector, then prove neither call consumed
+    // data before the caller supplies storage.
+    RunAgainstServer(
+        [&](Socket& server) { server.Send(Frame(0x81, 0x02, "ok")); },
+        [&](ClientWebSocket& client) {
+            std::vector<bytecs> empty;
+            auto first = client.ReceiveAsync(empty, 0, 0).getResultProperty();
+            EXPECT_EQ(first.getCountProperty(), 0);
+            EXPECT_FALSE(first.getEndOfMessageProperty());
+
+            auto leftover = client.ReceiveAsync(empty, 0, 0).getResultProperty();
+            EXPECT_EQ(leftover.getCountProperty(), 0);
+            EXPECT_FALSE(leftover.getEndOfMessageProperty());
+
+            std::vector<bytecs> buffer(2);
+            auto completed = client.ReceiveAsync(buffer, 0, 2).getResultProperty();
+            EXPECT_EQ(completed.getCountProperty(), 2);
+            EXPECT_TRUE(completed.getEndOfMessageProperty());
+            EXPECT_EQ(std::string(buffer.begin(), buffer.end()), "ok");
+        });
+}
+
 // ===========================================================================
 // Truncation and EOF — the frame header must never be read past what arrived
 // ===========================================================================

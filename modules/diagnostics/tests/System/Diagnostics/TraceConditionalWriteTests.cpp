@@ -12,11 +12,11 @@ using System::Diagnostics::Trace;
 
 namespace {
 class CerrCapture final {
-    std::streambuf* previous_;
     std::ostringstream captured_;
+    std::streambuf* previous_;
 
 public:
-    CerrCapture() : previous_(std::cerr.rdbuf(captured_.rdbuf())) {}
+    CerrCapture() : captured_(), previous_(std::cerr.rdbuf(captured_.rdbuf())) {}
     ~CerrCapture() { std::cerr.rdbuf(previous_); }
 
     [[nodiscard]] std::string getCaptured() const { return captured_.str(); }

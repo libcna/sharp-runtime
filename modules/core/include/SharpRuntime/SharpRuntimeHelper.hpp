@@ -6,9 +6,11 @@
 
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <type_traits>
 
 /**
  * @brief Indicates whether the active compiler provides a native 16-byte @c __int128 type.
@@ -33,6 +35,47 @@
 
 namespace SharpRuntime
 {
+    namespace detail {
+        /**
+         * Converts a binary floating-point value to an integral type without entering C++'s
+         * undefined out-of-range floating-to-integral conversion. Finite in-range values truncate
+         * toward zero; NaN becomes zero; 32/64-bit destinations saturate. Matching .NET's current
+         * unchecked conversion lowering, 8/16-bit destinations first saturate to int32 and then
+         * narrow with integral modulo semantics.
+         * @tparam TInteger Integral destination type other than bool.
+        */
+        template<typename TInteger>
+        [[nodiscard]] TInteger uncheckedFloatToInteger(float value) noexcept {
+            static_assert(std::is_integral_v<TInteger> && !std::is_same_v<TInteger, bool>);
+
+            if constexpr (sizeof(TInteger) < sizeof(int32_t)) {
+                return static_cast<TInteger>(uncheckedFloatToInteger<int32_t>(value));
+            } else {
+                if (std::isnan(value)) return TInteger{0};
+
+                // Integral ranges end at an exact power of two. Expressing the upper-exclusive
+                // boundary directly avoids depending on how max() rounds when converted to float.
+                const float upperExclusive =
+                    std::ldexp(1.0f, std::numeric_limits<TInteger>::digits);
+
+                if constexpr (std::is_unsigned_v<TInteger>) {
+                    if (value <= 0.0f) return TInteger{0};
+                } else {
+                    const float lowerInclusive = -upperExclusive;
+                    if (value <= lowerInclusive) {
+                        return std::numeric_limits<TInteger>::lowest();
+                    }
+                }
+
+                if (value >= upperExclusive) {
+                    return std::numeric_limits<TInteger>::max();
+                }
+
+                return static_cast<TInteger>(value);
+            }
+        }
+    } // namespace detail
+
     /**
      * @brief 8-bit signed integer type compatible with C# @c sbyte.
      * Range: -128 to 127 (System.SByte)

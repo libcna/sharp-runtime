@@ -1114,7 +1114,11 @@ ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs c
         if (recvLeftoverPos_ < recvLeftover_.size()) {
             size_t remaining = recvLeftover_.size() - recvLeftoverPos_;
             size_t n = std::min(static_cast<size_t>(count), remaining);
-            std::memcpy(buffer.data() + offset, recvLeftover_.data() + recvLeftoverPos_, n);
+            // Even a zero-byte memcpy requires valid pointer arguments. An empty caller buffer
+            // legitimately has data() == nullptr, so leave both pointers untouched when n is 0.
+            if (n != 0) {
+                std::memcpy(buffer.data() + offset, recvLeftover_.data() + recvLeftoverPos_, n);
+            }
             recvLeftoverPos_ += n;
             bool drained = recvLeftoverPos_ == recvLeftover_.size();
             if (drained) {
@@ -1206,11 +1210,15 @@ ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs c
                     }
 
                     if (frame.payload.size() <= static_cast<size_t>(count)) {
-                        std::memcpy(buffer.data() + offset, frame.payload.data(), frame.payload.size());
+                        if (!frame.payload.empty()) {
+                            std::memcpy(buffer.data() + offset, frame.payload.data(), frame.payload.size());
+                        }
                         return WebSocketReceiveResult(static_cast<intcs>(frame.payload.size()), type, frame.fin);
                     }
 
-                    std::memcpy(buffer.data() + offset, frame.payload.data(), static_cast<size_t>(count));
+                    if (count != 0) {
+                        std::memcpy(buffer.data() + offset, frame.payload.data(), static_cast<size_t>(count));
+                    }
                     recvLeftover_.assign(frame.payload.begin() + count, frame.payload.end());
                     recvLeftoverPos_ = 0;
                     recvLeftoverType_ = type;

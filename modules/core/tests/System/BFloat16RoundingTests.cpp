@@ -17,6 +17,7 @@
 #include "System/ArithmeticException.hpp"
 #include "System/Half.hpp"
 #include <array>
+#include <limits>
 #include <string>
 #include <type_traits>
 #include "System/FormatException.hpp"
@@ -36,6 +37,57 @@ namespace {
 
     std::uint16_t convert(std::uint32_t floatBits) {
         return BFloat16(asFloat(floatBits)).getBitsProperty();
+    }
+
+    template<typename TInteger, typename TFloat16>
+    void expectDefinedIntegralEdges(TFloat16 nan, TFloat16 positiveInfinity,
+                                    TFloat16 negativeInfinity, TFloat16 finiteMaximum,
+                                    TFloat16 finiteMinimum) {
+        EXPECT_EQ(static_cast<TInteger>(nan), TInteger{0});
+        const TInteger expectedPositive = [] {
+            if constexpr (sizeof(TInteger) < sizeof(SharpRuntime::intcs)) {
+                return static_cast<TInteger>(std::numeric_limits<SharpRuntime::intcs>::max());
+            }
+            return std::numeric_limits<TInteger>::max();
+        }();
+        EXPECT_EQ(static_cast<TInteger>(positiveInfinity), expectedPositive);
+
+        const TInteger expectedNegative = [] {
+            if constexpr (sizeof(TInteger) < sizeof(SharpRuntime::intcs)) {
+                return static_cast<TInteger>(std::numeric_limits<SharpRuntime::intcs>::lowest());
+            } else if constexpr (std::is_unsigned_v<TInteger>) {
+                return TInteger{0};
+            } else {
+                return std::numeric_limits<TInteger>::lowest();
+            }
+        }();
+        EXPECT_EQ(static_cast<TInteger>(negativeInfinity), expectedNegative);
+        EXPECT_EQ(static_cast<TInteger>(finiteMaximum), expectedPositive);
+        EXPECT_EQ(static_cast<TInteger>(finiteMinimum), expectedNegative);
+    }
+
+    template<typename TFloat16>
+    void expectEveryIntegralEdge(TFloat16 nan, TFloat16 positiveInfinity,
+                                 TFloat16 negativeInfinity, TFloat16 finiteMaximum,
+                                 TFloat16 finiteMinimum) {
+        expectDefinedIntegralEdges<SharpRuntime::charcs>(
+            nan, positiveInfinity, negativeInfinity, finiteMaximum, finiteMinimum);
+        expectDefinedIntegralEdges<SharpRuntime::bytecs>(
+            nan, positiveInfinity, negativeInfinity, finiteMaximum, finiteMinimum);
+        expectDefinedIntegralEdges<SharpRuntime::sbytecs>(
+            nan, positiveInfinity, negativeInfinity, finiteMaximum, finiteMinimum);
+        expectDefinedIntegralEdges<SharpRuntime::shortcs>(
+            nan, positiveInfinity, negativeInfinity, finiteMaximum, finiteMinimum);
+        expectDefinedIntegralEdges<SharpRuntime::ushortcs>(
+            nan, positiveInfinity, negativeInfinity, finiteMaximum, finiteMinimum);
+        expectDefinedIntegralEdges<SharpRuntime::intcs>(
+            nan, positiveInfinity, negativeInfinity, finiteMaximum, finiteMinimum);
+        expectDefinedIntegralEdges<SharpRuntime::uintcs>(
+            nan, positiveInfinity, negativeInfinity, finiteMaximum, finiteMinimum);
+        expectDefinedIntegralEdges<SharpRuntime::longcs>(
+            nan, positiveInfinity, negativeInfinity, finiteMaximum, finiteMinimum);
+        expectDefinedIntegralEdges<SharpRuntime::ulongcs>(
+            nan, positiveInfinity, negativeInfinity, finiteMaximum, finiteMinimum);
     }
 
 } // namespace
@@ -889,6 +941,71 @@ TEST(Fix2384Unit3, EveryFromConversionTruncatesTowardZero) {
     // The float/double operators that predate this unit still work and are unaffected.
     EXPECT_FLOAT_EQ(static_cast<float>(h), 3.75f);
     EXPECT_DOUBLE_EQ(static_cast<double>(h), 3.75);
+}
+
+TEST(FixFinalAuditSanitizer, HalfIntegralConversionsHaveDefinedSpecialValueEdges) {
+    // A native float-to-integer cast is undefined for NaN and out-of-range values. Half exposes
+    // all of those inputs, so every public integral destination must take the guarded path.
+    // Use infinities as the finite edge witnesses too: Half::MaxValue fits int32/int64 and would
+    // not exercise their upper guard.
+    expectEveryIntegralEdge(System::Half::NaN,
+                            System::Half::PositiveInfinity,
+                            System::Half::NegativeInfinity,
+                            System::Half::PositiveInfinity,
+                            System::Half::NegativeInfinity);
+
+    // .NET's current unchecked lowering saturates to int32 before narrowing small targets. These
+    // ordinary finite witnesses distinguish that policy from direct destination saturation.
+    EXPECT_EQ(static_cast<SharpRuntime::bytecs>(System::Half::FromSingle(-1.0f)), 255);
+    EXPECT_EQ(static_cast<SharpRuntime::bytecs>(System::Half::FromSingle(256.0f)), 0);
+    EXPECT_EQ(static_cast<SharpRuntime::sbytecs>(System::Half::FromSingle(128.0f)), -128);
+    EXPECT_EQ(static_cast<SharpRuntime::shortcs>(System::Half::FromSingle(32768.0f)), -32768);
+    EXPECT_EQ(static_cast<SharpRuntime::ushortcs>(System::Half::FromSingle(-1.0f)), 65535);
+    EXPECT_EQ(static_cast<SharpRuntime::charcs>(System::Half::FromSingle(-1.0f)), 65535);
+    EXPECT_EQ(static_cast<SharpRuntime::intcs>(System::Half::FromBits(0x7D01u)), 0)
+        << "a positive signalling NaN also maps to zero";
+}
+
+TEST(FixFinalAuditSanitizer, BFloat16IntegralConversionsHaveDefinedFiniteAndSpecialEdges) {
+    // BFloat16 has float32's exponent range, so its largest finite magnitudes also exceed every
+    // supported integral destination. This distinguishes finite clamping from an infinity-only
+    // special case and makes all nine operator bodies visible to -fsanitize=float-cast-overflow.
+    expectEveryIntegralEdge(BFloat16::NaN(),
+                            BFloat16::PositiveInfinity(),
+                            BFloat16::NegativeInfinity(),
+                            BFloat16::MaxValue(),
+                            BFloat16::MinValue());
+
+    // Exact upper-exclusive powers must clamp, while the adjacent BFloat16 below each boundary
+    // must still convert to its own value. Together these catch both a `>=` -> `>` mutation and a
+    // guard that clamps one representable value too early.
+    EXPECT_EQ(static_cast<SharpRuntime::longcs>(BFloat16::FromBits(0x5F00u)),
+              std::numeric_limits<SharpRuntime::longcs>::max());       // 2^63
+    EXPECT_EQ(static_cast<SharpRuntime::longcs>(BFloat16::FromBits(0x5EFFu)),
+              std::numeric_limits<SharpRuntime::longcs>::max() -
+                  ((SharpRuntime::longcs{1} << 55) - 1));              // 2^63 - 2^55
+    EXPECT_EQ(static_cast<SharpRuntime::ulongcs>(BFloat16::FromBits(0x5F80u)),
+              std::numeric_limits<SharpRuntime::ulongcs>::max());      // 2^64
+    EXPECT_EQ(static_cast<SharpRuntime::ulongcs>(BFloat16::FromBits(0x5F7Fu)),
+              std::numeric_limits<SharpRuntime::ulongcs>::max() -
+                  ((SharpRuntime::ulongcs{1} << 56) - 1));             // 2^64 - 2^56
+
+    EXPECT_EQ(static_cast<SharpRuntime::intcs>(BFloat16::FromBits(0x4F00u)),
+              std::numeric_limits<SharpRuntime::intcs>::max());        // 2^31
+    EXPECT_EQ(static_cast<SharpRuntime::intcs>(BFloat16::FromBits(0x4EFFu)),
+              std::numeric_limits<SharpRuntime::intcs>::max() -
+                  ((SharpRuntime::intcs{1} << 23) - 1));               // 2^31 - 2^23
+    EXPECT_EQ(static_cast<SharpRuntime::intcs>(BFloat16::FromBits(0xCF00u)),
+              std::numeric_limits<SharpRuntime::intcs>::lowest());     // -2^31
+    EXPECT_EQ(static_cast<SharpRuntime::intcs>(BFloat16::FromBits(0xCF01u)),
+              std::numeric_limits<SharpRuntime::intcs>::lowest());     // below -2^31
+    EXPECT_EQ(static_cast<SharpRuntime::uintcs>(BFloat16::FromBits(0x4F80u)),
+              std::numeric_limits<SharpRuntime::uintcs>::max());       // 2^32
+    EXPECT_EQ(static_cast<SharpRuntime::uintcs>(BFloat16::FromBits(0x4F7Fu)),
+              std::numeric_limits<SharpRuntime::uintcs>::max() -
+                  ((SharpRuntime::uintcs{1} << 24) - 1));              // 2^32 - 2^24
+    EXPECT_EQ(static_cast<SharpRuntime::intcs>(BFloat16::FromBits(0x7F81u)), 0)
+        << "a positive signalling NaN also maps to zero";
 }
 
 TEST(Fix2384Unit3, EveryFromConversionIsExplicit) {
