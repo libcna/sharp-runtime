@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <limits>
 #include <thread>
 #include <utility>
 
@@ -402,8 +403,9 @@ namespace System {
             // BCRYPT_USE_SYSTEM_PREFERRED_RNG needs no algorithm handle, which
             // is what lets this stay a leaf call with no initialisation state.
             while (length > 0) {
-                const ULONG chunk =
-                    static_cast<ULONG>(length > 0xFFFFFFFFull ? 0xFFFFFFFFull : length);
+                constexpr std::size_t maxChunk =
+                    static_cast<std::size_t>(std::numeric_limits<ULONG>::max());
+                const ULONG chunk = static_cast<ULONG>(std::min(length, maxChunk));
                 if (BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(buffer), chunk,
                                     BCRYPT_USE_SYSTEM_PREFERRED_RNG) >= 0) {
                     buffer += chunk;
