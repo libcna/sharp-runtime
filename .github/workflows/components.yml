@@ -55,7 +55,10 @@ jobs:
       # current hosted-runner image ships with an empty ping_group_range, which
       # makes every loopback Ping test fail before the request is sent.
       - run: sudo sysctl --write net.ipv4.ping_group_range='0 2147483647'
-      - run: scripts/local_ci_check.sh build
+      # local_ci_check includes the production-only Clang -Werror build before its full GCC
+      # build/tests, so ticket #37's two-compiler warning contract is exercised on every run.
+      - name: Full GCC tests and Clang production warnings
+        run: scripts/local_ci_check.sh build
 
   documentation:
     name: Doxygen warning baseline

@@ -52,6 +52,15 @@ python3 test/parse_gtest_summary_test.py
 echo "==> Validating repository-local temporary paths"
 python3 test/temporary_path_policy_test.py
 
+echo "==> Validating the Clang production warning gate"
+python3 test/check_clang_production_build_test.py
+
+# Ticket #37 established -Werror as a GCC/Clang contract, but the ordinary Linux build below
+# uses the configured/default GCC. Compile the complete production graph without tests so a
+# Clang-only diagnostic cannot survive behind that otherwise-green GCC gate.
+echo "==> Checking Clang production warnings"
+scripts/check_clang_production_build.sh
+
 echo "==> Validating test-only access seams (ticket #1800)"
 python3 scripts/check_version_seam_odr.py
 python3 test/check_version_seam_odr_test.py
