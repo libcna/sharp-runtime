@@ -10,16 +10,14 @@
 
 1. **Zero errors, zero warnings** before any commit. `cmake --build build --parallel 2` must be clean.
 2. **No test-count regression.** `scripts/run_component_tests.sh build` must show no failures or
-   skips. The current verified baseline is **17,781 tests across 38 executables with THE GATE
-   GREEN** — 17,781 run, 17,781 passed, 0 failed, 0 skipped, measured on 2026-08-22 by final audit
-   ticket #2417 after a cache-disabled full repository build at two jobs and the complete local CI
-   gate.
-   It is +3 on 17,778: Core.Base gained two guarded Half/BFloat16 integral-conversion regressions
-   and Net.WebSockets gained one zero-length receive-buffer regression. The preceding audit
-   reconciliation was +37 on 17,741, distributed exactly across Collections.Blocking (+2),
-   Diagnostics (+1), Globalization (+13), IO (+3), Net.Sockets (+5), Runtime (+3), Security (+3),
-   Text.Json (+1), and Timers (+6). Graph 41 / 95, test-only seams 5 / 22, negative fixtures
-   55 / 284. The Doxygen 1.9.8 no-regression baseline is 2,675 and is enforced both locally and in
+   skips. The current verified baseline is **17,840 tests across 38 executables with THE GATE
+   GREEN** — 17,840 run, 17,840 passed, 0 failed, 0 skipped, measured on 2026-08-22 by post-#1941
+   consumer-audit ticket #2418 after a cache-disabled full repository build at two jobs and the
+   complete local CI gate.
+   It is +59 on #2417's 17,781 final-audit closure: Core.Base +22, Globalization +1, IO +5,
+   Net +6, Net.Http.Headers +2, TimeZone +18, and Xml +5; all other executables are unchanged.
+   Graph 41 / 96, test-only seams 5 / 22, negative fixtures 55 / 284. The Doxygen 1.9.8
+   no-regression baseline is 2,675 and is enforced both locally and in
    CI.
 
 <details><summary>Historical test-count ledger retained verbatim</summary>

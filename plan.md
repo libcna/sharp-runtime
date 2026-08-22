@@ -1,29 +1,29 @@
 # Sharp Runtime plan
 
-*Last verified gate: 2026-08-22 — branch **`next`**. Gate **17,781 across 38 executables: 17,781
+*Last verified gate: 2026-08-22 — branch **`next`**. Gate **17,840 across 38 executables: 17,840
 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs with every executable
 run separately and continuing past failures, zero build warnings over a cache-disabled full build
-at `--parallel 2`. Graph **41 / 95**, seams **5 / 22**, negative fixtures **55 / 284**. A later
-post-#1941 reproduction found a bounded `DateTimeKind` propagation gap; #2418 is active and the
-maintenance-ready claim is suspended until its implementation and full gate complete.*
+at `--parallel 2`. Graph **41 / 96**, seams **5 / 22**, negative fixtures **55 / 284**. Ticket
+#2418 closed the bounded post-#1941 `DateTimeKind` propagation gap, and no actionable internal
+correctness work remains inside the declared practical subset.*
 
-## Status: one current-scope correctness workstream active (#2418)
+## Status: maintenance-ready for the declared scope
 
 Measured 2026-08-22, not estimated:
 
 | | |
 |---|---|
-| `ticket` done | **2,407** |
-| `ticket` doing | **1** |
+| `ticket` done | **2,408** |
+| `ticket` doing | **0** |
 | `ticket` **todo** | **0** |
 | `ticket` blocked | 3 |
 | `ticket` wontfix | 5 |
 | `task` | fully classified — 1,087 ported, 140 ignore, 14,980 ignored |
 
-Ticket **#2418** is the only active internal work: finish the post-#1941 `DateTimeKind` ripple audit
-and repair verified propagation/validation defects in `DateTime`, `DateTimeOffset`, and
-`TimeZoneInfo`. The 364-row audit index remains fully dispositioned, but that historical closure
-does not hide newly discovered correctness work.
+Ticket **#2418** completed the post-#1941 `DateTimeKind` ripple audit and repaired the verified
+propagation/validation defects in `DateTime`, `DateTimeOffset`, `TimeZoneInfo`, `TimeZone`, and
+their bounded consumers. The 364-row audit index remains fully dispositioned as historical audit
+truth; #2418 is a later correctness ticket and does not alter its distribution.
 
 The other three incomplete tickets are externally blocked. Each was measured rather than assumed:
 
@@ -33,6 +33,14 @@ The other three incomplete tickets are externally blocked. Each was measured rat
 * **#1962** needs a raw ICMP socket, hence `CAP_NET_RAW`, which this container does not have.
 
 The five `wontfix` entries are recorded decisions with their reasons.
+
+Ticket #2418's final evidence is a warning-free cache-disabled full build; **17,840/17,840** tests
+across 38 executables; graph **41/96**; all ten selective component configurations; Doxygen
+**2,675/2,675**; and every repository consistency validator. ASan+UBSan+LSan and strict UBSan each
+passed **9,680 relevant tests across 9 executables**. TSan passed **7,488 tests across 5
+executables**, with the process-timezone concurrency regression repeated five times. The exact +59
+test movement from #2417 is Core.Base +22, Globalization +1, IO +5, Net +6, Net.Http.Headers +2,
+TimeZone +18 and Xml +5; all other executables are unchanged.
 
 Ticket #2417's final evidence is a warning-free full build; **17,781/17,781** tests across 38
 executables; all ten selective component configurations; Doxygen **2,675/2,675**; graph 41/95;
@@ -55,8 +63,9 @@ closed residual `Socket`, `Timer` and `Process::WaitForExit()` lifetime/order de
 ## What closed the queue
 
 The date/time chain rooted at **#1940** — #1940, #1941, #1942, #1943, #1944, #1945, #2409, #2410,
-#2412, #2414 — together with **#1997** (all four groups) and three findings made *while working on
-something else*: **#2415** (a gate red for a day behind a green test count, and building into
+#2412, #2414 and the final #2418 consumer ripple — together with **#1997** (all four groups),
+#2417's audit close-out and three findings made *while working on something else*: **#2415** (a
+gate red for a day behind a green test count, and building into
 `/tmp`), **#2416** (`DateTime::ToString` had no standard-format table, so the two halves of one type
 disagreed about what `o` means), and #1945's `RoundtripKind` limitation, found by one of my own
 tests failing.

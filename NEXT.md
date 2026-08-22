@@ -3,10 +3,16 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-22 — 17,781 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,781 run: 17,781 passed, 0 failed, 0 skipped**, zero build warnings
-> at `--parallel 2` over a cache-disabled full repository build. Graph **41 / 95**, seams **5 / 22**,
+> **Test-count floor, 2026-08-22 — 17,840 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,840 run: 17,840 passed, 0 failed, 0 skipped**, zero build warnings
+> at `--parallel 2` over a cache-disabled full repository build. Graph **41 / 96**, seams **5 / 22**,
 > negative fixtures **55 / 284**.
+>
+> **+59** on the 17,781 final-audit closure, all from #2418's post-`DateTimeKind` consumer audit:
+> `Core_Base` 6,156 → 6,178, `Globalization` 704 → 705, `IO` 700 → 705, `Net` 340 → 346,
+> `Net_Http_Headers` 434 → 436, `TimeZone` 190 → 208 and `Xml` 526 → 531. No executable lost a
+> case; all other counts are unchanged. The new private `Net` → `TimeZone` dependency moves the
+> graph from 41 / 95 to **41 / 96**.
 >
 > **+3** on the 17,778 final-reconciliation checkpoint: `Core_Base` 6,154 → 6,156 adds two
 > guarded Half/BFloat16 integral-conversion edge tests, and `Net_WebSockets` 107 → 108 adds the
@@ -38,15 +44,13 @@
 >
 > ---
 >
-> ## POST-#1941 DATETIMEKIND RIPPLE REPAIR IS ACTIVE (#2418)
+> ## MAINTENANCE-READY FOR THE DECLARED SCOPE — #2418 CLOSED
 >
-> Measured 2026-08-22: `ticket` is **2,407 done, 1 doing, 0 todo, 3 blocked, 5 wontfix**, and
+> Measured 2026-08-22: `ticket` is **2,408 done, 0 doing, 0 todo, 3 blocked, 5 wontfix**, and
 > `task` is fully classified (**1,087 ported, 140 ignore, 14,980 ignored**). Ticket #2417 remains a
-> truthful closure of the 364 historical audit findings, but an independent post-#1941 probe found
-> a bounded new correctness family: `DateTimeKind` is still lost or ignored by parts of
-> `DateTime`, `DateTimeOffset`, and `TimeZoneInfo`. #2418 owns the implementation, regression,
-> stale-premise cleanup, and full-gate re-verification. The maintenance-ready claim is suspended
-> until that ticket is done.
+> truthful closure of the 364 historical audit findings; #2418 separately closes the later
+> post-#1941 `DateTimeKind` ripple discovered outside that audit. A bounded final scan found no
+> remaining actionable correctness work inside the declared practical subset.
 >
 > The other three incomplete tickets depend on external prerequisites this container lacks, as
 > measured rather than assumed:
@@ -57,6 +61,22 @@
 > * **#1962** needs a raw ICMP socket, hence `CAP_NET_RAW`, which this container does not have.
 >
 > The five `wontfix` entries are recorded decisions with their reasons, not oversights.
+>
+> ## 2026-08-22 — #2418: post-#1941 `DateTimeKind` consumer audit
+>
+> The ripple audit repaired local `DateTime::Now`/`Today`, UTC `UnixEpoch`, Kind-preserving
+> arithmetic, the complete `DateTimeOffset` constructor/property/format matrix, `TimeZoneInfo`
+> conversion result Kinds and rule validation, per-date legacy `TimeZone` conversion, and the
+> affected IO, HTTP/cookie, XML, globalization, threading and timer consumers. It also removed
+> stale pre-Kind premises, made the canonical UTC zone safe before `main`, and tightened XSD
+> timezone suffixes to exactly `Z` or `+/-hh:mm`.
+>
+> The full gate is **17,840/17,840** across 38 executables. ASan+UBSan+LSan and strict UBSan each
+> pass **9,680 relevant tests across 9 executables**; TSan passes **7,488 tests across 5
+> executables**, with the process-timezone concurrency regression repeated five times. Doxygen
+> remains exactly **2,675/2,675**. The intentional `DateTimeOffset` current-offset-only model and
+> the existing no-TZif-rule `TimeZoneInfo` model are explicit practical-subset deviations, not
+> forgotten work.
 >
 > ## 2026-08-22 — final audit reconciliation
 >
@@ -78,9 +98,9 @@
 >
 > ## HOW THE LAST STRETCH WENT, AND WHAT IS WORTH CARRYING FORWARD
 >
-> The queue was emptied by the date/time chain rooted at **#1940**, plus three findings made **while
-> working on something else**. That second category is the one worth naming, because none of the
-> three was on any list:
+> The queue was emptied by the date/time chain rooted at **#1940**, the #2417 audit close-out and
+> #2418's post-feature ripple audit, plus three findings made **while working on something else**.
+> That last category is worth naming, because none of the three was on any list:
 >
 > * **#2415 — a gate had been RED for a day behind a green test count.**
 >   `scripts/check_selective_components.sh` failed on a fixture #1889 had legitimately invalidated,

@@ -7,8 +7,8 @@ collector, or the complete .NET platform.
 
 The repository currently builds as 41 independently selectable CMake
 components. The verified Linux baseline on **2026-08-22** is a warning-free full build with
-**17,781 tests across 38 test executables — 17,781 passed, 0 failed, 0 skipped**. The component
-graph has 95 direct production edges; all ten selective-component configurations, every module
+**17,840 tests across 38 test executables — 17,840 passed, 0 failed, 0 skipped**. The component
+graph has 96 direct production edges; all ten selective-component configurations, every module
 boundary, generated catalogue, audit/plan cross-reference and the bounded Doxygen gate are checked
 locally. The paragraph below is the historical chain up to 2026-07-29 and is retained rather than
 rewritten; every later reading is recorded batch by batch in `NEXT.md`.
@@ -202,7 +202,7 @@ The component graph is enforced rather than documented only:
 - `.github/workflows/components.yml` runs the selective matrix and the full
   compatibility build on Ubuntu for pushes and pull requests.
 
-At the current baseline the graph has **41 physical modules and 95 direct
+At the current baseline the graph has **41 physical modules and 96 direct
 production dependency edges**, with no allow-listed exception. The boundary
 validator, the complete ten-job selective matrix, and the full build/test gate
 pass. The Text.Json negative assertion confirms that the target does not
@@ -215,7 +215,7 @@ Other platform evidence is narrower:
 
 | Platform/toolchain | Verified scope |
 |---|---|
-| Linux/GCC | Current warning-free full component build and all 17,781 tests, with no failures or skips. |
+| Linux/GCC | Current warning-free full component build and all 17,840 tests, with no failures or skips. |
 | Windows/MinGW | MinGW-w64 GCC 14-win32/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. GoogleTest was not cross-built and repository CI remains Ubuntu-only. |
 | Emscripten | Emscripten 5.0.7/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. Tests were not cross-built or run, and some runtime APIs deliberately throw `PlatformNotSupportedException`. |
 | macOS/Apple Clang | Real downstream Xcode 15.4 builds drove portability fixes on 2026-07-20; this repository has no macOS job or recorded full standalone test baseline. |

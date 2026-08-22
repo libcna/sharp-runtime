@@ -138,14 +138,25 @@ whose immediate `Task::IsCompleted` assertion raced terminal-state publication e
 raw-`this` lifetime boundary had already been crossed; the Socket production boundary itself did
 not need widening.
 
-Final verification is reproducible from the repository gates: a cache-disabled two-job build was
-warning-free; all **17,781 tests across 38 executables** passed with no failure or skip; all ten
-selective components passed; and module, catalogue, audit, planning, inventory, Unicode, temporary
-path, seam, and negative-fixture checks passed. ASan+UBSan+LSan covered **12,793 relevant tests
+Ticket #2417's audit-close-out verification is reproducible from the repository gates: a
+cache-disabled two-job build was warning-free; all **17,781 tests across 38 executables**
+passed with no failure or skip; all ten selective components passed; and module, catalogue,
+audit, planning, inventory, Unicode, temporary-path, seam, and negative-fixture checks passed.
+ASan+UBSan+LSan covered **12,793 relevant tests
 across 22 executables**, strict `float-cast-overflow` UBSan covered all **6,156 Core.Base tests**,
 and three repeated targeted TSan groups passed **57/57** without a report. The audit distribution
-remains 343/19/2 because these late defects were fixed before closure rather than hidden in a new
-open status.
+remains 343/19/2 because these late defects were fixed before #2417 closed rather than hidden in
+a new open status.
+
+A later post-#1941 consumer audit (#2418) found a bounded DateTimeKind ripple outside those 364
+historical findings. It repaired DateTime clocks/arithmetic, DateTimeOffset Kind and offset
+boundaries, TimeZone/TimeZoneInfo validation and result Kinds, and the affected IO, HTTP, XML,
+globalization, threading, and timer consumers. Its current gate is **17,840/17,840 across 38
+executables**, with graph **41 modules / 96 edges**. ASan+UBSan+LSan and strict UBSan each passed
+**9,680 relevant tests across 9 executables**; TSan passed **7,488 tests across 5 executables**
+and the process-timezone concurrency case passed five repeated runs. The audit distribution
+remains 343/19/2 because #2418 is a later correctness ticket, not a relabeling of the closed
+historical audit.
 
 The checked Doxygen ceiling remains 2,675 warnings and runs in both GitHub CI and
 `scripts/local_ci_check.sh`; this reconciliation does not re-baseline historical
