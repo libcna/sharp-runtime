@@ -141,7 +141,17 @@ namespace {
 // unchanged and this is not an SA-3 change.
 const std::type_info& effectiveDelegateType(const Delegate& d,
                                             const std::vector<std::shared_ptr<Delegate>>& list) {
-    return list.empty() ? typeid(d) : typeid(*list.front());
+    if (list.empty()) {
+        return typeid(d);
+    }
+    // Bound to a reference first, deliberately. `typeid(*list.front())` says exactly the same
+    // thing, but its operand is a function call, and clang's -Wpotentially-evaluated-expression
+    // rejects a call inside typeid -- an error here, since this library builds -Werror. GCC has
+    // no such diagnostic, which is why a file that has never been compiled by clang until now
+    // (an Emscripten build is the first) still reads that way. The dynamic lookup is the point
+    // and is unchanged: `front` is a polymorphic glvalue either way.
+    const Delegate& front = *list.front();
+    return typeid(front);
 }
 
 }  // namespace
