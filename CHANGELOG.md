@@ -9,6 +9,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the
 
 ## [Unreleased]
 
+## [0.1.0-beta.1] — 2026-08-22
+
+Sharp Runtime is complete for its currently declared practical subset and enters maintenance
+mode with this release. Compared with `0.1.0-alpha.1`, this beta closes the final internal audit,
+DateTime-kind propagation, and cross-compiler build-hygiene work without expanding the declared
+.NET compatibility scope.
+
+### Fixed
+
+- Reconciled all 364 historical audit findings against the implementation: **343 remediated**,
+  **19 accepted deviations**, **2 false positives**, and **0 open**.
+- Closed the remaining lifetime, arithmetic, undefined-behaviour, temporary-path, validator, and
+  selective-component coverage defects, with permanent regression tests.
+- Completed `DateTimeKind` propagation through `DateTime`, `DateTimeOffset`, `TimeZoneInfo`,
+  `TimeZone`, and XML conversion while preserving the documented practical-subset boundaries.
+- Restored warning-clean Clang builds, made the production Clang build a local and CI gate, and
+  retained the warning-clean GCC build.
+- Made Windows entropy chunking portable to i686 and restored hosted-runner component CI.
+
+### Verification
+
+- **17,840/17,840** tests pass across 38 executables, with 0 failed and 0 skipped.
+- The module graph is **41 modules / 96 edges**; all 10 selective component configurations pass.
+- GCC and Clang production builds complete with **0 warnings and 0 errors** under `-Werror`.
+- The Doxygen no-regression gate passes at the documented baseline of **2,675 warnings**.
+- Verified on Debian GNU/Linux 13 with GCC 14.2.0, glibc 2.41, CMake 3.31.6, tzdata 2026b,
+  and zlib 1.3.1.
+
 ## [0.1.0-alpha.1] — 2026-08-20
 
 First tagged release. Sharp Runtime has been developed continuously since 2025-05-30; this tag
@@ -84,5 +112,6 @@ instead. See [`docs/releasing.md`](docs/releasing.md).
   (`SHARP_RUNTIME_HAS_NATIVE_INT128`); they are absent on MSVC and 32-bit MinGW, which is a
   known, accepted and permanent boundary.
 
-[Unreleased]: https://github.com/openeggbert/sharp-runtime/compare/v0.1.0-alpha.1...HEAD
+[Unreleased]: https://github.com/openeggbert/sharp-runtime/compare/v0.1.0-beta.1...HEAD
+[0.1.0-beta.1]: https://github.com/openeggbert/sharp-runtime/compare/v0.1.0-alpha.1...v0.1.0-beta.1
 [0.1.0-alpha.1]: https://github.com/openeggbert/sharp-runtime/releases/tag/v0.1.0-alpha.1

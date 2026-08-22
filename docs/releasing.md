@@ -3,7 +3,7 @@
 
 # Releasing Sharp Runtime
 
-*Current as of 0.1.0-alpha.1 (2026-08-20).*
+*Current as of 0.1.0-beta.1 (2026-08-22).*
 
 Sharp Runtime follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html). A release
 is a git tag plus a `CHANGELOG.md` entry — there is no separate release branch, and nothing is
@@ -16,11 +16,11 @@ The version is decided in exactly **one** place:
 ```cmake
 # CMakeLists.txt (repository root)
 project(SHARP_RUNTIME VERSION 0.1.0 LANGUAGES CXX C)
-set(SHARP_RUNTIME_VERSION_PRERELEASE "alpha.1")   # empty on a final release
+set(SHARP_RUNTIME_VERSION_PRERELEASE "beta.1")   # empty on a final release
 ```
 
 `project(VERSION …)` accepts numeric components only, so the pre-release identifier sits beside
-it and the two are joined into `SHARP_RUNTIME_VERSION_STRING` (`0.1.0-alpha.1`).
+it and the two are joined into `SHARP_RUNTIME_VERSION_STRING` (`0.1.0-beta.1`).
 `SHARP_RUNTIME_VERSION_PRERELEASE` is deliberately a normal variable and not a cache entry: a
 cached copy would keep an existing build directory reporting the previous release after a bump.
 
@@ -63,7 +63,7 @@ Two copies are maintained by hand and must be updated as part of a bump:
 While the major version is 0, a minor bump may change the public API — which for this project is
 routine rather than exceptional: `docs/StandingApprovals.md` SA-2 governs public source breaks and
 they land with a migration note. Pre-release identifiers are `alpha.N` → `beta.N` → `rc.N`,
-ordered as SemVer orders them. `0.1.0-alpha.1` precedes `0.1.0`.
+ordered as SemVer orders them. `0.1.0-alpha.1` precedes `0.1.0-beta.1`, which precedes `0.1.0`.
 
 ## Downstream consumers
 
@@ -115,7 +115,7 @@ commit hash. Tagging is therefore worth doing before a downstream release, not a
 6. **Tag** with a `v` prefix and an annotated tag:
 
    ```bash
-   git tag -a v0.1.0-alpha.1 -m "Sharp Runtime 0.1.0-alpha.1"
+   git tag -a v0.1.0-beta.1 -m "Sharp Runtime 0.1.0-beta.1"
    ```
 
    The tag string carries the `v`; `SHARP_RUNTIME_VERSION_STRING` never does.
@@ -124,7 +124,7 @@ commit hash. Tagging is therefore worth doing before a downstream release, not a
 
    ```bash
    git push origin <branch>
-   git push origin v0.1.0-alpha.1
+   git push origin v0.1.0-beta.1
    ```
 8. **Open the next cycle** by adding an empty `## [Unreleased]` section back to `CHANGELOG.md` if
    step 2 consumed it.

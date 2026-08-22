@@ -9,7 +9,7 @@ project(SHARP_RUNTIME VERSION 0.1.0 LANGUAGES CXX C)
 # copy would keep an already-configured build directory reporting the previous release after a
 # bump -- exactly the kind of stale claim a release must not make. SHARP_RUNTIME_VERSION_STRING
 # is the single spelling the rest of the build reads. Do not re-derive it elsewhere.
-set(SHARP_RUNTIME_VERSION_PRERELEASE "alpha.1")
+set(SHARP_RUNTIME_VERSION_PRERELEASE "beta.1")
 if(SHARP_RUNTIME_VERSION_PRERELEASE)
     set(SHARP_RUNTIME_VERSION_STRING "${PROJECT_VERSION}-${SHARP_RUNTIME_VERSION_PRERELEASE}")
 else()
