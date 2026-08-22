@@ -409,15 +409,6 @@ namespace System::Threading {
             return true;
         }
 
-        /** Releases all resources held by the lock. */
-        /**
-         * @brief Marks this lock disposed.
-         *
-         * The release store pairs with throwIfDisposed()'s acquire load (#1955, SR-AUD-203
-         * race half). SR-AUD-203's *other* half -- that disposal succeeds while the caller
-         * still owns a mode, where .NET throws SynchronizationLockException -- is cause T-G
-         * and belongs to approval-gated ticket #1956; it is deliberately not changed here.
-         */
         /**
          * @brief Disposes the lock.
          * @throws System::Threading::SynchronizationLockException if the calling thread still

@@ -1,11 +1,14 @@
 <!-- SPDX-License-Identifier: MIT -->
 <!-- Copyright (c) Robert Vokac and contributors -->
 
-# Migration — `Rune`'s six classification and casing members are Unicode-aware (ticket #2018)
+# Migration — `Rune` classification, casing and whitespace match Unicode/.NET (ticket #2018)
 
 *2026-08-19.* `System::Text::Rune::IsLetter`, `IsDigit`, `IsLetterOrDigit`, `IsUpper`, `IsLower`,
 `ToUpper` and `ToLower` were ASCII-only while `IsWhiteSpace` was Unicode-aware — the
-self-contradiction SR-AUD-294 rests on. All of them now answer from the generated UCD 16.0 tables.
+self-contradiction SR-AUD-294 rests on. The table-backed members now answer from the generated
+UCD 16.0 data. The close-out also removes U+FEFF from `IsWhiteSpace`: modern .NET does not classify
+the byte-order mark as white space, so the former hand-written table's extra entry was not a
+supported Unicode extension.
 
 Landed under **SA-4**, third in its stated unlock order (#2315 → #2336 → **#2018** → #2338). No
 signature, layout or vtable change; `sizeof(Rune)` is unchanged.
@@ -25,7 +28,8 @@ signature, layout or vtable change; `sizeof(Rune)` is unchanged.
 | `ToLower(U+03B1)`… `ToUpper` | unchanged | `U+0391` |
 | `ToLower(U+10400)` (supplementary) | unchanged | `U+10428` |
 | the ASCII range | — | **unchanged** |
-| `IsWhiteSpace` | Unicode-aware | **unchanged** |
+| `IsWhiteSpace(U+FEFF)` | `true` | `false` (.NET-compatible) |
+| all other `IsWhiteSpace` entries | Unicode-aware | **unchanged** |
 
 `IsLetter` is the **five** letter categories (`Lu Ll Lt Lm Lo`), not the cased two, so a titlecase
 letter and a Hebrew alef are letters. `IsDigit` is `DecimalDigitNumber` **only**, so a Roman

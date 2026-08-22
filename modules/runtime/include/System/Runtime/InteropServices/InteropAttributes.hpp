@@ -34,15 +34,14 @@ namespace System::Runtime::InteropServices {
      * Stated explicitly because the audit found this header to be the one interop-adjacent file
      * that described effects it cannot produce **without saying so**, unlike the compiler-service
      * marker headers alongside it (ticket #1978, the disclosure half of SR-AUD-168). The
-     * The *value* divergences this header used to declare — `UnmanagedType::LPStruct`, the
+     * *value and type* divergences this header used to declare — `UnmanagedType::LPStruct`, the
      * missing `Currency`/`IDispatch`, `StructLayoutAttribute::Pack`, both `CharSet` defaults and
-     * `DllImportAttribute::PreserveSig`/`BestFitMapping` — were **#1980 group G-2** and are now
-     * fixed; see docs/Migration-InteropMetadataValues.md. What remains of #1980 here is
-     * **SR-AUD-167** (group G-5): the omitted `MarshalAsAttribute` fields and the absent
-     * `ComInterfaceType`/`ClassInterfaceType` enums.
+     * `DllImportAttribute::PreserveSig`/`BestFitMapping`, the typed `MarshalAsAttribute` fields,
+     * and the COM-interface attribute values — were **#1980 groups G-2/G-5** and are now fixed;
+     * see docs/Migration-InteropMetadataValues.md and docs/Migration-MarshalAsFieldTypes.md.
      *
      * Because these types exist to preserve managed metadata rather than to produce an effect,
-     * getting the *numbers* right is the whole of their contract.
+     * getting the metadata values and their public types right is the whole of their contract.
      */
 
     /** Specifies the memory layout of a managed class or struct. */
@@ -336,21 +335,37 @@ namespace System::Runtime::InteropServices {
     };
 
     /** Indicates the COM interface type exposed by a managed interface. */
-    class InterfaceTypeAttribute : public System::Attribute {
-    public:
-        SharpRuntime::intcs Value; ///< ComInterfaceType enum value.
+    class InterfaceTypeAttribute final : public System::Attribute {
+        ComInterfaceType value_;
 
-        /** @param interfaceType The ComInterfaceType value. */
-        explicit InterfaceTypeAttribute(SharpRuntime::intcs interfaceType) : Value(interfaceType) {}
+    public:
+        /** @param interfaceType The strongly typed COM interface kind. */
+        explicit InterfaceTypeAttribute(ComInterfaceType interfaceType) noexcept
+            : value_(interfaceType) {}
+
+        /** @param interfaceType Raw 16-bit metadata value accepted by .NET's compatibility overload. */
+        explicit InterfaceTypeAttribute(SharpRuntime::shortcs interfaceType) noexcept
+            : value_(static_cast<ComInterfaceType>(interfaceType)) {}
+
+        /** @return The immutable COM interface kind selected at construction. */
+        [[nodiscard]] ComInterfaceType getValueProperty() const noexcept { return value_; }
     };
 
     /** Specifies the type of COM interface generated for a class. */
-    class ClassInterfaceAttribute : public System::Attribute {
-    public:
-        SharpRuntime::intcs Value; ///< ClassInterfaceType enum value.
+    class ClassInterfaceAttribute final : public System::Attribute {
+        ClassInterfaceType value_;
 
-        /** @param classInterfaceType The ClassInterfaceType value. */
-        explicit ClassInterfaceAttribute(SharpRuntime::intcs classInterfaceType) : Value(classInterfaceType) {}
+    public:
+        /** @param classInterfaceType The strongly typed generated class-interface kind. */
+        explicit ClassInterfaceAttribute(ClassInterfaceType classInterfaceType) noexcept
+            : value_(classInterfaceType) {}
+
+        /** @param classInterfaceType Raw 16-bit metadata value accepted by .NET's compatibility overload. */
+        explicit ClassInterfaceAttribute(SharpRuntime::shortcs classInterfaceType) noexcept
+            : value_(static_cast<ClassInterfaceType>(classInterfaceType)) {}
+
+        /** @return The immutable generated class-interface kind selected at construction. */
+        [[nodiscard]] ClassInterfaceType getValueProperty() const noexcept { return value_; }
     };
 
     /** Marks a parameter as input-only in a COM interop signature. */

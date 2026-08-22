@@ -13,6 +13,10 @@
 #include <vector>
 #include <gtest/gtest.h>
 #include <optional>
+#include <atomic>
+#include <cstdint>
+#include <random>
+#include <stdexcept>
 #include "System/ArgumentException.hpp"
 #include "System/Environment.hpp"
 #include "System/IO/DirectoryNotFoundException.hpp"
@@ -673,6 +677,46 @@ namespace {
     std::string folder(Environment::SpecialFolder f) {
         return Environment::GetFolderPath(f, Environment::SpecialFolderOption::DoNotVerify);
     }
+
+    /// Gives filesystem-backed Environment tests an isolated root and removes every descendant.
+    class ScopedTemporaryDirectory final {
+    public:
+        ScopedTemporaryDirectory() {
+            const auto parent = std::filesystem::temp_directory_path();
+            static std::atomic<std::uint64_t> sequence{0};
+            std::random_device entropy;
+            for (int attempt = 0; attempt < 128; ++attempt) {
+                const auto random =
+                    (static_cast<std::uint64_t>(entropy()) << 32U) ^ entropy();
+                const auto suffix =
+                    random ^ sequence.fetch_add(1, std::memory_order_relaxed);
+                auto candidate =
+                    parent / ("sharp-runtime-environment-" + std::to_string(suffix));
+                std::error_code error;
+                if (std::filesystem::create_directory(candidate, error)) {
+                    path_ = std::move(candidate);
+                    return;
+                }
+            }
+            throw std::runtime_error(
+                "could not create a unique Environment-test directory");
+        }
+
+        ~ScopedTemporaryDirectory() {
+            std::error_code error;
+            std::filesystem::remove_all(path_, error);
+        }
+
+        ScopedTemporaryDirectory(const ScopedTemporaryDirectory&) = delete;
+        ScopedTemporaryDirectory& operator=(const ScopedTemporaryDirectory&) = delete;
+
+        [[nodiscard]] std::string path(const std::filesystem::path& relative) const {
+            return (path_ / relative).string();
+        }
+
+    private:
+        std::filesystem::path path_;
+    };
 }
 
 TEST(EnvironmentTests, Fix2364_TheSixUserDirectoriesGoThroughReadXdgDirectory) {
@@ -727,9 +771,8 @@ TEST(EnvironmentTests, Fix2364_TheUserDirsFileIsReadAndItsGrammarIsDotNets) {
     // XDG_CONFIG_HOME rather than a hard-coded ~/.config -- and each rejection below is one .NET
     // makes rather than a simplification.
     namespace fs = std::filesystem;
-    const fs::path sandbox = fs::current_path() / "sandbox-2364";
-    std::error_code ec;
-    fs::remove_all(sandbox, ec);
+    ScopedTemporaryDirectory temporary;
+    const fs::path sandbox = temporary.path("sandbox-2364");
     fs::create_directories(sandbox / "config");
 
     {
@@ -760,7 +803,6 @@ TEST(EnvironmentTests, Fix2364_TheUserDirsFileIsReadAndItsGrammarIsDotNets) {
               (sandbox / "home" / "Videos").string())
         << "an empty value is skipped";
 
-    fs::remove_all(sandbox, ec);
 }
 
 TEST(EnvironmentTests, Fix2364_TheTwoStaticPathsAndTheTwoDeliberatelyUnmappedOnes) {
@@ -1286,8 +1328,8 @@ TEST(XdgAndFolderOptionTests, Fix2320_TheThreeOptionsDifferOnAMissingDirectory) 
 #if !defined(_WIN32)
     // Builds its own missing directory rather than hoping one exists, so the row means the same
     // thing in every container.
-    const std::string missing = "/tmp/sharp-runtime-2320-missing/deep/tree";
-    ::system("rm -rf /tmp/sharp-runtime-2320-missing");
+    ScopedTemporaryDirectory temporary;
+    const std::string missing = temporary.path("deep/tree");
     ScopedEnv data("XDG_DATA_HOME", missing.c_str());
     const auto folder = Environment::SpecialFolder::LocalApplicationData;
 
@@ -1301,7 +1343,6 @@ TEST(XdgAndFolderOptionTests, Fix2320_TheThreeOptionsDifferOnAMissingDirectory) 
     // Create really created it, every missing component of it, and the default now agrees.
     EXPECT_EQ(0, ::access(missing.c_str(), R_OK));
     EXPECT_EQ(missing, Environment::GetFolderPath(folder, Environment::SpecialFolderOption::None));
-    ::system("rm -rf /tmp/sharp-runtime-2320-missing");
 #else
     GTEST_SKIP() << "the POSIX verification path";
 #endif

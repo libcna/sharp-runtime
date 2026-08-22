@@ -37,10 +37,14 @@
 #include "System/IO/MemoryStream.hpp"
 #include <miniz/miniz.h>
 #include <vector>
+#include <atomic>
 #include <climits>
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <random>
+#include <stdexcept>
+#include <utility>
 
 using System::NotImplementedException;
 using System::Buffers::OperationStatus;
@@ -69,6 +73,41 @@ using System::IO::Compression::ZLibDecoder;
 using System::IO::Compression::ZLibEncoder;
 
 namespace {
+class ScopedTemporaryDirectory final {
+    std::filesystem::path path_;
+
+public:
+    ScopedTemporaryDirectory() {
+        const auto parent = std::filesystem::temp_directory_path();
+        static std::atomic<std::uint64_t> sequence{0};
+        std::random_device entropy;
+        for (int attempt = 0; attempt < 128; ++attempt) {
+            const auto random =
+                (static_cast<std::uint64_t>(entropy()) << 32U) ^ entropy();
+            const auto suffix = random ^ sequence.fetch_add(1, std::memory_order_relaxed);
+            auto candidate = parent / ("sharp-runtime-compression-" + std::to_string(suffix));
+            std::error_code error;
+            if (std::filesystem::create_directory(candidate, error)) {
+                path_ = std::move(candidate);
+                return;
+            }
+        }
+        throw std::runtime_error("could not create a unique compression-test directory");
+    }
+
+    ~ScopedTemporaryDirectory() {
+        std::error_code error;
+        std::filesystem::remove_all(path_, error);
+    }
+
+    ScopedTemporaryDirectory(const ScopedTemporaryDirectory&) = delete;
+    ScopedTemporaryDirectory& operator=(const ScopedTemporaryDirectory&) = delete;
+
+    [[nodiscard]] std::string path(const std::string& name) const {
+        return (path_ / name).string();
+    }
+};
+
 // Test double for the 2026-07-13 resource-management fix: verifies DeflateStream/GZipStream/
 // ZLibStream::Close() cleans up zlib state (and doesn't hang/crash on a second Close() call, as
 // the destructor performs) when the inner stream's Write() throws mid-flush.
@@ -670,7 +709,8 @@ TEST(ZipArchiveTests, Open_ReadsContent) {
 // ===========================================================================
 
 TEST(ZipArchiveTests, CreateAndReadBack_RoundTrip) {
-    const char* tmpPath = "/tmp/sharpruntimetest.zip";
+    ScopedTemporaryDirectory temporary;
+    const std::string tmpPath = temporary.path("archive.zip");
 
     // Create
     {
@@ -702,7 +742,8 @@ TEST(ZipArchiveTests, CreateAndReadBack_RoundTrip) {
 // of the caller's buffer for a negative offset -- confirmed via a standalone ASan repro as a
 // genuine stack-buffer-overflow read before this fix, not just a wrong-exception-type issue.
 TEST(ZipArchiveTests, EntryWriteStream_NegativeOffset_Throws) {
-    ZipArchive z("/tmp/sharpruntimetest_negoffset.zip", ZipArchiveMode::Create);
+    ScopedTemporaryDirectory temporary;
+    ZipArchive z(temporary.path("archive.zip"), ZipArchiveMode::Create);
     auto entry = z.CreateEntry("x.txt");
     std::unique_ptr<System::IO::Stream> s(entry.Open());
     const uint8_t data[] = {'a', 'b', 'c'};
@@ -710,7 +751,8 @@ TEST(ZipArchiveTests, EntryWriteStream_NegativeOffset_Throws) {
 }
 
 TEST(ZipArchiveTests, EntryWriteStream_ZeroCount_IsNoOp) {
-    ZipArchive z("/tmp/sharpruntimetest_zerocount.zip", ZipArchiveMode::Create);
+    ScopedTemporaryDirectory temporary;
+    ZipArchive z(temporary.path("archive.zip"), ZipArchiveMode::Create);
     auto entry = z.CreateEntry("x.txt");
     std::unique_ptr<System::IO::Stream> s(entry.Open());
     const uint8_t data[] = {'a', 'b', 'c'};
@@ -718,7 +760,8 @@ TEST(ZipArchiveTests, EntryWriteStream_ZeroCount_IsNoOp) {
 }
 
 TEST(ZipArchiveTests, CreateMultipleEntries) {
-    const char* tmpPath = "/tmp/sharpruntimetest2.zip";
+    ScopedTemporaryDirectory temporary;
+    const std::string tmpPath = temporary.path("archive.zip");
     {
         ZipArchive z(tmpPath, ZipArchiveMode::Create);
         for (int i = 0; i < 3; ++i) {
@@ -737,7 +780,8 @@ TEST(ZipArchiveTests, CreateMultipleEntries) {
 // discarding every pre-existing one. Verified against ZipArchive.cs: real .NET's Dispose()
 // always preserves every entry that wasn't explicitly Delete()'d.
 TEST(ZipArchiveTests, UpdateMode_PreservesExistingEntriesWhenAddingNew) {
-    const char* tmpPath = "/tmp/sharpruntimetest_update_preserve.zip";
+    ScopedTemporaryDirectory temporary;
+    const std::string tmpPath = temporary.path("archive.zip");
 
     // Seed the archive with one entry in Create mode.
     {
@@ -782,7 +826,8 @@ TEST(ZipArchiveTests, UpdateMode_PreservesExistingEntriesWhenAddingNew) {
 }
 
 TEST(ZipArchiveTests, UpdateMode_DeleteExistingEntry_RemovedOnFlush) {
-    const char* tmpPath = "/tmp/sharpruntimetest_update_delete.zip";
+    ScopedTemporaryDirectory temporary;
+    const std::string tmpPath = temporary.path("archive.zip");
 
     {
         ZipArchive z(tmpPath, ZipArchiveMode::Create);
@@ -808,7 +853,8 @@ TEST(ZipArchiveTests, UpdateMode_DeleteExistingEntry_RemovedOnFlush) {
 }
 
 TEST(ZipArchiveTests, UpdateMode_DeletePendingEntry_NeverWritten) {
-    const char* tmpPath = "/tmp/sharpruntimetest_update_delete_pending.zip";
+    ScopedTemporaryDirectory temporary;
+    const std::string tmpPath = temporary.path("archive.zip");
 
     {
         ZipArchive z(tmpPath, ZipArchiveMode::Create);
@@ -1017,7 +1063,8 @@ TEST(ZipArchiveTests, NullStreamGuard_DoesNotAffectValidCreateRoundTrip) {
 // this ticket: an unopenable path still produces InvalidDataException from the reader,
 // not the new null-stream ArgumentNullException.
 TEST(ZipArchiveTests, NullStreamGuard_DoesNotAffectPathConstructor) {
-    const std::string missing = std::string("sharp_rt_1812_no_such_archive.zip");
+    ScopedTemporaryDirectory temporary;
+    const std::string missing = temporary.path("missing-archive.zip");
     EXPECT_THROW(ZipArchive z(missing, ZipArchiveMode::Read), System::IO::InvalidDataException);
 }
 
@@ -1094,7 +1141,8 @@ TEST(ZipArchiveTests, PathCtor_ModeAboveRange_ThrowsArgumentOutOfRange) {
     // The path is deliberately one that does not exist: the range check must fire before
     // the file system is touched, so this is ArgumentOutOfRangeException and not the
     // InvalidDataException an unopenable path otherwise produces.
-    EXPECT_THROW(ZipArchive z(std::string("sharp_rt_1813_never_created.zip"),
+    ScopedTemporaryDirectory temporary;
+    EXPECT_THROW(ZipArchive z(temporary.path("never-created.zip"),
                               static_cast<ZipArchiveMode>(42)),
                  System::ArgumentOutOfRangeException);
 }
@@ -1102,8 +1150,9 @@ TEST(ZipArchiveTests, PathCtor_ModeAboveRange_ThrowsArgumentOutOfRange) {
 // ZipFile::Open is a bare forwarder to the path constructor, so it inherits the guard.
 // Pinned separately so a future refactor that stops forwarding cannot silently lose it.
 TEST(ZipArchiveTests, ZipFileOpen_ModeAboveRange_ThrowsArgumentOutOfRange) {
+    ScopedTemporaryDirectory temporary;
     EXPECT_THROW(System::IO::Compression::ZipFile::Open(
-                     std::string("sharp_rt_1813_never_created.zip"),
+                     temporary.path("never-created.zip"),
                      static_cast<ZipArchiveMode>(42)),
                  System::ArgumentOutOfRangeException);
 }
@@ -1666,18 +1715,11 @@ TEST(ZLibEncoderDecoderTests, WithCompressionOptions) {
 // ZipFile / ZipFileExtensions
 // ===========================================================================
 
-namespace {
-    void RemoveAll(const std::string& path) {
-        std::error_code ec;
-        std::filesystem::remove_all(path, ec);
-    }
-}
-
 TEST(ZipFileTests, CreateFromDirectory_ExtractToDirectory_Roundtrip) {
-    const std::string srcDir = "/tmp/sharp_rt_zipfile_src";
-    const std::string archivePath = "/tmp/sharp_rt_zipfile_test.zip";
-    const std::string destDir = "/tmp/sharp_rt_zipfile_dest";
-    RemoveAll(srcDir); RemoveAll(archivePath); RemoveAll(destDir);
+    ScopedTemporaryDirectory temporary;
+    const std::string srcDir = temporary.path("source");
+    const std::string archivePath = temporary.path("archive.zip");
+    const std::string destDir = temporary.path("destination");
 
     Directory::CreateDirectory(srcDir);
     Directory::CreateDirectory(Path::Combine(srcDir, "sub"));
@@ -1691,13 +1733,12 @@ TEST(ZipFileTests, CreateFromDirectory_ExtractToDirectory_Roundtrip) {
     EXPECT_EQ(File::ReadAllText(Path::Combine(destDir, "a.txt")), "hello from a");
     EXPECT_EQ(File::ReadAllText(Path::Combine(destDir, "sub", "b.txt")), "hello from b");
 
-    RemoveAll(srcDir); RemoveAll(archivePath); RemoveAll(destDir);
 }
 
 TEST(ZipFileTests, CreateFromDirectory_IncludeBaseDirectory) {
-    const std::string srcDir = "/tmp/sharp_rt_zipfile_base_src";
-    const std::string archivePath = "/tmp/sharp_rt_zipfile_base_test.zip";
-    RemoveAll(srcDir); RemoveAll(archivePath);
+    ScopedTemporaryDirectory temporary;
+    const std::string srcDir = temporary.path("source");
+    const std::string archivePath = temporary.path("archive.zip");
 
     Directory::CreateDirectory(srcDir);
     File::WriteAllText(Path::Combine(srcDir, "f.txt"), "data");
@@ -1709,13 +1750,14 @@ TEST(ZipFileTests, CreateFromDirectory_IncludeBaseDirectory) {
     auto entry = archive.GetEntry(baseName + "/f.txt");
     EXPECT_TRUE(entry.IsValid());
 
-    RemoveAll(srcDir); RemoveAll(archivePath);
 }
 
 TEST(ZipFileTests, OpenRead_NonExistentDirectory_Throws) {
-    RemoveAll("/tmp/sharp_rt_zipfile_missing_src");
+    ScopedTemporaryDirectory temporary;
+    const std::string missingSource = temporary.path("missing-source");
+    const std::string archivePath = temporary.path("archive.zip");
     EXPECT_THROW(
-        ZipFile::CreateFromDirectory("/tmp/sharp_rt_zipfile_missing_src", "/tmp/sharp_rt_zipfile_missing.zip"),
+        ZipFile::CreateFromDirectory(missingSource, archivePath),
         System::IO::DirectoryNotFoundException);
 }
 
@@ -1726,14 +1768,14 @@ TEST(ZipFileTests, OpenRead_NonExistentDirectory_Throws) {
 // resolving the full destination path and rejecting it with an IOException unless it stays under
 // the destination directory -- mirrored here.
 TEST(ZipFileTests, ExtractToDirectory_EntryEscapesDestination_Throws) {
-    const std::string archivePath = "/tmp/sharp_rt_zipslip_test.zip";
-    const std::string destDir = "/tmp/sharp_rt_zipslip_dest";
-    const std::string escapedFile = "/tmp/sharp_rt_zipslip_evil.txt";
-    RemoveAll(archivePath); RemoveAll(destDir); RemoveAll(escapedFile);
+    ScopedTemporaryDirectory temporary;
+    const std::string archivePath = temporary.path("archive.zip");
+    const std::string destDir = temporary.path("destination");
+    const std::string escapedFile = temporary.path("escaped.txt");
 
     {
         ZipArchive archive(archivePath, ZipArchiveMode::Create);
-        auto entry = archive.CreateEntry("../sharp_rt_zipslip_evil.txt");
+        auto entry = archive.CreateEntry("../escaped.txt");
         std::unique_ptr<System::IO::Stream> s(entry.Open());
         const uint8_t data[] = {'p', 'w', 'n', 'e', 'd'};
         s->Write(data, 0, 5);
@@ -1743,14 +1785,13 @@ TEST(ZipFileTests, ExtractToDirectory_EntryEscapesDestination_Throws) {
     // The escaped file must never have been written.
     EXPECT_FALSE(File::Exists(escapedFile));
 
-    RemoveAll(archivePath); RemoveAll(destDir); RemoveAll(escapedFile);
 }
 
 TEST(ZipFileExtensionsTests, CreateEntryFromFile_ExtractToFile_Roundtrip) {
-    const std::string srcFile = "/tmp/sharp_rt_zfe_src.txt";
-    const std::string archivePath = "/tmp/sharp_rt_zfe_test.zip";
-    const std::string destFile = "/tmp/sharp_rt_zfe_dest.txt";
-    RemoveAll(srcFile); RemoveAll(archivePath); RemoveAll(destFile);
+    ScopedTemporaryDirectory temporary;
+    const std::string srcFile = temporary.path("source.txt");
+    const std::string archivePath = temporary.path("archive.zip");
+    const std::string destFile = temporary.path("destination.txt");
 
     File::WriteAllText(srcFile, "extension-method roundtrip");
     {
@@ -1764,14 +1805,13 @@ TEST(ZipFileExtensionsTests, CreateEntryFromFile_ExtractToFile_Roundtrip) {
     ZipFileExtensions::ExtractToFile(entry, destFile);
     EXPECT_EQ(File::ReadAllText(destFile), "extension-method roundtrip");
 
-    RemoveAll(srcFile); RemoveAll(archivePath); RemoveAll(destFile);
 }
 
 TEST(ZipFileExtensionsTests, ExtractToFile_WithoutOverwrite_ExistingFile_Throws) {
-    const std::string srcFile = "/tmp/sharp_rt_zfe_ow_src.txt";
-    const std::string archivePath = "/tmp/sharp_rt_zfe_ow_test.zip";
-    const std::string destFile = "/tmp/sharp_rt_zfe_ow_dest.txt";
-    RemoveAll(srcFile); RemoveAll(archivePath); RemoveAll(destFile);
+    ScopedTemporaryDirectory temporary;
+    const std::string srcFile = temporary.path("source.txt");
+    const std::string archivePath = temporary.path("archive.zip");
+    const std::string destFile = temporary.path("destination.txt");
 
     File::WriteAllText(srcFile, "content");
     File::WriteAllText(destFile, "already here");
@@ -1784,14 +1824,13 @@ TEST(ZipFileExtensionsTests, ExtractToFile_WithoutOverwrite_ExistingFile_Throws)
     auto entry = archive.GetEntry("entry.txt");
     EXPECT_THROW(ZipFileExtensions::ExtractToFile(entry, destFile, false), System::IO::IOException);
 
-    RemoveAll(srcFile); RemoveAll(archivePath); RemoveAll(destFile);
 }
 
 TEST(ZipFileExtensionsTests, ExtractToFile_WithOverwrite_ReplacesExistingFile) {
-    const std::string srcFile = "/tmp/sharp_rt_zfe_ow2_src.txt";
-    const std::string archivePath = "/tmp/sharp_rt_zfe_ow2_test.zip";
-    const std::string destFile = "/tmp/sharp_rt_zfe_ow2_dest.txt";
-    RemoveAll(srcFile); RemoveAll(archivePath); RemoveAll(destFile);
+    ScopedTemporaryDirectory temporary;
+    const std::string srcFile = temporary.path("source.txt");
+    const std::string archivePath = temporary.path("archive.zip");
+    const std::string destFile = temporary.path("destination.txt");
 
     File::WriteAllText(srcFile, "new content");
     File::WriteAllText(destFile, "old content");
@@ -1805,5 +1844,4 @@ TEST(ZipFileExtensionsTests, ExtractToFile_WithOverwrite_ReplacesExistingFile) {
     EXPECT_NO_THROW(ZipFileExtensions::ExtractToFile(entry, destFile, true));
     EXPECT_EQ(File::ReadAllText(destFile), "new content");
 
-    RemoveAll(srcFile); RemoveAll(archivePath); RemoveAll(destFile);
 }

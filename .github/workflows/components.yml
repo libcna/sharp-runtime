@@ -20,6 +20,8 @@ jobs:
         include:
           - component: Core.Base
             fixture: core_base.cpp
+          - component: Collections.Blocking
+            fixture: blocking_collection.cpp
           - component: Text.Json
             fixture: text_json.cpp
           - component: Net.Http.Headers

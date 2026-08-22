@@ -3,6 +3,11 @@
 
 # `modules/runtime` — strict ownership of every open audit finding
 
+> **Historical ownership snapshot (2026-08-12).** The open/blocked counts and owner states below
+> describe that checkpoint, not current HEAD. All audit findings were subsequently reconciled;
+> current dispositions are in `docs/AuditFindingsReconciliation.md` and current ticket state is
+> authoritative only in `plan.sqlite3`.
+
 Companion to `docs/ThreadingOpenFindingOwnership.md`, produced by the same method on
 2026-08-12. It answers one question for `modules/runtime`: of the open findings, how many
 carry work a session could implement **now**, without a user decision and without evidence

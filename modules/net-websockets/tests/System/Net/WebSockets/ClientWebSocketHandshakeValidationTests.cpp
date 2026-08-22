@@ -18,8 +18,10 @@
 //
 // SCOPE CORRECTION, the same one #2063 made for System::Net::Http: the finding names
 // SetRequestHeader, but the REQUEST URI is a third door. System::Uri preserves CR/LF/NUL
-// (build-probe/2089_probe2_uri_door.log; the Uri-side defect is the separate blocked ticket
-// #2003), and the URI's path/query goes on the request LINE while its host goes into Host:.
+// (build-probe/2089_probe2_uri_door.log). #2359 subsequently made Uri reject control characters
+// in hosts, while #2003 verified that path/query controls remain part of this port's declared
+// no-percent-encoding boundary. The path/query still goes on the request line, so this door must
+// reject it before opening a socket.
 // Closing only the options doors would have left request smuggling open.
 //
 // The predicate is System::Net::detail::ContainsProtocolFieldTerminator — the single shared
@@ -293,8 +295,8 @@ TEST(ClientWebSocketHandshakeValidationTests, AnAcceptedSubprotocolListStillReac
 // ===========================================================================
 
 TEST(ClientWebSocketHandshakeValidationTests, ATerminatorInTheUriPathOrQueryIsRejected) {
-    // System::Uri keeps CR/LF/NUL (that is the separate, blocked ticket #2003); this module's
-    // own door must not concatenate them into the request line.
+    // System::Uri deliberately keeps CR/LF/NUL in path/query under the resolved #2003 contract;
+    // this module's own door must not concatenate them into the request line.
     for (const std::string& bad : {std::string("\r"), std::string("\n"), std::string("\r\n"), kNul}) {
         ClientWebSocket client;
         System::Uri uri("ws://127.0.0.1:9/a" + bad + "X-Injected: yes");

@@ -5,6 +5,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <future>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -164,6 +166,70 @@ TEST(BlockingCollectionTests, TimeSpanTokenSnapshotAndAllAnyOverloads) {
     EXPECT_EQ(BlockingCollection<int>::TryAddToAny(collections, 8, shortTimeout), 0);
     EXPECT_EQ(BlockingCollection<int>::TryTakeFromAny(collections, value, shortTimeout), 0);
     EXPECT_EQ(value, 8);
+}
+
+TEST(BlockingCollectionTests, FractionalNegativeTimeSpanUsesDotNetTruncationBoundaries) {
+    using System::TimeSpan;
+    constexpr auto ticksPerMillisecond = TimeSpan::TicksPerMillisecond;
+    const TimeSpan negativeHalfMillisecond(-ticksPerMillisecond / 2);
+    const TimeSpan negativeOneAndAHalfMilliseconds(-(ticksPerMillisecond * 3) / 2);
+    const TimeSpan negativeAlmostTwoMilliseconds(-(ticksPerMillisecond * 2) + 1);
+    const TimeSpan negativeTwoMilliseconds(-(ticksPerMillisecond * 2));
+
+    // (-1ms, 0) truncates to zero, so an empty take returns immediately.
+    BlockingCollection<int> empty;
+    int value = 0;
+    EXPECT_FALSE(empty.TryTake(value, negativeHalfMillisecond));
+
+    // [-1.9999ms, -1ms] truncates to -1, the infinite sentinel. A full bounded collection
+    // must therefore keep waiting until capacity is released rather than returning false.
+    BlockingCollection<int> bounded(1);
+    bounded.Add(1);
+    std::promise<void> entered;
+    auto enteredFuture = entered.get_future();
+    auto add = std::async(std::launch::async, [&] {
+        entered.set_value();
+        return bounded.TryAdd(2, negativeOneAndAHalfMilliseconds);
+    });
+    enteredFuture.wait();
+    EXPECT_EQ(add.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+    EXPECT_TRUE(bounded.TryTake(value, 0));
+    EXPECT_TRUE(add.get());
+
+    // The other three TimeSpan doors share the same conversion helper.
+    BlockingCollection<int> first;
+    const std::vector<BlockingCollection<int>*> collections{&first};
+    EXPECT_EQ(BlockingCollection<int>::TryAddToAny(
+                  collections, 7, negativeAlmostTwoMilliseconds),
+              0);
+    EXPECT_EQ(BlockingCollection<int>::TryTakeFromAny(
+                  collections, value, negativeHalfMillisecond),
+              0);
+    EXPECT_EQ(value, 7);
+
+    EXPECT_THROW(empty.TryAdd(1, negativeTwoMilliseconds), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(empty.TryTake(value, negativeTwoMilliseconds), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(BlockingCollection<int>::TryAddToAny(
+                     collections, 1, negativeTwoMilliseconds),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(BlockingCollection<int>::TryTakeFromAny(
+                     collections, value, negativeTwoMilliseconds),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(BlockingCollectionTests, TimeSpanMillisecondRepresentabilityIsCheckedAfterTruncation) {
+    using System::TimeSpan;
+    const auto maxMilliseconds = static_cast<SharpRuntime::longcs>(
+        std::numeric_limits<intcs>::max());
+    const TimeSpan maxPlusFraction(
+        maxMilliseconds * TimeSpan::TicksPerMillisecond + TimeSpan::TicksPerMillisecond - 1);
+    const TimeSpan firstUnrepresentable(
+        (maxMilliseconds + 1) * TimeSpan::TicksPerMillisecond);
+
+    BlockingCollection<int> collection;
+    EXPECT_TRUE(collection.TryAdd(1, maxPlusFraction));
+    EXPECT_THROW(collection.TryAdd(2, firstUnrepresentable),
+                 System::ArgumentOutOfRangeException);
 }
 
 TEST(BlockingCollectionTests, ConstructorAndDisposeValidateState) {

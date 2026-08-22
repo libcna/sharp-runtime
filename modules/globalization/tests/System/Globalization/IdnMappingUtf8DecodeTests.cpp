@@ -48,3 +48,27 @@ TEST(IdnMappingUtf8DecodeTests, WellFormedNamesAreUnaffected) {
     EXPECT_NE(asciiName, original);
     EXPECT_EQ(mapping.GetUnicode(asciiName), original);
 }
+
+TEST(IdnMappingUtf8DecodeTests, AllowUnassignedControlsMappingUsingThePinnedUcdVersion) {
+    const std::string unassigned = "\xCD\xB8"; // U+0378, unassigned in UCD 16.0.
+    const std::string unicodeName = unassigned + ".example";
+
+    IdnMapping rejecting;
+    EXPECT_THROW((void)rejecting.GetAscii(unicodeName), System::ArgumentException);
+
+    IdnMapping allowing;
+    allowing.setAllowUnassignedProperty(true);
+    const std::string asciiName = allowing.GetAscii(unicodeName);
+    EXPECT_EQ(asciiName, "xn--zva.example");
+    EXPECT_EQ(allowing.GetUnicode(asciiName), unicodeName);
+
+    // GetUnicode's mandatory GetAscii round trip applies the same policy rather than providing
+    // a back door around the setting.
+    EXPECT_THROW((void)rejecting.GetUnicode(asciiName), System::ArgumentException);
+}
+
+TEST(IdnMappingUtf8DecodeTests, AssignedNeighbourIsNotRejectedByDefault) {
+    const std::string assigned = "\xCD\xB7"; // U+0377, GREEK SMALL LETTER PAMPHYLIAN DIGAMMA.
+    IdnMapping mapping;
+    EXPECT_NO_THROW((void)mapping.GetAscii(assigned + ".example"));
+}

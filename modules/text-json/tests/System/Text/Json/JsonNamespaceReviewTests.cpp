@@ -335,9 +335,10 @@ TEST(JsonReviewPinTests, JsonElementSIntegerAccessorsAreALREADYCorrect) {
 }
 
 TEST(JsonReviewPinTests, DisposalGuardsThatALREADYWorkAndTheOneThatDoesNot) {
-    // Plan §6.1: SR-AUD-324 is NOT a use-after-free. JsonElement holds an OWNING aliasing
-    // shared_ptr, so a captured element reads LIVE storage. Two halves already work; the third
-    // is the blocked #2117.
+    // Plan §6.1's framing still matters: SR-AUD-324 was never a use-after-free because the
+    // captured element retained its tree. #2117 repaired the actual defect by sharing disposal
+    // state, so all three guards below now agree and the retained tree serves only a safe
+    // ObjectDisposedException diagnostic.
     auto doc = JsonDocument::Parse("{\"a\":10}");
     JsonElement captured = doc->getRootElementProperty().GetProperty("a");
     doc->Dispose();
@@ -976,9 +977,10 @@ TEST(JsonGatedBehaviourPins, Fix2115_BothOptionsWorkAtBOTHDoorsIdentically) {
 }
 
 TEST(JsonGatedBehaviourPins, PINCCF019JsonNodeSParentIsABorrowedPointerAndDetachIsPublic) {
-    // SR-AUD-327 / cause TJ-C, CCF-019's first-named site. #1888/#1889/#1894 stay blocked on a
-    // public source break and an object-layout change. This review implements nothing there;
-    // the pin records what is true today so the blocked tickets keep a live baseline.
+    // SR-AUD-327 / cause TJ-C, CCF-019's first-named site. #1888/#1889/#1894 have landed: parent
+    // mutation is container-only, destruction detaches retained children, copy/move are deleted,
+    // and enumeration is fail-fast. The raw pointer remains a deliberately borrowed link whose
+    // lifetime invariant is now enforced rather than an open ticket.
     auto object = std::make_shared<Nodes::JsonObject>();
     auto child = Nodes::JsonValue::Create(intcs{1});
     object->Add("a", child);

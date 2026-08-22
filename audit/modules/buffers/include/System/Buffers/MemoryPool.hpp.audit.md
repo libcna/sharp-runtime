@@ -100,6 +100,24 @@ retain a `Memory<T>` past its owner's `Dispose()`. Five pins guard the current b
 were mutation-checked — making the getter throw fails three of them, while the retained-view
 pin stays green, which is what shows the mutation was targeted rather than indiscriminate.
 
+## Final reconciliation update (ticket #2417, 2026-08-22)
+
+The design-closure section above is retained as the historical state at #2056 and is now
+**superseded**. Half (a) subsequently landed: `getMemoryProperty()` throws
+`ObjectDisposedException` after disposal. Half (b) is not a second owner operation that can be
+fixed locally; it is the declared lifetime of `System::Memory<T>`, an explicitly non-owning C++
+view whose backing storage must outlive every access. As with `std::span`, a retained view is
+invalid after its owner is disposed or destroyed.
+
+Changing that result would require replacing the public borrowed-view model across Core.Base
+with shared ownership in order to imitate a moving-GC array reference. That is outside this
+runtime's practical subset and would contradict the documented vector/raw-pointer constructors.
+The final status is therefore **`accepted-deviation`**: the post-dispose getter defect is fixed,
+and the retained-view lifetime is an explicit caller precondition rather than an open promise.
+`IMemoryOwner.hpp`, `MemoryPool.hpp`, the migration note, and
+`BuffersContractPinTests.cpp` all state and pin the same boundary. No code dereferences an
+expired view in a test, because doing so is undefined behavior by that contract.
+
 ### SR-AUD-070's site in this file is remediated (#2054, 2026-08-04)
 
 The *"SR-AUD-070 (extended)"* note in this report — `MemoryPoolHeapOwner_` constructs its
@@ -113,4 +131,6 @@ when `Rent` is called. Naming `MemoryPool<NoDefault>` and taking its `sizeof` st
 before and after, so the assert is in the constructor body rather than at class scope. A
 custom subclass backed by storage that does not value-initialize is free of the requirement,
 and the header says so. SR-AUD-070's full remediation record is in the `ArrayBufferWriter.hpp`
-report. This does **not** touch SR-AUD-071 or blocked ticket #2056.
+report. **At the #2054 checkpoint** this did not touch SR-AUD-071 or then-blocked ticket #2056;
+the final-reconciliation section above records the later getter repair and accepted retained-view
+contract that supersede that historical state.

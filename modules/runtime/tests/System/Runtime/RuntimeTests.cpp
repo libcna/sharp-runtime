@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -670,15 +671,15 @@ TEST(TargetFrameworkAttributeTests, Constructor_StoresFrameworkName) {
     EXPECT_EQ(attr.getFrameworkNameProperty(), ".NETCoreApp,Version=v8.0");
 }
 
-TEST(TargetFrameworkAttributeTests, DefaultDisplayName_IsEmpty) {
+TEST(TargetFrameworkAttributeTests, DefaultDisplayName_IsNull) {
     TargetFrameworkAttribute attr(".NETCoreApp,Version=v8.0");
-    EXPECT_EQ(attr.getFrameworkDisplayNameProperty(), "");
+    EXPECT_EQ(attr.getFrameworkDisplayNameProperty(), std::nullopt);
 }
 
 TEST(TargetFrameworkAttributeTests, SetDisplayName) {
     TargetFrameworkAttribute attr(".NETCoreApp,Version=v8.0");
     attr.setFrameworkDisplayNameProperty(".NET 8.0");
-    EXPECT_EQ(attr.getFrameworkDisplayNameProperty(), ".NET 8.0");
+    EXPECT_EQ(attr.getFrameworkDisplayNameProperty(), std::optional<std::string>(".NET 8.0"));
 }
 
 TEST(SupportedOSPlatformAttributeTests, Constructor_StoresPlatform) {
@@ -689,13 +690,14 @@ TEST(SupportedOSPlatformAttributeTests, Constructor_StoresPlatform) {
 TEST(UnsupportedOSPlatformAttributeTests, Constructor_StoresPlatform) {
     UnsupportedOSPlatformAttribute attr("browser");
     EXPECT_EQ(attr.getPlatformNameProperty(), "browser");
-    EXPECT_EQ(attr.getMessageProperty(), "");
+    EXPECT_EQ(attr.getMessageProperty(), std::nullopt);
 }
 
 TEST(UnsupportedOSPlatformAttributeTests, Constructor_WithMessage) {
     UnsupportedOSPlatformAttribute attr("browser", "Not supported in the browser sandbox.");
     EXPECT_EQ(attr.getPlatformNameProperty(), "browser");
-    EXPECT_EQ(attr.getMessageProperty(), "Not supported in the browser sandbox.");
+    EXPECT_EQ(attr.getMessageProperty(),
+              std::optional<std::string>("Not supported in the browser sandbox."));
 }
 
 TEST(SupportedOSPlatformGuardAttributeTests, Constructor_StoresPlatform) {
@@ -715,11 +717,11 @@ TEST(ObsoletedOSPlatformAttributeTests, Fix1980G4_UrlIsASettablePropertyNotACons
     // exactly `(platformName)` and `(platformName, message)` (PlatformAttributes.cs).
     ObsoletedOSPlatformAttribute attr("ios", "Use X instead");
     EXPECT_EQ(attr.getPlatformNameProperty(), "ios");
-    EXPECT_EQ(attr.getMessageProperty(), "Use X instead");
-    EXPECT_EQ(attr.getUrlProperty(), "") << "unset until assigned, as .NET's null is";
+    EXPECT_EQ(attr.getMessageProperty(), std::optional<std::string>("Use X instead"));
+    EXPECT_EQ(attr.getUrlProperty(), std::nullopt);
 
     attr.setUrlProperty("https://example.com");
-    EXPECT_EQ(attr.getUrlProperty(), "https://example.com");
+    EXPECT_EQ(attr.getUrlProperty(), std::optional<std::string>("https://example.com"));
 
     static_assert(!std::is_constructible_v<ObsoletedOSPlatformAttribute,
                                             std::string, std::string, std::string>,
@@ -729,18 +731,18 @@ TEST(ObsoletedOSPlatformAttributeTests, Fix1980G4_UrlIsASettablePropertyNotACons
 TEST(ObsoletedOSPlatformAttributeTests, Fix1980G4_TheOneArgumentConstructorIsDotNets) {
     ObsoletedOSPlatformAttribute attr("android");
     EXPECT_EQ(attr.getPlatformNameProperty(), "android");
-    EXPECT_EQ(attr.getMessageProperty(), "");
-    EXPECT_EQ(attr.getUrlProperty(), "");
+    EXPECT_EQ(attr.getMessageProperty(), std::nullopt);
+    EXPECT_EQ(attr.getUrlProperty(), std::nullopt);
 }
 
-TEST(RequiresPreviewFeaturesAttributeTests, DefaultConstructor_EmptyMessage) {
+TEST(RequiresPreviewFeaturesAttributeTests, DefaultConstructor_NullMessage) {
     RequiresPreviewFeaturesAttribute attr;
-    EXPECT_EQ(attr.getMessageProperty(), "");
+    EXPECT_EQ(attr.getMessageProperty(), std::nullopt);
 }
 
 TEST(RequiresPreviewFeaturesAttributeTests, Constructor_WithMessage) {
     RequiresPreviewFeaturesAttribute attr("Preview feature");
-    EXPECT_EQ(attr.getMessageProperty(), "Preview feature");
+    EXPECT_EQ(attr.getMessageProperty(), std::optional<std::string>("Preview feature"));
 }
 
 TEST(RequiresPreviewFeaturesAttributeTests, Fix1980G4_UrlIsASettablePropertyNotAConstructorArgument) {
@@ -748,13 +750,50 @@ TEST(RequiresPreviewFeaturesAttributeTests, Fix1980G4_UrlIsASettablePropertyNotA
     // names. .NET: `public RequiresPreviewFeaturesAttribute(string? message)` and
     // `public string? Url { get; set; }` (RequiresPreviewFeaturesAttribute.cs:34,47).
     RequiresPreviewFeaturesAttribute attr("Preview feature");
-    EXPECT_EQ(attr.getUrlProperty(), "");
+    EXPECT_EQ(attr.getUrlProperty(), std::nullopt);
     attr.setUrlProperty("https://aka.ms/preview");
-    EXPECT_EQ(attr.getUrlProperty(), "https://aka.ms/preview");
+    EXPECT_EQ(attr.getUrlProperty(), std::optional<std::string>("https://aka.ms/preview"));
 
     static_assert(!std::is_constructible_v<RequiresPreviewFeaturesAttribute,
                                             std::string, std::string>,
                   "#1980 G-4: .NET's constructor takes the message alone");
+}
+
+TEST(VersioningNullableMetadataTests, AbsentAndExplicitlyEmptyRemainDifferentForAllSixProperties) {
+    // SR-AUD-164's remaining half: every field below is `string?` in .NET. Plain std::string
+    // collapsed an omitted value and an explicitly supplied empty string into the same state.
+    TargetFrameworkAttribute target(".NETCoreApp,Version=v8.0");
+    EXPECT_EQ(target.getFrameworkDisplayNameProperty(), std::nullopt);
+    target.setFrameworkDisplayNameProperty(std::string{});
+    EXPECT_EQ(target.getFrameworkDisplayNameProperty(), std::optional<std::string>(""));
+    target.setFrameworkDisplayNameProperty(std::nullopt);
+    EXPECT_EQ(target.getFrameworkDisplayNameProperty(), std::nullopt);
+
+    const UnsupportedOSPlatformAttribute unsupportedAbsent("browser");
+    const UnsupportedOSPlatformAttribute unsupportedEmpty("browser", std::string{});
+    EXPECT_EQ(unsupportedAbsent.getMessageProperty(), std::nullopt);
+    EXPECT_EQ(unsupportedEmpty.getMessageProperty(), std::optional<std::string>(""));
+    EXPECT_NE(unsupportedAbsent.getMessageProperty(), unsupportedEmpty.getMessageProperty());
+
+    ObsoletedOSPlatformAttribute obsoletedAbsent("ios");
+    const ObsoletedOSPlatformAttribute obsoletedEmpty("ios", std::string{});
+    EXPECT_EQ(obsoletedAbsent.getMessageProperty(), std::nullopt);
+    EXPECT_EQ(obsoletedEmpty.getMessageProperty(), std::optional<std::string>(""));
+    EXPECT_EQ(obsoletedAbsent.getUrlProperty(), std::nullopt);
+    obsoletedAbsent.setUrlProperty(std::string{});
+    EXPECT_EQ(obsoletedAbsent.getUrlProperty(), std::optional<std::string>(""));
+    obsoletedAbsent.setUrlProperty(std::nullopt);
+    EXPECT_EQ(obsoletedAbsent.getUrlProperty(), std::nullopt);
+
+    RequiresPreviewFeaturesAttribute previewAbsent;
+    const RequiresPreviewFeaturesAttribute previewEmpty(std::string{});
+    EXPECT_EQ(previewAbsent.getMessageProperty(), std::nullopt);
+    EXPECT_EQ(previewEmpty.getMessageProperty(), std::optional<std::string>(""));
+    EXPECT_EQ(previewAbsent.getUrlProperty(), std::nullopt);
+    previewAbsent.setUrlProperty(std::string{});
+    EXPECT_EQ(previewAbsent.getUrlProperty(), std::optional<std::string>(""));
+    previewAbsent.setUrlProperty(std::nullopt);
+    EXPECT_EQ(previewAbsent.getUrlProperty(), std::nullopt);
 }
 
 // ===========================================================================
@@ -1268,6 +1307,59 @@ TEST(MarshalAsFieldTypeTests, Fix1980G5_TheTwoComEnumsExist) {
     EXPECT_EQ(static_cast<int>(ClassInterfaceType::AutoDual), 2);
 }
 
+TEST(ComInterfaceAttributeShapeTests, InterfaceTypeValueIsTypedGetOnlyAndTheClassIsFinal) {
+    static_assert(std::is_final_v<InterfaceTypeAttribute>);
+    static_assert(!HasPublicValueField<InterfaceTypeAttribute>,
+                  "SR-AUD-167: InterfaceTypeAttribute.Value must be get-only");
+    static_assert(std::is_constructible_v<InterfaceTypeAttribute, ComInterfaceType>);
+    static_assert(std::is_constructible_v<InterfaceTypeAttribute, SharpRuntime::shortcs>);
+    static_assert(std::is_same_v<
+                  decltype(InterfaceTypeAttribute(ComInterfaceType::InterfaceIsDual)
+                               .getValueProperty()),
+                  ComInterfaceType>);
+    static_assert(sizeof(ComInterfaceType) == sizeof(SharpRuntime::intcs));
+    constexpr std::size_t interfaceDeclared =
+        sizeof(System::Attribute) + sizeof(ComInterfaceType);
+    constexpr std::size_t interfaceAlignment = alignof(InterfaceTypeAttribute);
+    constexpr std::size_t interfaceRounded =
+        ((interfaceDeclared + interfaceAlignment - 1) / interfaceAlignment) * interfaceAlignment;
+    EXPECT_EQ(sizeof(InterfaceTypeAttribute), interfaceRounded)
+        << "the typed private field replaces, rather than supplements, the old public int";
+
+    const InterfaceTypeAttribute typed(ComInterfaceType::InterfaceIsIDispatch);
+    EXPECT_EQ(typed.getValueProperty(), ComInterfaceType::InterfaceIsIDispatch);
+
+    // .NET retains a raw Int16 compatibility constructor. It stores the value verbatim even when
+    // that value is not a named enumerator; the strongly typed constructor is the normal route.
+    const InterfaceTypeAttribute raw(static_cast<SharpRuntime::shortcs>(42));
+    EXPECT_EQ(static_cast<int>(raw.getValueProperty()), 42);
+}
+
+TEST(ComInterfaceAttributeShapeTests, ClassInterfaceValueIsTypedGetOnlyAndTheClassIsFinal) {
+    static_assert(std::is_final_v<ClassInterfaceAttribute>);
+    static_assert(!HasPublicValueField<ClassInterfaceAttribute>,
+                  "SR-AUD-167: ClassInterfaceAttribute.Value must be get-only");
+    static_assert(std::is_constructible_v<ClassInterfaceAttribute, ClassInterfaceType>);
+    static_assert(std::is_constructible_v<ClassInterfaceAttribute, SharpRuntime::shortcs>);
+    static_assert(std::is_same_v<
+                  decltype(ClassInterfaceAttribute(ClassInterfaceType::None).getValueProperty()),
+                  ClassInterfaceType>);
+    static_assert(sizeof(ClassInterfaceType) == sizeof(SharpRuntime::intcs));
+    constexpr std::size_t classDeclared =
+        sizeof(System::Attribute) + sizeof(ClassInterfaceType);
+    constexpr std::size_t classAlignment = alignof(ClassInterfaceAttribute);
+    constexpr std::size_t classRounded =
+        ((classDeclared + classAlignment - 1) / classAlignment) * classAlignment;
+    EXPECT_EQ(sizeof(ClassInterfaceAttribute), classRounded)
+        << "the typed private field replaces, rather than supplements, the old public int";
+
+    const ClassInterfaceAttribute typed(ClassInterfaceType::AutoDual);
+    EXPECT_EQ(typed.getValueProperty(), ClassInterfaceType::AutoDual);
+
+    const ClassInterfaceAttribute raw(static_cast<SharpRuntime::shortcs>(42));
+    EXPECT_EQ(static_cast<int>(raw.getValueProperty()), 42);
+}
+
 namespace {
     /// Exhaustive over VarEnum, with NO `default:` label.
     ///
@@ -1361,13 +1453,13 @@ TEST(RuntimeG3Tests, AmbiguousImplementationExceptionHasDotNetsShape) {
 // here was measured after the change rather than predicted before it -- #1958's lesson, where a
 // predicted 104 was asserted and the build rejected it.
 //
-// NOTHING GREW. AmbiguousImplementationException stays 168 because SystemException adds no members
-// of its own over Exception, so reparenting moved the type sideways rather than shrinking it. The
-// five attributes stay exactly where they were because their platformName_ moved INTO the new base
-// rather than being duplicated beside it -- which is the whole point of the base. A consumer must
-// still rebuild, because the VTABLE moved even where sizeof did not, and that is what the migration
-// note records.
-TEST(RuntimeG3Tests, TheLayoutsAreMeasuredAndUnchanged) {
+// G-3 ITSELF GREW NOTHING. AmbiguousImplementationException stays 168 because SystemException
+// adds no members of its own over Exception, so reparenting moved the type sideways rather than
+// shrinking it. The five attributes stayed where they were because platformName_ moved INTO the
+// new base rather than being duplicated beside it. SR-AUD-164's later nullable-state follow-up
+// legitimately grows the four types named below; those new relationships are pinned separately.
+// A consumer must rebuild for both changes: G-3 moved the vtable, and SR-AUD-164 moved layouts.
+TEST(RuntimeG3Tests, G3LayoutsAndLaterNullableGrowthArePinned) {
     using namespace System::Runtime::Versioning;
     EXPECT_EQ(sizeof(System::Exception), 168u);
     EXPECT_EQ(sizeof(System::SystemException), 168u)
@@ -1380,10 +1472,18 @@ TEST(RuntimeG3Tests, TheLayoutsAreMeasuredAndUnchanged) {
     EXPECT_EQ(sizeof(SupportedOSPlatformAttribute), sizeof(OSPlatformAttribute));
     EXPECT_EQ(sizeof(SupportedOSPlatformGuardAttribute), sizeof(OSPlatformAttribute));
     EXPECT_EQ(sizeof(UnsupportedOSPlatformGuardAttribute), sizeof(OSPlatformAttribute));
-    // These two carry a message of their own, so they are larger -- asserted as a RELATIONSHIP so a
-    // later member cannot hide behind a hand-updated literal.
-    EXPECT_EQ(sizeof(UnsupportedOSPlatformAttribute), sizeof(OSPlatformAttribute) + sizeof(std::string));
-    EXPECT_GT(sizeof(ObsoletedOSPlatformAttribute), sizeof(UnsupportedOSPlatformAttribute));
+    // SR-AUD-164 makes each nullable string a real optional state. These relationships pin every
+    // affected data member and ensure a later edit cannot silently collapse null back into empty.
+    EXPECT_GT(sizeof(std::optional<std::string>), sizeof(std::string));
+    EXPECT_EQ(sizeof(TargetFrameworkAttribute),
+              sizeof(System::Attribute) + sizeof(std::string) +
+                  sizeof(std::optional<std::string>));
+    EXPECT_EQ(sizeof(UnsupportedOSPlatformAttribute),
+              sizeof(OSPlatformAttribute) + sizeof(std::optional<std::string>));
+    EXPECT_EQ(sizeof(ObsoletedOSPlatformAttribute),
+              sizeof(OSPlatformAttribute) + 2 * sizeof(std::optional<std::string>));
+    EXPECT_EQ(sizeof(RequiresPreviewFeaturesAttribute),
+              sizeof(System::Attribute) + 2 * sizeof(std::optional<std::string>));
 
     // The vtable half: every one of these is polymorphic, which is what forces the rebuild.
     static_assert(std::is_polymorphic_v<System::Runtime::AmbiguousImplementationException>);

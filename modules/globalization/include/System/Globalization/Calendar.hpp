@@ -46,8 +46,13 @@ public:
     /** @brief Constant representing the current era. */
     static constexpr intcs CurrentEra = 0;
 
-    /** @brief Virtual destructor for safe polymorphic destruction. */
-    virtual ~Calendar() = default;
+    /**
+     * @brief Pure virtual destructor: Calendar is an abstract base, as in .NET.
+     *
+     * The destructor still has an inline definition below so concrete calendars can reuse every
+     * default implementation in this class and be destroyed polymorphically.
+     */
+    virtual ~Calendar() = 0;
 
     /**
      * @brief Gets the algorithm type for this calendar.
@@ -637,5 +642,7 @@ public:
         return year;
     }
 };
+
+inline Calendar::~Calendar() = default;
 
 } // namespace System::Globalization

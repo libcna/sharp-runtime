@@ -103,9 +103,8 @@ Component **`Timers`** → target `sharp_runtime_timers`,
 | `Elapsed` | a public `System::EventHandler<ElapsedEventArgs>` **field**, not an accessor pair |
 
 Deliberate reductions already documented in the header and **not** re-litigated here: no
-`Component` base, no `SynchronizingObject`, and the raw-`this`-capture lifetime caveat (the same
-class of hazard as `Socket`'s async members and `ClientWebSocket`'s Send/Receive, tracked in those
-namespaces' own blocked design tickets).
+`Component` base and no `SynchronizingObject`. This review originally excluded the raw-`this`
+callback lifetime hazard; the final audit follow-up subsequently remediated it in §17.
 
 ---
 
@@ -265,9 +264,8 @@ the upper bound. Neither excludes `NaN`. §4.3.
   is the point of the repair, but it means a handler that throws every time now loops silently. The
   swallow is what .NET does (`throw_process=alive` in the audit's managed probe) and is pinned by a
   test that asserts subsequent fires still happen.
-- **The `this`-capture hazard is out of scope and unchanged.** The header already documents it; it
-  is the same shape as `Socket`'s and `ClientWebSocket`'s, both of which have their own blocked
-  design tickets. Nothing in this review makes it better or worse.
+- **Historical scope note:** this review left the `this`-capture hazard unchanged. The final audit
+  follow-up in §17 replaced that capture with a shared lifetime gate and supersedes this decision.
 - **`Close()` from inside a handler, rescheduling from inside a handler, double `Close()` and
   destruction while enabled all already survive** (probe 1's control block), and every ticket here
   must keep them surviving.
@@ -306,8 +304,8 @@ current behaviour is process death.
 
 1. **`System::Threading::Timer`'s own lack of a callback exception boundary** — measured (§4.1),
    matches .NET's `System.Threading.Timer`, pinned, not changed.
-2. **The raw-`this` capture lifetime hazard** — documented in the header, same class as `Socket`'s
-   and `ClientWebSocket`'s, out of scope for this review.
+2. **The raw-`this` capture lifetime hazard** — out of scope for this historical review, then
+   remediated by the final audit follow-up in §17.
 3. **`Component`/`SynchronizingObject`** — documented reductions, not findings.
 4. **`TimersDescriptionAttribute`** — an attribute stub; attributes are a permanent deviation.
 5. **#2155's `Object` base** — approval-gated.
@@ -458,13 +456,18 @@ The §9 matrix was measured by `build-probe/2153_probe1_before.log` and survived
 probe log is not a regression test. Nine cases are now permanent
 (`TimerLifecyclePinTests.cpp`), each one a way a future edit to `Close()`, `setEnabledProperty` or
 the callback lambda could deadlock, use after free, or silently stop firing, and none of them
-covered by the module's original nine tests: `Close()` from inside the handler (a self-join would
-deadlock here — `Dispose` detaches, which is what makes it survivable), rescheduling from inside the
-handler, flipping `AutoReset` from inside the handler, `Stop()` before the first fire, destruction
-while enabled, restarting after `Close()`, `Dispose()` being `Close()`, and the two compile-time
-pins for #2155.
+covered by the module's original nine tests: `Close()` from inside the handler, rescheduling from
+inside the handler, flipping `AutoReset` from inside the handler, `Stop()` before the first fire,
+destruction while enabled, restarting after `Close()`, `Dispose()` being `Close()`, and the two
+compile-time pins for #2155. The first destruction pin only proved that one observed run survived;
+§17 replaces it with a handshake that holds a handler in flight while destruction runs elsewhere.
 
-### 16.3 Namespace reconciliation — `System::Timers`
+### 16.3 Historical namespace reconciliation at the #2157 landing
+
+The table and closure statement below record the state when #2157 landed. They are not the current
+audit disposition: #2155 subsequently landed, made `Timer` polymorphic, and remediated
+SR-AUD-239. Section 17 and the final audit index supersede this checkpoint; there is no remaining
+#2155 blocker.
 
 | Finding | Sev | Cause | Ticket | Disposition |
 |---|---|---|---|---|
@@ -483,13 +486,67 @@ Deliberately excluded, each recorded rather than silently dropped:
 | Item | Why | Where it is pinned |
 |---|---|---|
 | `System::Threading::Timer` does not catch its own callback either | matches .NET's `System.Threading.Timer`; changing it would diverge in the other direction | `build-probe/2153_probe1_before.log`; not asserted in-process, because the abort would take the test executable with it and because `Threading` is a **private** dependency of this component |
-| the raw-`this`-capture lifetime hazard | documented in the header; same class as `Socket`'s and `ClientWebSocket`'s, both with their own blocked design tickets | header `@note` |
+| the raw-`this`-capture lifetime hazard | **subsequently remediated** by the final audit follow-up; retained here only as history of this review's original exclusion | §17; `TimerLifecyclePinTests` |
 | a second subscribed handler is not reached when the first throws | matches a C# multicast delegate | `TimerExceptionBoundaryTests` |
 | the constructor ceils the interval and the setter does not | no finding names it; either answer is a public observable change | `TimerIntervalDomainPinTests`, and the header |
 | `Component` / `SynchronizingObject` / `TimersDescriptionAttribute` | documented reductions and an attribute stub; attributes are a permanent deviation | header |
 
-**Every compatible-ready ticket in this namespace is complete.** #2153, #2154, #2156 and #2157 are
-`done`; #2155 is blocked on an approval whose exact wording and measured cost are recorded in its
-ticket. **`modules/timers` is closed except for #2155.**
+**At that checkpoint**, every compatible-ready ticket in this namespace was complete. #2153,
+#2154, #2156 and #2157 were `done`; #2155 was blocked on an approval whose exact wording and
+measured cost were recorded in its ticket. The later #2155 implementation closed that last item.
 
 Test count for the namespace: **9 → 36** (#2154 +10, #2156 +8, #2157 +9).
+
+---
+
+## 17. Final-audit lifetime follow-up
+
+The old callback stored a `shared_ptr<int>` cookie but still captured `this`. The cookie could
+reject a stale tick only by reading `cookie_` through that pointer, while
+`System::Threading::Timer::Dispose()` detached the worker. Destruction racing callback entry could
+therefore read an already-destroyed `Timer`, and the original
+`DestructionWhileEnabledIsSafe` test did not force that race or hold any callback in flight.
+
+The cookie-sized member is now a shared callback-lifetime gate. A tick locks the gate, verifies its
+generation and registers itself active before acquiring the owner pointer. Destruction invalidates
+the generation before releasing the underlying timer and waits until every registered callback has
+left; a later detached tick sees only the independently-owned gate and never reads `Timer`.
+`enabled_` is atomic because a one-shot worker and `Close()`/`Stop()` can write it from different
+threads. There is no signature, vtable or layout change: the shared gate replaces the old shared
+cookie and the existing 112-byte layout pin remains green.
+
+`Close()` remains deliberately non-blocking, preserving .NET's allowance for an already-running
+event to finish after close and allowing a handler to close its own timer without a self-wait.
+The callback performs no owner access after `Elapsed.Raise` returns. Destroying the object from one
+of its own handlers is still not a supported contract because another handler in the same multicast
+snapshot would receive a destroyed sender; the public header says to call `Close()` there.
+
+The lifecycle suite now holds a handler behind a condition variable, starts destruction on another
+thread, proves destruction has not returned while the handler owns the callback gate, releases the
+handler, and proves destruction then completes. The existing self-close case now signals only after
+`Close()` returns, so it detects a self-deadlock rather than merely observing handler entry.
+
+Later #2155 coverage had already brought the executable to 38 tests. The first lifetime follow-up
+replaces the old observation-only destruction case with the forced in-flight handshake. Final
+diff review then added two distinct regressions: destruction racing the supported
+`Close()`-from-handler path, and a one-shot timer restarted as periodic after changing
+`AutoReset`. The latter exposed a stale callback capture that made `Enabled` false while the
+underlying periodic timer kept firing, so `Stop()` became a no-op. Both `enabled_` and
+`autoReset_` are now atomic, and the callback reads the current reset mode only after entering the
+lifetime gate.
+
+A later review pass caught one more ordering defect: the underlying timer used to be armed by its
+constructor before `make_unique` could assign it to `timer_`, so a fast handler calling `Close()`
+could race that assignment. Start now constructs a paused worker locally, transfers it and arms it
+under the callback-lifetime gate, and all `timer_` ownership accesses use that gate. A test-only
+ODR-checked seam holds the exact pre-arm boundary: one regression proves no handler enters before
+publication; the other proves an external `Close()` there cancels Start without publishing a
+worker afterward.
+
+The final static pass then separated two stale-generation outcomes that the first implementation
+had conflated. A Start held at the seam may lose to `Close()` plus a newer successful Start. On
+ordinary return the old generation now discards only its local paused worker and cannot clear the
+new generation's `Enabled`; on an injected failure it cleans published state only when it still
+owns the current generation. Two deterministic regressions pin the successful and throwing stale
+paths. The final executable count is **44**; the full-repository count is recorded in `NEXT.md`
+after the clean gate.

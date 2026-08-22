@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source_without_task": {
+    "System.ILocalTimeZone": "Sharp-runtime-only dependency inversion used where Core.Base cannot depend on the TimeZone component; it is not a .NET inventory type.",
+    "System.MulticastAction": "C++ event/delegate storage helper; managed inventories represent its public event shapes as delegate types instead.",
+    "System.Xml.XPath.XPathEvaluateResult": "C++ tagged-union approximation of object-valued XPathNavigator.Evaluate results; .NET has no public type with this name.",
+    "System.Xml.XPath.XmlDocumentNavigator": "C++ concrete implementation of .NET's internal DocumentXPathNavigator, not a public .NET inventory type."
+  },
+  "ported_without_header": {
+    "System.Linq.Enumerable": "The C++ compatibility surface is represented by free functions in namespace System::Linq in System/Linq.hpp rather than a static Enumerable class."
+  }
+}

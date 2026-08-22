@@ -8,8 +8,10 @@
 //   CultureInfo:           int ctor, CurrentUICulture, all properties
 //   CultureNotFoundException: all ctors, getInvalidCultureIdProperty
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/NotSupportedException.hpp"
 #include "System/Globalization/CompareInfo.hpp"
 #include "System/Globalization/CompareOptions.hpp"
 #include "System/Globalization/CultureInfo.hpp"
@@ -93,11 +95,13 @@ TEST(CompareInfoBatch27Test, IndexOf_OrdinalIgnoreCase) {
     EXPECT_EQ(ci.IndexOf("Hello World", "WORLD", CompareOptions::OrdinalIgnoreCase), 6);
 }
 
-TEST(CompareInfoBatch27Test, GetSortKey_OrdinalIgnoreCase_ProducesEqualKeys) {
+TEST(CompareInfoBatch27Test, GetSortKey_RejectsOrdinalModes) {
     CompareInfo ci("en-US");
-    auto k1 = ci.GetSortKey("HELLO", CompareOptions::OrdinalIgnoreCase);
-    auto k2 = ci.GetSortKey("hello", CompareOptions::OrdinalIgnoreCase);
-    EXPECT_TRUE(k1 == k2);
+    // Unlike Compare and GetHashCode, .NET's GetSortKey contract excludes both ordinal flags.
+    EXPECT_THROW((void)ci.GetSortKey("hello", CompareOptions::Ordinal),
+                 System::ArgumentException);
+    EXPECT_THROW((void)ci.GetSortKey("hello", CompareOptions::OrdinalIgnoreCase),
+                 System::ArgumentException);
 }
 
 TEST(CompareInfoBatch27Test, GetHashCode_OrdinalIgnoreCase_MatchesAcrossCase) {
@@ -173,6 +177,74 @@ TEST(CompareInfoBatch27Test, GetHashCode_IgnoreCase_MatchesAcrossCase) {
     CompareInfo ci("en-US");
     EXPECT_EQ(ci.GetHashCode("Hello", CompareOptions::IgnoreCase),
               ci.GetHashCode("hello", CompareOptions::IgnoreCase));
+}
+
+TEST(CompareInfoBatch27Test, UnicodeInvariantIgnoreCaseIsConsistentAcrossEveryDoor) {
+    CompareInfo ci("de-DE");
+    const std::string upperAumlaut = "\xC3\x84";
+    const std::string lowerAumlaut = "\xC3\xA4";
+    const std::string roundedVe = "\xE1\xB2\x80"; // U+1C80 simple-uppercase maps to U+0412.
+    const std::string capitalVe = "\xD0\x92";
+
+    EXPECT_EQ(ci.Compare(upperAumlaut, lowerAumlaut, CompareOptions::IgnoreCase), 0);
+    EXPECT_EQ(ci.Compare(upperAumlaut, lowerAumlaut, CompareOptions::OrdinalIgnoreCase), 0);
+    EXPECT_TRUE(ci.IsPrefix(roundedVe + "alue", capitalVe, CompareOptions::OrdinalIgnoreCase));
+    EXPECT_TRUE(ci.IsSuffix("word" + roundedVe, capitalVe, CompareOptions::OrdinalIgnoreCase));
+    EXPECT_EQ(ci.IndexOf("a" + roundedVe + "b", capitalVe,
+                         CompareOptions::OrdinalIgnoreCase), 1);
+    EXPECT_EQ(ci.LastIndexOf("a" + roundedVe + "b" + roundedVe, capitalVe,
+                             CompareOptions::OrdinalIgnoreCase), 5);
+
+    const auto upperKey = ci.GetSortKey(upperAumlaut, CompareOptions::IgnoreCase);
+    const auto lowerKey = ci.GetSortKey(lowerAumlaut, CompareOptions::IgnoreCase);
+    EXPECT_EQ(SortKey::Compare(upperKey, lowerKey), 0);
+    EXPECT_EQ(ci.GetHashCode(upperAumlaut, CompareOptions::OrdinalIgnoreCase),
+              ci.GetHashCode(lowerAumlaut, CompareOptions::OrdinalIgnoreCase));
+
+    // OrdinalIgnoreCase is simple one-scalar folding, never a culture expansion.
+    EXPECT_NE(ci.Compare("Stra\xC3\x9F" "e", "STRASSE", CompareOptions::OrdinalIgnoreCase), 0);
+}
+
+TEST(CompareInfoBatch27Test, UnsupportedLinguisticOptionsFailInsteadOfBeingIgnored) {
+    CompareInfo ci;
+    const CompareOptions unsupported[] = {
+        CompareOptions::IgnoreNonSpace,
+        CompareOptions::IgnoreSymbols,
+        CompareOptions::IgnoreKanaType,
+        CompareOptions::IgnoreWidth,
+        CompareOptions::NumericOrdering,
+        CompareOptions::StringSort,
+    };
+    for (CompareOptions option : unsupported) {
+        EXPECT_THROW((void)ci.Compare("a", "a", option), System::NotSupportedException);
+    }
+
+    // Every public option-taking door uses the same policy, including paths whose values would
+    // otherwise permit an early return.
+    EXPECT_THROW((void)ci.IsPrefix("", "", CompareOptions::IgnoreSymbols),
+                 System::NotSupportedException);
+    EXPECT_THROW((void)ci.IsSuffix("", "", CompareOptions::IgnoreSymbols),
+                 System::NotSupportedException);
+    EXPECT_THROW((void)ci.IndexOf("abc", "", CompareOptions::IgnoreSymbols),
+                 System::NotSupportedException);
+    EXPECT_THROW((void)ci.LastIndexOf("abc", "", CompareOptions::IgnoreSymbols),
+                 System::NotSupportedException);
+    EXPECT_THROW((void)ci.GetSortKey("abc", CompareOptions::IgnoreSymbols),
+                 System::NotSupportedException);
+    EXPECT_THROW((void)ci.GetHashCode("abc", CompareOptions::IgnoreSymbols),
+                 System::NotSupportedException);
+}
+
+TEST(CompareInfoBatch27Test, OrdinalOptionsAreValidOnlyInIsolation) {
+    CompareInfo ci;
+    EXPECT_THROW((void)ci.Compare("a", "A",
+                                  CompareOptions::Ordinal | CompareOptions::IgnoreCase),
+                 System::ArgumentException);
+    EXPECT_THROW((void)ci.IndexOf("a", "A",
+                                  CompareOptions::OrdinalIgnoreCase | CompareOptions::IgnoreCase),
+                 System::ArgumentException);
+    EXPECT_THROW((void)ci.Compare("a", "a", static_cast<CompareOptions>(0x00000100)),
+                 System::ArgumentException);
 }
 
 TEST(CompareInfoBatch27Test, EqualityAndToString) {

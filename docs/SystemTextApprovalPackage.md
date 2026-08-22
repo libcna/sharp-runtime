@@ -3,6 +3,11 @@
 
 # `System::Text` approval package — the nine blocked decisions, verified
 
+> **Historical approval snapshot (2026-08-03).** This is no longer an active request: its
+> decisions subsequently landed. Use `plan.sqlite3` for current ticket state and
+> `docs/AuditFindingsReconciliation.md` for current finding dispositions; the body is retained as
+> the evidence and cost record at the time approval was sought.
+
 Ticket **#2022**, written 2026-08-03 on branch
 `feature/remediation-batch-text-approvals-next-review`.
 

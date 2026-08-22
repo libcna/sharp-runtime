@@ -39,7 +39,12 @@ namespace System {
         SharpRuntime::intcs hResult_ = static_cast<SharpRuntime::intcs>(0x80131500u); // COR_E_EXCEPTION
 
     public:
-        /** @brief Initializes a new instance of the Exception class with an empty message. */
+        /**
+         * @brief Initializes a new instance with .NET's fallback message for System.Exception.
+         *
+         * An explicitly supplied empty string remains empty; only the parameterless constructor
+         * uses `"Exception of type 'System.Exception' was thrown."` (#2323, SR-AUD-092).
+         */
         Exception();
 
         ~Exception() override = default;

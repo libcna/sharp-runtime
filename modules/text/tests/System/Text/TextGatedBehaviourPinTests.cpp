@@ -151,22 +151,19 @@ TEST(TextGatedBehaviourPinTests, Fix2018_RuneCasingUsesTheSimpleMappingTable) {
     }));
 }
 
-TEST(TextGatedBehaviourPinTests, RuneIsWhiteSpaceIsUnicodeAwareAndIncludesOneScalarDotNetDoesNot) {
-    // The self-contradiction SR-AUD-294 rests on: this one classifier IS Unicode-aware while
-    // its six siblings are not.
+TEST(TextGatedBehaviourPinTests, RuneIsWhiteSpaceMatchesDotNetForTheFormerFeffDivergence) {
+    // SR-AUD-294's classifiers are all Unicode-aware; keep representative non-ASCII whitespace
+    // controls beside the boundary that used to disagree with .NET.
     EXPECT_TRUE(Rune::IsWhiteSpace(Rune(uint32_t(0x00A0))));  // NO-BREAK SPACE
     EXPECT_TRUE(Rune::IsWhiteSpace(Rune(uint32_t(0x2003))));  // EM SPACE
     EXPECT_TRUE(Rune::IsWhiteSpace(Rune(uint32_t(0x3000))));  // IDEOGRAPHIC SPACE
     EXPECT_TRUE(Rune::IsWhiteSpace(Rune(' ')));
 
-    // Measured by #2022 and NOT named by SR-AUD-294: the table this port ships also contains
-    // U+FEFF, which .NET removed from its white-space set — `Char.IsWhiteSpace('﻿')` is
-    // false there. Recorded as a post-audit observation folded into #2018 (no SR-AUD
-    // identifier issued; numbering stays frozen at 364), and pinned here so the repair that
-    // adopts real Unicode tables has to decide it deliberately.
-    EXPECT_TRUE(Rune::IsWhiteSpace(Rune(uint32_t(0xFEFF))))
-        << "gated by #2018: .NET reports false for U+FEFF";
-    // The complement: a scalar .NET also reports false for, and this port already does.
+    // #2022 found this residual and folded it into #2018: U+FEFF is a format character, not
+    // white space in .NET's Rune/Char contract. The old pin expected true and preserved the
+    // contradiction after the table-backed classifiers landed.
+    EXPECT_FALSE(Rune::IsWhiteSpace(Rune(uint32_t(0xFEFF))));
+    // A second historical whitespace removal remains false as well.
     EXPECT_FALSE(Rune::IsWhiteSpace(Rune(uint32_t(0x180E))));
 }
 

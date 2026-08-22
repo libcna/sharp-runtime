@@ -41,8 +41,12 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "System/Diagnostics/Process.hpp"
 #include "System/Diagnostics/ProcessStartInfo.hpp"
@@ -83,6 +87,46 @@ void killDirectChildAndSettle(Process& process) {
 long elapsedMsSince(std::chrono::steady_clock::time_point start) {
     return static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start).count());
+}
+
+class ScopedTemporaryDirectory final {
+public:
+    ScopedTemporaryDirectory() {
+        std::string pattern =
+            (std::filesystem::temp_directory_path() /
+             "sharp-runtime-process-reader-XXXXXX").string();
+        std::vector<char> writable(pattern.begin(), pattern.end());
+        writable.push_back('\0');
+        const char* created = ::mkdtemp(writable.data());
+        if (created == nullptr) {
+            throw std::runtime_error("could not create a unique Process-test directory");
+        }
+        path_ = created;
+    }
+
+    ~ScopedTemporaryDirectory() {
+        std::error_code error;
+        std::filesystem::remove_all(path_, error);
+    }
+
+    ScopedTemporaryDirectory(const ScopedTemporaryDirectory&) = delete;
+    ScopedTemporaryDirectory& operator=(const ScopedTemporaryDirectory&) = delete;
+
+    [[nodiscard]] std::filesystem::path path(const std::string& name) const {
+        return path_ / name;
+    }
+
+private:
+    std::filesystem::path path_;
+};
+
+std::string shellQuote(const std::string& value) {
+    std::string result = "'";
+    for (const char c : value) {
+        if (c == '\'') result += "'\\''";
+        else result += c;
+    }
+    return result + "'";
 }
 
 } // namespace
@@ -177,6 +221,40 @@ TEST(ProcessReaderJoinBlockingPinTests, Fix2032_TheUnboundedOverloadStillWaitsFo
     process.WaitForExit();
     // Complete, because the unbounded overload joined the reader.
     EXPECT_EQ(process.getStandardOutputTextProperty().size(), 400u * 40u);
+}
+
+// A finite wait is allowed to return as soon as the direct child exits, but a subsequent
+// parameterless wait must still complete the redirected streams. Before the final close-out
+// repair, WaitForExit() returned immediately whenever the finite overload had already set
+// hasExited, skipping both joins and contradicting the split contract above.
+TEST(ProcessReaderJoinBlockingPinTests,
+     UnboundedWaitAfterFiniteWaitStillCompletesDelayedInheritedOutput) {
+    ScopedTemporaryDirectory temporary;
+    const std::filesystem::path release = temporary.path("release");
+
+    ProcessStartInfo startInfo("/bin/sh");
+    startInfo.getArgumentListProperty().push_back("-c");
+    startInfo.getArgumentListProperty().push_back(
+        "(while [ ! -e " + shellQuote(release.string()) +
+        " ]; do sleep 0.01; done; printf 'late-output') & exit 0");
+    startInfo.setRedirectStandardOutputProperty(true);
+
+    Process process = Process::Start(startInfo);
+    EXPECT_TRUE(process.WaitForExit(5000)) << "the direct shell did not exit";
+
+    const auto started = std::chrono::steady_clock::now();
+    std::jthread releaser([release] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        std::error_code error;
+        (void)std::filesystem::create_directory(release, error);
+    });
+
+    process.WaitForExit();
+    const long blockedMs = elapsedMsSince(started);
+
+    EXPECT_GE(blockedMs, 100)
+        << "the unbounded overload returned before the inherited pipe was released";
+    EXPECT_EQ(process.getStandardOutputTextProperty(), "late-output");
 }
 
 // STILL PINNED, and deliberately: the restart is the one door whose join #2032 does NOT remove.

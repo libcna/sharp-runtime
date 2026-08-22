@@ -43,14 +43,11 @@ namespace System::IO
     // Order matters and is .NET's: null first. Testing getCanReadProperty() before the null
     // check would dereference the pointer that the null check exists to reject.
     //
-    // Only the READER half is here. The matching StreamWriter guard is ticket #1824 and is
-    // BLOCKED on explicit approval, because System::IO::Stream::getCanWriteProperty()
-    // defaults to false where .NET's Stream.CanWrite is abstract: a custom stream that
-    // implements Write() without overriding the property reports CanWrite=false and yet
-    // works today (case 8 writes "hello" successfully), so the writer guard would reject
-    // streams that are in fact usable. getCanReadProperty() defaults to TRUE, so this check
-    // rejects only streams that positively declare themselves unreadable, which is why it
-    // needed no approval. The full analysis is docs/TextWrapperInputContractPlan.md §5.
+    // The reader half landed first because getCanReadProperty() defaults to true, so this check
+    // rejects only streams that positively declare themselves unreadable. Ticket #1824 later
+    // landed the matching StreamWriter guard after making Stream::getCanWriteProperty() default
+    // to true as well. The full compatibility analysis is in
+    // docs/TextWrapperInputContractPlan.md §5.
     StreamReader::StreamReader(Stream* stream, bool leaveOpen)
         : stream_(stream), leaveOpen_(leaveOpen), ownsStream_(false)
     {

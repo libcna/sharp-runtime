@@ -6,12 +6,12 @@ ports, especially CNA, without attempting to implement a CLR, JIT, garbage
 collector, or the complete .NET platform.
 
 The repository currently builds as 41 independently selectable CMake
-components. The verified Linux baseline on **2026-08-10** is a warning-free build with
-**16,406 tests across 37 test executables — 16,398 passing, 2 skipped and 6 failing** for two
-measured environment/implementation causes recorded in `NEXT.md` (five `Ping` tests for the
-still-open raw-ICMP gap, one `Socket` test for the absent IPv6 stack). The paragraph below is the
-historical chain up to 2026-07-29 and is retained rather than rewritten; every reading since is
-recorded batch by batch in `NEXT.md`.
+components. The verified Linux baseline on **2026-08-22** is a warning-free clean build with
+**17,778 tests across 38 test executables — 17,778 passed, 0 failed, 0 skipped**. The component
+graph has 95 direct production edges; all ten selective-component configurations, every module
+boundary, generated catalogue, audit/plan cross-reference and the bounded Doxygen gate are checked
+locally. The paragraph below is the historical chain up to 2026-07-29 and is retained rather than
+rewritten; every later reading is recorded batch by batch in `NEXT.md`.
 
 The verified Linux baseline on 2026-07-29 was a warning-free build
 with **14,070 passing tests across 37 test executables**. (This figure had been
@@ -111,7 +111,7 @@ set(SHARP_RUNTIME_COMPONENTS
 )
 set(SHARP_RUNTIME_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 
-add_subdirectory(path/to/sharp-runtimervc)
+add_subdirectory(path/to/sharp-runtime)
 
 target_link_libraries(MyApp PRIVATE
     SharpRuntime::Text.Json
@@ -202,7 +202,7 @@ The component graph is enforced rather than documented only:
 - `.github/workflows/components.yml` runs the selective matrix and the full
   compatibility build on Ubuntu for pushes and pull requests.
 
-At the current baseline the graph has **41 physical modules and 91 direct
+At the current baseline the graph has **41 physical modules and 95 direct
 production dependency edges**, with no allow-listed exception. The boundary
 validator, the complete ten-job selective matrix, and the full build/test gate
 pass. The Text.Json negative assertion confirms that the target does not
@@ -215,7 +215,7 @@ Other platform evidence is narrower:
 
 | Platform/toolchain | Verified scope |
 |---|---|
-| Linux/GCC | Current full component build and all 13,538 tests. |
+| Linux/GCC | Current warning-free full component build and all 17,778 tests, with no failures or skips. |
 | Windows/MinGW | MinGW-w64 GCC 14-win32/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. GoogleTest was not cross-built and repository CI remains Ubuntu-only. |
 | Emscripten | Emscripten 5.0.7/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. Tests were not cross-built or run, and some runtime APIs deliberately throw `PlatformNotSupportedException`. |
 | macOS/Apple Clang | Real downstream Xcode 15.4 builds drove portability fixes on 2026-07-20; this repository has no macOS job or recorded full standalone test baseline. |
@@ -1279,8 +1279,9 @@ mkdir -p docs/generated
 doxygen Doxyfile
 ```
 
-The tracked Doxygen 1.9.8 baseline is **1,942 warnings**, measured on
-2026-07-25. Check it before submitting public-API documentation changes:
+The tracked Doxygen 1.9.8 no-regression baseline is **2,675 warnings**, verified on
+2026-08-22. It runs in both GitHub CI and `scripts/local_ci_check.sh`; run it directly before
+submitting public-API documentation changes when a full local gate is not otherwise needed:
 
 ```bash
 scripts/check_doxygen_warnings.sh

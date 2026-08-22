@@ -29,8 +29,18 @@ namespace System::Text::Json {
         /** @return true if @p text matches the name of this property. */
         [[nodiscard]] bool NameEquals(const std::string& text) const { return name_ == text; }
 
-        /** @return The raw JSON text of this property's value. */
-        [[nodiscard]] std::string ToString() const { return value_.ToString(); }
+        /**
+         * @return This complete property (escaped name, separator and value) re-rendered as
+         *         canonical JSON text.
+         *
+         * .NET returns the original property source slice. This DOM has no source spans, so the
+         * representation-level limitation declared for JsonElement::GetRawText() in ticket #2118
+         * applies here too; unlike the old implementation, the property name and separator are
+         * never omitted.
+         */
+        [[nodiscard]] std::string ToString() const {
+            return nlohmann::ordered_json(name_).dump() + ":" + value_.GetRawText();
+        }
     };
 
 } // namespace System::Text::Json

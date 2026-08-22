@@ -158,12 +158,13 @@ void ClientWebSocket::performHandshake(const System::Uri& uri) {
     //     "GET " + uri.getPathAndQueryProperty() + " HTTP/1.1\r\n"
     //     "Host: " + uri.getHostProperty() + ":" + port + "\r\n"
     //
-    // System::Uri preserves CR, LF and NUL in both components (measured in
-    // build-probe/2089_probe2_uri_door.log; the Uri-side finding is the separate, blocked
-    // ticket #2003), so ws://host/a\r\nX-Injected:+yes used to put "GET /a" on the request
-    // line and "X-Injected: yes HTTP/1.1" into a header field -- request smuggling, not one
-    // extra field. This is the same scope correction #2063 made for System::Net::Http, where
-    // the request URI turned out to be a door the review's paraphrase had dropped.
+    // System::Uri preserves CR, LF and NUL in path/query under its resolved #2003
+    // no-percent-encoding contract (measured in build-probe/2089_probe2_uri_door.log), so
+    // ws://host/a\r\nX-Injected:+yes used to put "GET /a" on the request line and
+    // "X-Injected: yes HTTP/1.1" into a header field -- request smuggling, not one extra field.
+    // #2359 subsequently made Uri reject those characters in a host; retaining the host check
+    // here keeps this protocol boundary self-contained. This is the same scope correction #2063
+    // made for System::Net::Http, where the URI was a door the review paraphrase had dropped.
     //
     // The check runs BEFORE the socket is constructed, so a rejected URI opens no connection,
     // sends no bytes and leaks no descriptor. System::Uri is not modified: this is this
@@ -272,10 +273,9 @@ void ClientWebSocket::performHandshake(const System::Uri& uri) {
     // RFC 6455 §4.1 forbids that: the server "MUST NOT" return a subprotocol the client did not
     // request, and returning one when none was requested is an invalid response.
     //
-    // Rejecting rather than ignoring is THIS PORT'S CHOICE (plan §16): the reference tree is
-    // absent, so whether .NET rejects or silently ignores cannot be verified here. Rejecting is
-    // chosen because the alternative leaves getSubProtocolProperty() reporting a protocol the
-    // application never agreed to speak.
+    // Rejecting rather than ignoring was initially recorded as this port's conservative choice.
+    // The reference is now available and confirms it: WebSocketHandle.Managed rejects a returned
+    // protocol unless it matches one of the requested values with OrdinalIgnoreCase.
     //
     // The comparison is OrdinalIgnoreCase, matching the duplicate check AddSubProtocol already
     // performs on the same values, so the two ends of the same list agree about identity.
@@ -839,10 +839,9 @@ namespace {
 // ReviewPlan.md §7.1-§7.5). Each check below rejects before any dependent bytes are read, so a
 // malformed frame never causes an allocation or a read sized by its own bad header.
 //
-// Every rule here is RFC 6455, cited as a PROTOCOL fact rather than as .NET behaviour: the
-// reference tree is absent, and these five are decidable from the wire format alone. The
-// exception identity -- WebSocketException with the closest WebSocketError -- is THIS PORT'S
-// CHOICE, recorded as such.
+// Every rule here is an RFC 6455 protocol fact and agrees with the now-available .NET reference.
+// The exact exception identity -- WebSocketException with the closest WebSocketError -- remains
+// this port's documented mapping.
 namespace {
 
     constexpr bool isControlOpcode(bytecs opcode) { return (opcode & 0x08) != 0; }
@@ -864,9 +863,9 @@ namespace {
     /// above U+10FFFF, as RFC 6455 §8.1 requires for a Text payload and a close reason.
     ///
     /// Transcribed from this repository's own already-correct implementation --
-    /// `System::Net::Security::SslApplicationProtocol::isValidUtf8` -- rather than invented,
-    /// because that one was written against .NET's ExceptionFallback decoder and the reference
-    /// tree is absent. It is copied rather than shared because that one is a *private member*
+    /// `System::Net::Security::SslApplicationProtocol::isValidUtf8` -- rather than invented;
+    /// that implementation was already derived from .NET's ExceptionFallback decoder. It is
+    /// copied rather than shared because that one is a *private member*
     /// of an unrelated class in a different (INTERFACE) component; extracting it would be a
     /// refactor of a third module, and this repository already holds several independent UTF-8
     /// decoders (`UTF8Encoding`, `Utf8JsonWriter`, `BinaryReader`, `IdnMapping`). Consolidating
@@ -904,9 +903,8 @@ namespace {
     ///   an enumerator existing locally does not make the value legal in a frame.
     /// * 1012-1014 are registered with IANA under the procedure §7.4.2 delegates ("reserved for
     ///   definition by this protocol, its future revisions, and extensions specified in a
-    ///   permanent and readily available public specification"), so they are ACCEPTED. This is
-    ///   THIS PORT'S CHOICE, taken deliberately: rejecting them would reject a conforming
-    ///   server, and the reference tree is absent so .NET's own set cannot be consulted.
+    ///   permanent and readily available public specification"), so they are ACCEPTED. Current
+    ///   .NET's ManagedWebSocket accepts the same three values explicitly.
     /// * 1015 is registered but §7.4.1 likewise says it MUST NOT appear in a frame.
     /// * 1016-2999 are reserved and undefined; 3000-4999 are delegated by §7.4.2 to IANA
     ///   registration and private use respectively, and are ACCEPTED.

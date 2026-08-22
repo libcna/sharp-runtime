@@ -133,3 +133,57 @@ approval sentence is recorded verbatim in ticket #2155.
 
 **Current behaviour is pinned** by a runtime test and by compile-time `static_assert`s in two test
 files, so the change cannot land silently: the build stops until the pins are deliberately updated.
+
+---
+
+## Final-audit callback lifetime remediation (2026-08-22): REMEDIATED
+
+The historical assessment above explicitly did not assign a separate finding number to the
+raw-`this` callback hazard, but the final reconciliation rechecked the source rather than treating
+that exclusion as a permanent deviation. The hazard was real: the shared integer cookie still
+required dereferencing `Timer` to compare `cookie_`, while the underlying
+`System::Threading::Timer` detached its worker on disposal.
+
+The cookie member is now a same-sized shared callback-lifetime gate. A tick validates a captured
+generation and increments an active-callback count under the gate mutex before acquiring the owner
+pointer. Destruction invalidates the generation before releasing the underlying timer, then waits
+for every callback that already acquired the owner. A pending detached worker owns the gate itself
+and can reject stale work without touching `Timer`. The callback performs no owner access after
+`Elapsed.Raise` returns, while `Close()` remains non-blocking and can still be called from its own
+handler without self-join.
+
+`TimerLifecyclePinTests.DestructionWaitsForAnEnteredHandlerBeforeDestroyingMembers` replaces the
+old observation-only destruction case. It holds a handler behind a condition variable, starts
+destruction on another thread, proves the destructor does not return while that handler is active,
+then releases it and proves destruction completes. The existing self-close case now signals only
+after `Close()` has returned. `enabled_` is atomic to remove the one-shot worker versus
+Close/Stop write race exposed by the same lifecycle boundary. The pre-existing 112-byte layout pin
+remains unchanged and green.
+
+Final diff review found a second start-order race inside that repair. The former
+`startTimerThread()` armed `System::Threading::Timer` in its constructor, before
+`std::make_unique` returned and before assignment to `timer_`. A 1 ms callback could therefore
+enter a handler that legitimately called `Close()` while the `unique_ptr` assignment was still in
+progress. The underlying worker is now constructed paused, held locally, and transferred into
+`timer_` under the lifetime gate; `Change()` arms it while the same gate prevents callback entry.
+Every access and ownership transfer of `timer_` now uses that gate, including the case where an
+external `Close()` cancels a Start held at the pre-arm boundary. Two deterministic seam/handshake
+tests pin both handler-close-after-arm and external-close-before-arm ordering; repeated tests and
+TSan cover the member race. The test-only seam is source-ODR checked and compile-inaccessible to an
+ordinary consumer.
+
+## Final generation-ownership follow-up (2026-08-22): REMEDIATED
+
+A last diff review found that the pre-arm serialization still let an obsolete Start mutate the
+state of a newer one. If the old Start lost its generation race, its normal-return branch wrote
+`enabled_ = false`; if its injected pre-arm hook threw, the catch unconditionally detached
+`timer_`, advanced the generation and cleared Enabled. A concurrent `Close()` plus successful
+Start could therefore publish a healthy newer worker and then have the stale Start disable or
+destroy it.
+
+Both exits now apply ownership before cleanup. A stale normal return discards only its local
+paused worker. The catch clears `owner`, advances generation, detaches `timer_` and clears Enabled
+only when the failing Start's generation is still current. The two seam-driven regressions
+`AStaleSuccessfulStartCannotDisableANewerGeneration` and
+`AStaleFailingStartCannotDestroyANewerGeneration` force the respective orderings. The component
+now has **44/44** passing tests; the public shape and the 112-byte layout remain unchanged.

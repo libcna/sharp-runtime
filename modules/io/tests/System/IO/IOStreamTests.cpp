@@ -9,6 +9,7 @@
 #include <limits>
 #include <string>
 #include <vector>
+#include "TestTemporaryDirectory.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -65,7 +66,16 @@ using System::IO::intcs;
 using System::IO::IsolatedStorage::IsolatedStorageFile;
 
 static std::string tf(const char* name) {
-    return std::string("/tmp/sharp_rt_io_") + name;
+    static const SharpRuntime::Tests::TestTemporaryDirectory temporary;
+    return temporary.path(std::string("sharp_rt_io_") + name);
+}
+
+static std::string isolatedName(const char* name) {
+    // The application store is shared by every concurrent invocation of this executable. Use
+    // the basename of an atomically-created temporary directory as a run-unique relative prefix;
+    // interrupted runs can leave data behind without changing a later run's verdict.
+    static const SharpRuntime::Tests::TestTemporaryDirectory temporary;
+    return temporary.relativeName(name);
 }
 
 // ===========================================================================
@@ -2650,12 +2660,12 @@ TEST(IsolatedStorageFileTests, GetUserStoreForApplication_NoThrow) {
 
 TEST(IsolatedStorageFileTests, FileExists_False_ForNonExistent) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
-    EXPECT_FALSE(store.FileExists("sharp_rt_nonexistent_xyzxyz_12345.dat"));
+    EXPECT_FALSE(store.FileExists(isolatedName("nonexistent.dat")));
 }
 
 TEST(IsolatedStorageFileTests, OpenFile_WriteAndDelete_Roundtrip) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
-    const std::string fname = "sharp_rt_iso_test_file.dat";
+    const std::string fname = isolatedName("roundtrip.dat");
     {
         auto stream = store.OpenFile(fname, FileMode::Create);
         uint8_t data[] = {0xDE, 0xAD, 0xBE, 0xEF};
@@ -2672,7 +2682,7 @@ TEST(IsolatedStorageFileTests, OpenFile_OpenMode_SupportsReadAndWrite) {
     // (std::ios::in only), unlike .NET's IsolatedStorageFileStream(path, mode) which defaults
     // access to ReadWrite for every mode except Append.
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
-    const std::string fname = "sharp_rt_iso_openmode_rw.dat";
+    const std::string fname = isolatedName("openmode-rw.dat");
     { auto s = store.CreateFile(fname); s.Close(); }
 
     auto stream = store.OpenFile(fname, FileMode::Open);
@@ -2686,7 +2696,7 @@ TEST(IsolatedStorageFileTests, OpenFile_SupportsSeek) {
     // Regression: IsolatedStorageFileStream previously duplicated a thin std::fstream wrapper
     // with no Position/Seek support at all; it now derives from the real FileStream.
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
-    const std::string fname = "sharp_rt_iso_seek.dat";
+    const std::string fname = isolatedName("seek.dat");
     auto stream = store.CreateFile(fname);
     uint8_t data[] = {1, 2, 3, 4, 5};
     stream.Write(data, 0, 5);
@@ -2703,7 +2713,7 @@ TEST(IsolatedStorageFileTests, OpenFile_SupportsSeek) {
 
 TEST(IsolatedStorageFileTests, CreateFile_Creates) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
-    const std::string fname = "sharp_rt_iso_create.dat";
+    const std::string fname = isolatedName("create.dat");
     { auto s = store.CreateFile(fname); s.Close(); }
     EXPECT_TRUE(store.FileExists(fname));
     store.DeleteFile(fname);
@@ -2711,8 +2721,8 @@ TEST(IsolatedStorageFileTests, CreateFile_Creates) {
 
 TEST(IsolatedStorageFileTests, CopyFile_CopiesContent) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
-    const std::string src = "sharp_rt_iso_src.dat";
-    const std::string dst = "sharp_rt_iso_dst.dat";
+    const std::string src = isolatedName("copy-src.dat");
+    const std::string dst = isolatedName("copy-dst.dat");
     { auto s = store.CreateFile(src); s.Close(); }
     store.CopyFile(src, dst);
     EXPECT_TRUE(store.FileExists(dst));
@@ -2722,8 +2732,8 @@ TEST(IsolatedStorageFileTests, CopyFile_CopiesContent) {
 
 TEST(IsolatedStorageFileTests, MoveFile_MovesFile) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
-    const std::string src = "sharp_rt_iso_mv_src.dat";
-    const std::string dst = "sharp_rt_iso_mv_dst.dat";
+    const std::string src = isolatedName("move-src.dat");
+    const std::string dst = isolatedName("move-dst.dat");
     { auto s = store.CreateFile(src); s.Close(); }
     store.MoveFile(src, dst);
     EXPECT_FALSE(store.FileExists(src));
@@ -2733,21 +2743,21 @@ TEST(IsolatedStorageFileTests, MoveFile_MovesFile) {
 
 TEST(IsolatedStorageFileTests, GetFileNames_ReturnsCreatedFile) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
-    const std::string fname = "sharp_rt_iso_list.dat";
+    const std::string fname = isolatedName("listed-file.dat");
     { auto s = store.CreateFile(fname); s.Close(); }
-    auto names = store.GetFileNames("sharp_rt_iso_list*");
+    auto names = store.GetFileNames(fname);
     EXPECT_FALSE(names.empty());
     store.DeleteFile(fname);
 }
 
 TEST(IsolatedStorageFileTests, DirectoryExists_FalseForNonExistent) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
-    EXPECT_FALSE(store.DirectoryExists("sharp_rt_iso_no_such_dir_xyz"));
+    EXPECT_FALSE(store.DirectoryExists(isolatedName("nonexistent-directory")));
 }
 
 TEST(IsolatedStorageFileTests, CreateDirectory_DirectoryExists_Delete) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
-    const std::string dir = "sharp_rt_iso_testdir";
+    const std::string dir = isolatedName("test-directory");
     store.CreateDirectory(dir);
     EXPECT_TRUE(store.DirectoryExists(dir));
     store.DeleteDirectory(dir);
@@ -2756,8 +2766,8 @@ TEST(IsolatedStorageFileTests, CreateDirectory_DirectoryExists_Delete) {
 
 TEST(IsolatedStorageFileTests, MoveDirectory_MovesDir) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
-    const std::string src = "sharp_rt_iso_dir_src";
-    const std::string dst = "sharp_rt_iso_dir_dst";
+    const std::string src = isolatedName("move-directory-src");
+    const std::string dst = isolatedName("move-directory-dst");
     store.CreateDirectory(src);
     store.MoveDirectory(src, dst);
     EXPECT_FALSE(store.DirectoryExists(src));
@@ -2767,9 +2777,9 @@ TEST(IsolatedStorageFileTests, MoveDirectory_MovesDir) {
 
 TEST(IsolatedStorageFileTests, GetDirectoryNames_ReturnsCreatedDir) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
-    const std::string dir = "sharp_rt_iso_listed_dir";
+    const std::string dir = isolatedName("listed-directory");
     store.CreateDirectory(dir);
-    auto names = store.GetDirectoryNames("sharp_rt_iso_listed*");
+    auto names = store.GetDirectoryNames(dir);
     EXPECT_FALSE(names.empty());
     store.DeleteDirectory(dir);
 }
@@ -2781,7 +2791,7 @@ TEST(IsolatedStorageFileTests, AvailableFreeSpace_Positive) {
 
 TEST(IsolatedStorageFileTests, UsedSize_AfterWrite_Positive) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
-    const std::string fname = "sharp_rt_iso_used.dat";
+    const std::string fname = isolatedName("used-size.dat");
     {
         auto s = store.CreateFile(fname);
         uint8_t buf[64] = {};
@@ -2813,7 +2823,7 @@ TEST(IsolatedStorageFileTests, DeleteDirectory_NonEmpty_ThrowsInsteadOfRecursive
     // entire subtree instead of matching real .NET's Directory.Delete(path, recursive: false)
     // "must be empty" contract.
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
-    const std::string dir = "sharp_rt_iso_nonempty_dir";
+    const std::string dir = isolatedName("nonempty-directory");
     const std::string nested = dir + "/nested.dat";
     store.CreateDirectory(dir);
     { auto s = store.CreateFile(nested); s.Close(); }

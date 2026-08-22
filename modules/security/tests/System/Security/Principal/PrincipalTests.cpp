@@ -40,6 +40,34 @@ TEST(GenericPrincipalTests, IsInRole_CaseInsensitiveMatch) {
     EXPECT_FALSE(principal.IsInRole("Guest"));
 }
 
+// SR-AUD-246: GenericPrincipal promises OrdinalIgnoreCase for the explicit role list. The old
+// byte-at-a-time std::tolower happened to work for ASCII but could never fold a UTF-8 scalar.
+TEST(GenericPrincipalTests, IsInRole_UsesUnicodeOrdinalIgnoreCaseWithoutLocaleByteFolding) {
+    auto identity = std::make_shared<GenericIdentity>("alice");
+    GenericPrincipal principal(identity, {"\xC3\x84" "DMIN", "\xCE\xA3"}); // ÄDMIN, Σ
+
+    EXPECT_TRUE(principal.IsInRole("\xC3\xA4" "dmin")); // ädmin
+    EXPECT_TRUE(principal.IsInRole("\xCF\x82"));         // final sigma ς -> Σ
+    EXPECT_FALSE(principal.IsInRole("admin"));
+}
+
+TEST(GenericPrincipalTests, IsInRole_UsesSimpleFoldingRatherThanMultiCharacterExpansion) {
+    auto identity = std::make_shared<GenericIdentity>("alice");
+    GenericPrincipal principal(identity, {"Stra\xC3\x9F" "e"}); // Straße
+
+    // .NET OrdinalIgnoreCase uses one-code-point ordinal casing; it does not expand ß to SS.
+    EXPECT_FALSE(principal.IsInRole("STRASSE"));
+}
+
+TEST(GenericPrincipalTests, IsInRole_MalformedUtf8IsComparedDeterministicallyAsRawBytes) {
+    auto identity = std::make_shared<GenericIdentity>("alice");
+    const std::string malformedRole("\xC3", 1);
+    GenericPrincipal principal(identity, {malformedRole});
+
+    EXPECT_TRUE(principal.IsInRole(malformedRole));
+    EXPECT_FALSE(principal.IsInRole(std::string("\xE3", 1)));
+}
+
 TEST(GenericPrincipalTests, Identity_ReturnsSameIdentity) {
     auto identity = std::make_shared<GenericIdentity>("alice");
     GenericPrincipal principal(identity, {});

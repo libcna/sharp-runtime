@@ -20,31 +20,16 @@ using SharpRuntime::intcs;
  * C++ counterpart of .NET System.Globalization.CharUnicodeInfo.
  * All methods are static; this class cannot be instantiated.
  *
- * @note <b>Category classification is a declared reduction, and is locale-independent.</b>
- *       GetUnicodeCategory answers from this port's own knowledge only: the ASCII range
- *       U+0000–U+007F, and the surrogate range U+D800–U+DFFF that
- *       System::Char::IsSurrogate already fixes. Every other code point — every
- *       assigned non-ASCII letter, every combining mark, every symbol, every private-use
- *       code point, and every supplementary code point — is reported
- *       UnicodeCategory::OtherNotAssigned. That value is a statement about what this port
- *       knows, not a claim that the code point is unassigned in Unicode. Answering for the
- *       rest of the code space requires a Unicode character database, its attribution and a
- *       stated Unicode version with an update policy; that decision is open and no partial
- *       table is hand-authored here.
+ * @note <b>Category and numeric classification cover the complete Unicode scalar range and
+ *       are locale-independent.</b> Tickets #2315 and #2336 replaced the former ASCII/sixteen-
+ *       code-point reductions with generated Unicode 16.0 lookup tables. No C or C++ locale
+ *       facet participates, so installing a different process locale cannot change an answer.
+ *       The generated data, version pin and update procedure are documented in
+ *       `docs/Migration-UnicodeCategoryTable.md` and the generator sources.
  *
- * @note <b>The three numeric queries are a declared reduction too, and a much narrower
- *       one.</b> GetDecimalDigitValue answers only for U+0030-U+0039; GetDigitValue adds
- *       only U+00B9, U+00B2 and U+00B3 (superscript one, two, three); GetNumericValue adds
- *       to those only U+00BC, U+00BD and U+00BE (the vulgar fractions one quarter, one half,
- *       three quarters). <b>Sixteen code points in total.</b> Every other code point gets
- *       -1 (or -1.0), including code points that really do carry a Unicode numeric value:
- *       U+0665 ARABIC-INDIC DIGIT FIVE answers -1 here where .NET answers 5, U+216B ROMAN
- *       NUMERAL TWELVE answers -1.0 where .NET answers 12, and U+2153 VULGAR FRACTION ONE
- *       THIRD answers -1.0 where .NET answers 0.333.... As with the category above, -1
- *       states what this port knows, not that the character has no numeric value; the
- *       Numeric_Type/Numeric_Value data needed to answer properly is part of the same open
- *       Unicode-data decision and is not hand-authored here either. `System::Char::
- *       GetNumericValue` forwards to GetNumericValue and inherits the reduction exactly.
+ * @note The string/index overloads combine a valid UTF-16 surrogate pair and query its code
+ *       point, matching .NET. An index that names the low surrogate of a pair still observes that
+ *       code unit as a surrogate, also matching .NET's index contract.
  */
 class CharUnicodeInfo {
     /** @brief Throws ArgumentOutOfRangeException if @p index is out of bounds for @p s. */
@@ -99,14 +84,11 @@ public:
     CharUnicodeInfo() = delete;
 
     /**
-     * @brief Gets the decimal digit value of a character, or -1 if this port has none.
+     * @brief Gets the Unicode decimal digit value of a character.
      *
-     * C++ counterpart of .NET CharUnicodeInfo.GetDecimalDigitValue(char), reduced to
-     * <b>ASCII U+0030-U+0039 only</b> (see the class note). A non-ASCII decimal digit
-     * such as U+0665 returns -1 here and 5 in .NET.
+     * C++ counterpart of .NET CharUnicodeInfo.GetDecimalDigitValue(char).
      * @param ch The character to evaluate.
-     * @return The decimal digit value (0–9) for U+0030-U+0039; -1 for every other
-     *         character, whether or not it is a decimal digit in Unicode.
+     * @return The decimal digit value (0–9), or -1 if @p ch is not a Unicode decimal digit.
      */
     static intcs GetDecimalDigitValue(charcs ch) {
         // #2336: the whole code space, from the generated UCD 16.0 numeric table.
@@ -119,8 +101,8 @@ public:
      * C++ counterpart of .NET CharUnicodeInfo.GetDecimalDigitValue(string, int).
      * @param s     The string containing the character.
      * @param index The zero-based index of the character.
-     * @return The decimal digit value (0–9) for U+0030-U+0039; -1 otherwise, under the
-     *         same reduction as the single-character overload.
+     * @return The decimal digit value (0–9), or -1 if the code point at @p index is not a
+     *         Unicode decimal digit.
      */
     static intcs GetDecimalDigitValue(const std::u16string& s, intcs index) {
         CheckIndex(s, index);
@@ -129,17 +111,14 @@ public:
     }
 
     /**
-     * @brief Gets the digit value of a character, or -1 if this port has none.
+     * @brief Gets the Unicode digit value of a character.
      *
      * C++ counterpart of .NET CharUnicodeInfo.GetDigitValue(char).
      * Unlike GetDecimalDigitValue, this also recognizes characters whose Unicode
-     * Numeric_Type is Digit rather than Decimal (e.g. superscript digits), matching
-     * .NET's distinction between the two methods -- but only for the three superscripts
-     * it hard-codes. <b>Reduced to U+0030-U+0039 plus U+00B9/U+00B2/U+00B3</b> (see the
-     * class note); every other Numeric_Type Digit character returns -1.
+     * Numeric_Type is Digit rather than Decimal (for example superscript digits), matching
+     * .NET's distinction between the two methods.
      * @param ch The character to evaluate.
-     * @return The digit value (0–9) for the thirteen characters above; -1 for every
-     *         other character, whether or not it is a digit in Unicode.
+     * @return The digit value (0–9), or -1 if @p ch has neither Decimal nor Digit numeric type.
      */
     static intcs GetDigitValue(charcs ch) {
         // #2336. Note this is NOT "decimal value, else the digit-only cases": .NET reads a
@@ -156,8 +135,8 @@ public:
      * C++ counterpart of .NET CharUnicodeInfo.GetDigitValue(string, int).
      * @param s     The string containing the character.
      * @param index The zero-based index of the character.
-     * @return The digit value (0–9) for the thirteen recognized characters; -1 otherwise,
-     *         under the same reduction as the single-character overload.
+     * @return The digit value (0–9), or -1 if the code point at @p index has neither Decimal
+     *         nor Digit numeric type.
      */
     static intcs GetDigitValue(const std::u16string& s, intcs index) {
         CheckIndex(s, index);
@@ -168,13 +147,9 @@ public:
     /**
      * @brief Gets the numeric value associated with a Unicode character.
      *
-     * C++ counterpart of .NET CharUnicodeInfo.GetNumericValue(char), <b>reduced to
-     * sixteen code points</b>: U+0030-U+0039, the superscripts U+00B9/U+00B2/U+00B3, and
-     * the vulgar fractions U+00BC/U+00BD/U+00BE (see the class note). U+216B answers -1.0
-     * here where .NET answers 12, and U+2153 answers -1.0 where .NET answers 0.333....
+     * C++ counterpart of .NET CharUnicodeInfo.GetNumericValue(char).
      * @param ch The character to evaluate.
-     * @return The numeric value for the sixteen characters above; -1.0 for every other
-     *         character, whether or not it carries a Unicode numeric value.
+     * @return The Unicode numeric value, including fractional values; -1.0 if @p ch has none.
      */
     static double GetNumericValue(charcs ch) {
         // #2336: the whole code space. The rationals are real rationals -- U+2153 is
@@ -188,8 +163,7 @@ public:
      * C++ counterpart of .NET CharUnicodeInfo.GetNumericValue(string, int).
      * @param s     The string containing the character.
      * @param index The zero-based index of the character.
-     * @return The numeric value for the sixteen recognized characters; -1.0 otherwise,
-     *         under the same reduction as the single-character overload.
+     * @return The Unicode numeric value of the code point at @p index, or -1.0 if it has none.
      */
     static double GetNumericValue(const std::u16string& s, intcs index) {
         CheckIndex(s, index);
@@ -227,14 +201,9 @@ public:
      *
      * C++ counterpart of .NET CharUnicodeInfo.GetUnicodeCategory(int) (for supplementary chars).
      *
-     * The answer is <b>locale-independent</b>: no C or C++ locale facet is consulted, so a
-     * process that installs a different global locale gets the same category for the same
-     * code point. It is also <b>reduced</b>: only U+0000–U+007F and the surrogate range
-     * U+D800–U+DFFF are classified, and every other code point — BMP or
-     * supplementary — returns OtherNotAssigned (see the class note). Within ASCII, every
-     * punctuation and symbol character is reported OtherPunctuation rather than its finer
-     * .NET subcategory (MathSymbol, CurrencySymbol, OpenPunctuation, DashPunctuation, ...);
-     * that too is part of the reduction and is unchanged here.
+     * The answer is read from the generated Unicode 16.0 category table and is
+     * <b>locale-independent</b>: no C or C++ locale facet is consulted, so a process that
+     * installs a different global locale gets the same category for the same code point.
      *
      * @param codePoint The Unicode code point to categorize.
      * @return The UnicodeCategory value for the code point.

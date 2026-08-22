@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <algorithm>
+#include <cstddef>
 #include <string>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -12,11 +14,13 @@ using SharpRuntime::bytecs;
 using SharpRuntime::intcs;
 
 /**
- * @brief Represents the result of mapping a string to its sort key for culture-sensitive comparison.
+ * @brief Represents a string and its precomputed comparison-key bytes.
  *
  * C++ counterpart of .NET System.Globalization.SortKey.
- * Sort keys allow efficient repeated comparisons. The key data is a byte array
- * derived from the original string according to the culture's sort rules.
+ * Sort keys allow efficient repeated comparisons. This practical subset has no culture collation
+ * database: CompareInfo creates deterministic invariant keys from the original UTF-8 bytes for
+ * CompareOptions::None, or from fixed-width Unicode simple-folded scalars for IgnoreCase. The
+ * retained CompareInfo culture name does not select culture-specific sort rules.
  */
 class SortKey {
 public:

@@ -3,12 +3,18 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <algorithm>
-#include <cctype>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <string>
+#include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/CompareOptions.hpp"
 #include "System/Globalization/SortKey.hpp"
+#include "System/Globalization/detail/InvariantCase.hpp"
+#include "System/NotSupportedException.hpp"
 
 namespace System::Globalization {
 
@@ -20,8 +26,11 @@ using SharpRuntime::intcs;
  *
  * C++ counterpart of .NET System.Globalization.CompareInfo.
  * Instances are obtained via the GetCompareInfo factory methods.
- * This implementation performs locale-insensitive comparisons with optional
- * case folding; full ICU-based locale comparison is not provided.
+ * This practical subset provides deterministic ordinal/invariant comparison, including Unicode
+ * simple-case folding for IgnoreCase and OrdinalIgnoreCase. The culture name is descriptive only:
+ * ICU-style collation and the linguistic IgnoreNonSpace/IgnoreSymbols/IgnoreKanaType/IgnoreWidth,
+ * NumericOrdering and StringSort options are not implemented and throw NotSupportedException
+ * instead of silently producing a byte-comparison result.
  */
 class CompareInfo {
 public:
@@ -78,11 +87,7 @@ public:
      */
     intcs Compare(const std::string& s1, const std::string& s2,
                   CompareOptions options = CompareOptions::None) const {
-        if (isCaseInsensitive(options))
-            return compareIgnoreCase(s1, s2);
-        if (s1 < s2) return -1;
-        if (s1 > s2) return  1;
-        return 0;
+        return validateOptions(options) ? compareIgnoreCase(s1, s2) : compareOrdinal(s1, s2);
     }
 
     /**
@@ -118,9 +123,14 @@ public:
      */
     [[nodiscard]] bool IsPrefix(const std::string& source, const std::string& prefix,
                                 CompareOptions options = CompareOptions::None) const {
-        if (prefix.size() > source.size()) return false;
-        return Compare(source, 0, static_cast<intcs>(prefix.size()),
-                       prefix, 0, static_cast<intcs>(prefix.size()), options) == 0;
+        const bool ignoreCase = validateOptions(options);
+        if (!ignoreCase) {
+            return prefix.size() <= source.size() && source.compare(0, prefix.size(), prefix) == 0;
+        }
+        const auto sourceFolded = detail::FoldUtf8OrdinalIgnoreCase(source);
+        const auto prefixFolded = detail::FoldUtf8OrdinalIgnoreCase(prefix);
+        return prefixFolded.scalars.size() <= sourceFolded.scalars.size() &&
+               foldedSubsequenceAt(sourceFolded.scalars, 0, prefixFolded.scalars);
     }
 
     /**
@@ -134,10 +144,17 @@ public:
      */
     [[nodiscard]] bool IsSuffix(const std::string& source, const std::string& suffix,
                                 CompareOptions options = CompareOptions::None) const {
-        if (suffix.size() > source.size()) return false;
-        intcs off = static_cast<intcs>(source.size() - suffix.size());
-        return Compare(source, off, static_cast<intcs>(suffix.size()),
-                       suffix, 0, static_cast<intcs>(suffix.size()), options) == 0;
+        const bool ignoreCase = validateOptions(options);
+        if (!ignoreCase) {
+            return suffix.size() <= source.size() &&
+                   source.compare(source.size() - suffix.size(), suffix.size(), suffix) == 0;
+        }
+        const auto sourceFolded = detail::FoldUtf8OrdinalIgnoreCase(source);
+        const auto suffixFolded = detail::FoldUtf8OrdinalIgnoreCase(suffix);
+        if (suffixFolded.scalars.size() > sourceFolded.scalars.size()) return false;
+        return foldedSubsequenceAt(sourceFolded.scalars,
+                                   sourceFolded.scalars.size() - suffixFolded.scalars.size(),
+                                   suffixFolded.scalars);
     }
 
     /**
@@ -151,13 +168,19 @@ public:
      */
     [[nodiscard]] intcs IndexOf(const std::string& source, const std::string& value,
                                 CompareOptions options = CompareOptions::None) const {
-        if (isCaseInsensitive(options)) {
-            std::string sl = toLower(source), vl = toLower(value);
-            auto pos = sl.find(vl);
+        if (!validateOptions(options)) {
+            const auto pos = source.find(value);
             return pos == std::string::npos ? -1 : static_cast<intcs>(pos);
         }
-        auto pos = source.find(value);
-        return pos == std::string::npos ? -1 : static_cast<intcs>(pos);
+        if (value.empty()) return 0;
+        const auto sourceFolded = detail::FoldUtf8OrdinalIgnoreCase(source);
+        const auto valueFolded = detail::FoldUtf8OrdinalIgnoreCase(value);
+        for (std::size_t i = 0; i + valueFolded.scalars.size() <= sourceFolded.scalars.size(); ++i) {
+            if (foldedSubsequenceAt(sourceFolded.scalars, i, valueFolded.scalars)) {
+                return static_cast<intcs>(sourceFolded.byteOffsets[i]);
+            }
+        }
+        return -1;
     }
 
     /**
@@ -171,13 +194,23 @@ public:
      */
     [[nodiscard]] intcs LastIndexOf(const std::string& source, const std::string& value,
                                     CompareOptions options = CompareOptions::None) const {
-        if (isCaseInsensitive(options)) {
-            std::string sl = toLower(source), vl = toLower(value);
-            auto pos = sl.rfind(vl);
+        if (!validateOptions(options)) {
+            const auto pos = source.rfind(value);
             return pos == std::string::npos ? -1 : static_cast<intcs>(pos);
         }
-        auto pos = source.rfind(value);
-        return pos == std::string::npos ? -1 : static_cast<intcs>(pos);
+        if (value.empty()) return static_cast<intcs>(source.size());
+        const auto sourceFolded = detail::FoldUtf8OrdinalIgnoreCase(source);
+        const auto valueFolded = detail::FoldUtf8OrdinalIgnoreCase(value);
+        if (valueFolded.scalars.size() > sourceFolded.scalars.size()) return -1;
+        std::size_t i = sourceFolded.scalars.size() - valueFolded.scalars.size();
+        while (true) {
+            if (foldedSubsequenceAt(sourceFolded.scalars, i, valueFolded.scalars)) {
+                return static_cast<intcs>(sourceFolded.byteOffsets[i]);
+            }
+            if (i == 0) break;
+            --i;
+        }
+        return -1;
     }
 
     /**
@@ -200,18 +233,23 @@ public:
      * @brief Gets the SortKey for a string using the specified comparison options.
      *
      * C++ counterpart of .NET CompareInfo.GetSortKey(string, CompareOptions).
-     * This stub returns a byte-level key from the raw string bytes; when @p options
-     * includes IgnoreCase, the key is derived from the case-folded string so that two
-     * strings comparing equal under IgnoreCase also produce equal sort keys, matching
-     * the .NET contract that GetSortKey results are consistent with Compare.
+     * In the supported invariant subset, a case-sensitive key contains the original UTF-8 bytes
+     * and an ignore-case key contains fixed-width folded scalars. Consequently strings equal under
+     * the corresponding Compare operation produce equal keys.
      * @param source  The string to create a sort key for.
      * @param options Comparison options (default None).
      * @return A SortKey object for @p source.
+     * @throws System::ArgumentException if @p options contains Ordinal or OrdinalIgnoreCase.
      */
     [[nodiscard]] SortKey GetSortKey(const std::string& source,
                                      CompareOptions options = CompareOptions::None) const {
-        const std::string& keySource = isCaseInsensitive(options) ? toLower(source) : source;
-        std::vector<bytecs> key(keySource.begin(), keySource.end());
+        const bool ignoreCase = validateSortKeyOptions(options);
+        std::vector<bytecs> key;
+        if (ignoreCase) {
+            key = foldedKey(detail::FoldUtf8OrdinalIgnoreCase(source).scalars);
+        } else {
+            key.assign(source.begin(), source.end());
+        }
         return SortKey(source, key);
     }
 
@@ -226,7 +264,11 @@ public:
      * @return A hash code derived from the string value.
      */
     [[nodiscard]] intcs GetHashCode(const std::string& source, CompareOptions options) const {
-        const std::string& hashSource = isCaseInsensitive(options) ? toLower(source) : source;
+        if (!validateOptions(options)) {
+            return static_cast<intcs>(std::hash<std::string>{}(source));
+        }
+        const auto key = foldedKey(detail::FoldUtf8OrdinalIgnoreCase(source).scalars);
+        const std::string hashSource(key.begin(), key.end());
         return static_cast<intcs>(std::hash<std::string>{}(hashSource));
     }
 
@@ -259,31 +301,88 @@ private:
         }
     }
 
-    static bool hasFlag(CompareOptions options, CompareOptions flag) {
-        return (static_cast<int>(options) & static_cast<int>(flag)) != 0;
+    /**
+     * Validates the shared comparison-option policy and returns whether it folds case.
+     * Ordinal flags are valid only alone, matching .NET. Linguistic options are known public enum
+     * values but outside this no-ICU subset, so they fail explicitly rather than being ignored.
+     * GetSortKey applies its narrower per-door mask before entering this policy.
+     */
+    static bool validateOptions(CompareOptions options) {
+        constexpr std::uint32_t IgnoreCase = 0x00000001u;
+        constexpr std::uint32_t LinguisticUnsupported = 0x2000003Eu;
+        constexpr std::uint32_t OrdinalIgnoreCase = 0x10000000u;
+        constexpr std::uint32_t Ordinal = 0x40000000u;
+        constexpr std::uint32_t Known = IgnoreCase | LinguisticUnsupported |
+                                        OrdinalIgnoreCase | Ordinal;
+        const auto raw = static_cast<std::uint32_t>(static_cast<int>(options));
+        if ((raw & ~Known) != 0) {
+            throw System::ArgumentException("The CompareOptions value contains an unknown flag.",
+                                            "options");
+        }
+        if ((raw & (Ordinal | OrdinalIgnoreCase)) != 0) {
+            if (raw == Ordinal) return false;
+            if (raw == OrdinalIgnoreCase) return true;
+            throw System::ArgumentException(
+                "Ordinal and OrdinalIgnoreCase may only be used by themselves.", "options");
+        }
+        if ((raw & LinguisticUnsupported) != 0) {
+            throw System::NotSupportedException(
+                "This practical subset has no ICU collation data for the requested CompareOptions.");
+        }
+        return (raw & IgnoreCase) != 0;
     }
 
-    // .NET's real invariant-mode implementation (CompareInfo.Invariant.cs) treats a
-    // comparison as case-insensitive when EITHER CompareOptions::IgnoreCase OR
-    // CompareOptions::OrdinalIgnoreCase is set: `(options & (CompareOptions.IgnoreCase |
-    // CompareOptions.OrdinalIgnoreCase)) != 0`. IgnoreCase and OrdinalIgnoreCase are
-    // distinct, non-overlapping bits (0x1 vs 0x10000000), so checking only IgnoreCase here
-    // would silently treat OrdinalIgnoreCase-only callers as case-sensitive.
-    static bool isCaseInsensitive(CompareOptions options) {
-        return hasFlag(options, CompareOptions::IgnoreCase) || hasFlag(options, CompareOptions::OrdinalIgnoreCase);
+    /**
+     * GetSortKey uses .NET's narrower ValidCompareMaskOffFlags contract: the linguistic flags
+     * belong to that door (and are rejected below only because this subset has no collation
+     * database), but neither ordinal mode is a valid SortKey option.
+     */
+    static bool validateSortKeyOptions(CompareOptions options) {
+        constexpr std::uint32_t OrdinalModes = 0x50000000u;
+        const auto raw = static_cast<std::uint32_t>(static_cast<int>(options));
+        if ((raw & OrdinalModes) != 0) {
+            throw System::ArgumentException(
+                "Ordinal and OrdinalIgnoreCase are not valid GetSortKey options.", "options");
+        }
+        return validateOptions(options);
     }
 
-    static std::string toLower(const std::string& s) {
-        std::string r = s;
-        for (auto& c : r) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        return r;
+    static intcs compareOrdinal(const std::string& a, const std::string& b) {
+        if (a < b) return -1;
+        if (a > b) return 1;
+        return 0;
     }
 
     static intcs compareIgnoreCase(const std::string& a, const std::string& b) {
-        std::string al = toLower(a), bl = toLower(b);
-        if (al < bl) return -1;
-        if (al > bl) return  1;
+        const auto aFolded = detail::FoldUtf8OrdinalIgnoreCase(a).scalars;
+        const auto bFolded = detail::FoldUtf8OrdinalIgnoreCase(b).scalars;
+        const std::size_t count = std::min(aFolded.size(), bFolded.size());
+        for (std::size_t i = 0; i < count; ++i) {
+            if (aFolded[i] < bFolded[i]) return -1;
+            if (aFolded[i] > bFolded[i]) return 1;
+        }
+        if (aFolded.size() < bFolded.size()) return -1;
+        if (aFolded.size() > bFolded.size()) return 1;
         return 0;
+    }
+
+    static bool foldedSubsequenceAt(const std::vector<std::uint32_t>& source,
+                                    std::size_t offset,
+                                    const std::vector<std::uint32_t>& value) {
+        if (offset > source.size() || value.size() > source.size() - offset) return false;
+        return std::equal(value.begin(), value.end(), source.begin() + static_cast<std::ptrdiff_t>(offset));
+    }
+
+    static std::vector<bytecs> foldedKey(const std::vector<std::uint32_t>& scalars) {
+        std::vector<bytecs> key;
+        key.reserve(scalars.size() * 4);
+        for (std::uint32_t scalar : scalars) {
+            key.push_back(static_cast<bytecs>((scalar >> 24) & 0xFFu));
+            key.push_back(static_cast<bytecs>((scalar >> 16) & 0xFFu));
+            key.push_back(static_cast<bytecs>((scalar >> 8) & 0xFFu));
+            key.push_back(static_cast<bytecs>(scalar & 0xFFu));
+        }
+        return key;
     }
 };
 

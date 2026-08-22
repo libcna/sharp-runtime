@@ -101,6 +101,56 @@ TEST(StringInfoBatch33Test, ParseCombiningCharacters) {
     EXPECT_EQ(v[1], 1); // starting byte index of 'i'
 }
 
+TEST(StringInfoBatch33Test, SubstringUsesElementIndexesRatherThanUtf8ByteOffsets) {
+    const std::string eAcute = "\xC3\xA9";
+    const std::string deseret = "\xF0\x90\x90\x80";
+    StringInfo info(eAcute + "a" + deseret);
+
+    EXPECT_EQ(info.getLengthInTextElementsProperty(), 3);
+    EXPECT_EQ(info.SubstringByTextElements(0, 1), eAcute);
+    EXPECT_EQ(info.SubstringByTextElements(1, 1), "a");
+    EXPECT_EQ(info.SubstringByTextElements(1), "a" + deseret);
+    EXPECT_EQ(info.SubstringByTextElements(2, 1), deseret);
+}
+
+TEST(StringInfoBatch33Test, ScalarSubsetAndMalformedBytePolicyAreExplicit) {
+    const std::string combining = "e\xCC\x81"; // e + COMBINING ACUTE ACCENT: two scalars here.
+    StringInfo scalarSubset(combining);
+    EXPECT_EQ(scalarSubset.getLengthInTextElementsProperty(), 2);
+    EXPECT_EQ(StringInfo::ParseCombiningCharacters(combining), (std::vector<int>{0, 1}));
+
+    const std::string malformed = "\xE2\x28\xA1";
+    EXPECT_EQ(StringInfo::ParseCombiningCharacters(malformed), (std::vector<int>{0, 1, 2}));
+    EXPECT_EQ(StringInfo::GetNextTextElement(malformed, 0), malformed.substr(0, 1));
+
+    TextElementEnumerator enumerator(malformed);
+    for (std::size_t i = 0; i < malformed.size(); ++i) {
+        ASSERT_TRUE(enumerator.MoveNext());
+        EXPECT_EQ(enumerator.GetTextElement(), malformed.substr(i, 1));
+        EXPECT_EQ(enumerator.getElementIndexProperty(), static_cast<int>(i));
+    }
+    EXPECT_FALSE(enumerator.MoveNext());
+}
+
+TEST(StringInfoBatch33Test, NonZeroEnumerationPreservesOriginalByteIndexesAndScalarBoundaries) {
+    const std::string text = "\xC3\xA9" "a";
+    auto enumerator = StringInfo::GetTextElementEnumerator(text, 2);
+    ASSERT_TRUE(enumerator.MoveNext());
+    EXPECT_EQ(enumerator.GetTextElement(), "a");
+    EXPECT_EQ(enumerator.getElementIndexProperty(), 2);
+    EXPECT_FALSE(enumerator.MoveNext());
+    enumerator.Reset();
+    ASSERT_TRUE(enumerator.MoveNext());
+    EXPECT_EQ(enumerator.getElementIndexProperty(), 2);
+
+    EXPECT_THROW((void)StringInfo::GetNextTextElement(text, 1),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)StringInfo::GetNextTextElementLength(text, 1),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)StringInfo::GetTextElementEnumerator(text, 1),
+                 System::ArgumentOutOfRangeException);
+}
+
 // ===========================================================================
 // TaiwanCalendar
 // ===========================================================================
@@ -233,6 +283,48 @@ TEST(TextInfoBatch33Test, ToUpper_String) {
     EXPECT_EQ(ti.ToUpper(std::string("hello")), "HELLO");
 }
 
+TEST(TextInfoBatch33Test, UnicodeSimpleCasingIsInvariantAndNotCultureTailored) {
+    TextInfo german("de-DE");
+    EXPECT_EQ(german.ToUpper("\xC3\xA4"), "\xC3\x84"); // ä -> Ä
+    EXPECT_EQ(german.ToLower("\xCE\xA3"), "\xCF\x83"); // Σ -> σ (not contextual final sigma)
+
+    const std::string deseretSmall = "\xF0\x90\x90\xA8"; // U+10428
+    const std::string deseretCapital = "\xF0\x90\x90\x80"; // U+10400
+    EXPECT_EQ(german.ToUpper(deseretSmall), deseretCapital);
+    EXPECT_EQ(german.ToLower(deseretCapital), deseretSmall);
+
+    TextInfo turkish("tr-TR");
+    EXPECT_EQ(turkish.ToUpper("i"), "I")
+        << "the stored culture name does not enable Turkish-I tailoring in this subset";
+}
+
+TEST(TextInfoBatch33Test, Utf16SupplementaryCasingAndMalformedUtf8AreDeterministic) {
+    TextInfo info;
+    EXPECT_EQ(info.ToUpper(std::u16string(u"\U00010428")), std::u16string(u"\U00010400"));
+    EXPECT_EQ(info.ToLower(std::u16string(u"\U00010400")), std::u16string(u"\U00010428"));
+
+    std::string malformed("\xC2", 1);
+    malformed += "a";
+    std::string expected("\xC2", 1);
+    expected += "A";
+    EXPECT_EQ(info.ToUpper(malformed), expected);
+}
+
+TEST(TextInfoBatch33Test, ToTitleCaseUsesUnicodeScalarBoundariesAndInvariantCasing) {
+    TextInfo info("fr-FR");
+    EXPECT_EQ(info.ToTitleCase("\xC3\xA9lan vital"), "\xC3\x89lan Vital");
+}
+
+TEST(TextInfoBatch33Test, ToTitleCaseDoesNotTreatUnassignedScalarsAsWordSeparators) {
+    TextInfo info;
+    const std::string unassigned = "\xCD\xB8"; // U+0378, OtherNotAssigned in UCD 16.0.
+
+    // .NET's word-separator mask contains categories 11..15 and 18..28, but not category 29.
+    // Accidentally using an open-ended >= punctuation check produced A<U+0378>B here.
+    EXPECT_EQ(info.ToTitleCase("a" + unassigned + "b"),
+              "A" + unassigned + "b");
+}
+
 TEST(TextInfoBatch33Test, ToTitleCase) {
     TextInfo ti;
     EXPECT_EQ(ti.ToTitleCase("hello world"), "Hello World");
@@ -258,9 +350,8 @@ TEST(TextInfoBatch33Test, ToTitleCase_LowercaseFirstLetter_NotTreatedAsAcronym) 
 // real .NET's word-boundary detection (TextInfo.cs's c_wordSeparatorMask) treats most
 // punctuation categories (dashes, parens, quotes, other punctuation/symbols) as word
 // separators too -- so a hyphenated word like "mary-jane" was incorrectly treated as one word
-// ("Mary-jane") instead of two ("Mary-Jane"). The apostrophe is a documented exception (real
-// .NET gives it bespoke handling this port doesn't replicate, but excluding it from the
-// separator set reproduces the same observable result for the common case).
+// ("Mary-jane") instead of two ("Mary-Jane"). Apostrophes take .NET's separate mid-word path:
+// the prefix is flushed with acronym preservation and the following segment is lowercased.
 TEST(TextInfoBatch33Test, ToTitleCase_HyphenatedWord_CapitalizesBothParts) {
     TextInfo ti;
     EXPECT_EQ(ti.ToTitleCase("mary-jane watson"), "Mary-Jane Watson");
@@ -272,6 +363,13 @@ TEST(TextInfoBatch33Test, ToTitleCase_Parentheses_CapitalizeInsideToo) {
 TEST(TextInfoBatch33Test, ToTitleCase_Apostrophe_DoesNotCapitalizeAfter) {
     TextInfo ti;
     EXPECT_EQ(ti.ToTitleCase("o'brien"), "O'brien");
+    EXPECT_EQ(ti.ToTitleCase("O'BRIEN"), "O'brien");
+    EXPECT_EQ(ti.ToTitleCase("USA'S"), "USA's");
+}
+
+TEST(TextInfoBatch33Test, ToTitleCase_StartsAtFirstLetterAfterLeadingNonLetters) {
+    TextInfo ti;
+    EXPECT_EQ(ti.ToTitleCase("123hello"), "123Hello");
 }
 
 TEST(TextInfoBatch33Test, Clone_IsMutable) {

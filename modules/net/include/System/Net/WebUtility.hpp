@@ -18,27 +18,20 @@ namespace System::Net {
      *
      * C++ counterpart of .NET System.Net.WebUtility.
      *
-     * @note HtmlEncode here only encodes the 5 ASCII special characters
-     * ('&', '<', '>', '"', '\''); .NET additionally numeric-entity-encodes the
-     * Latin-1 supplement range (U+00A0-U+00FF) and non-BMP characters, which would
-     * require decoding UTF-8 into code points — not done here since std::string is
-     * treated as an opaque byte sequence elsewhere in this class (UrlEncode/UrlDecode
-     * already work correctly on UTF-8 bytes without needing to decode code points).
+     * @note HtmlEncode decodes UTF-8 scalars and follows .NET WebUtility's deliberately
+     *       narrow policy: five ASCII specials, decimal numeric references for U+00A0-U+00FF,
+     *       and one decimal reference per supplementary scalar. Ticket #2044 replaced the old
+     *       five-character-only implementation; the detailed contract is on HtmlEncode below.
      * @note HtmlDecode supports the 5 basic named entities plus numeric character
      * references (&amp;#NNN; and &amp;#xHH;) and a handful of common named entities
      * (nbsp, copy, reg, apos, trade) — not .NET's full ~250-entry HTML5 named-entity
      * table.
-     * @warning The two notes above are ASYMMETRIC, and that asymmetry is the shape of the
-     * finding rather than an accident: the **decoder understands more than the encoder ever
-     * produces**. `HtmlDecode` accepts `&amp;copy;`, `&amp;#169;` and `&amp;#xA9;`, none of
-     * which `HtmlEncode` can emit, so a decode-then-encode round trip is **not** the identity
-     * even though encode-then-decode is. SR-AUD-309 describes the **encode** direction only.
-     * Ticket **#2044** carries the decision, is **deferred rather than merely blocked** because
-     * .NET's exact default escape set cannot be verified in this container, and is explicitly
-     * coupled to `System::Text::Encodings::Web`'s #2019 — two HTML encoders in one repository
-     * must not be given two different escape sets. Both directions are pinned by
-     * `NetGatedBehaviourPinTests.Pin2044_*`; see
-     * `docs/SystemNetNamespaceReviewPlan.md` §4.4 and §14.4.
+     * @warning The two notes above remain lexically asymmetric: HtmlDecode accepts spellings
+     * such as `&amp;copy;` and hexadecimal numeric references that HtmlEncode canonicalizes to
+     * decimal references. A decode-then-encode round trip therefore need not preserve the input
+     * spelling, although encode-then-decode preserves the scalar value. #2044 verified this
+     * against .NET and also corrected the old premise that WebUtility and HtmlEncoder should
+     * share an escape set: .NET intentionally gives the two APIs different policies.
      * @note TextWriter-based overloads and the byte[]-based UrlEncodeToBytes/
      * UrlDecodeToBytes overloads are not ported (no TextWriter/byte[] idiom used
      * elsewhere in this class).

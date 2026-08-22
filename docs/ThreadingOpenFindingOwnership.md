@@ -3,6 +3,11 @@
 
 # `modules/threading` — strict ownership of every open audit finding
 
+> **Historical ownership snapshot (2026-08-12).** The open/blocked counts and owner states below
+> describe that checkpoint, not current HEAD. All audit findings were subsequently reconciled;
+> current dispositions are in `docs/AuditFindingsReconciliation.md` and current ticket state is
+> authoritative only in `plan.sqlite3`.
+
 Ticket **#2342**, 2026-08-12. Companion to `docs/ThreadingNamespaceReviewPlan.md`; it does
 not replace that plan, it records who owns the *remaining* work after the plan's own tickets
 #1947–#1955, #1971 and #2341 have run.

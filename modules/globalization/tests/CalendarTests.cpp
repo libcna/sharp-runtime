@@ -6,6 +6,7 @@
 // Add* convenience methods (AddDays, AddHours, AddMinutes, AddSeconds, AddMilliseconds).
 #include <climits>
 #include <gtest/gtest.h>
+#include <type_traits>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
 #include "System/DayOfWeek.hpp"
@@ -18,6 +19,18 @@
 using System::DateTime;
 using System::DayOfWeek;
 using namespace System::Globalization;
+
+namespace {
+
+// Exercises Calendar's reusable default implementations without making the public base type
+// constructible. A concrete port calendar may override only the rules it actually changes.
+class TestCalendar final : public Calendar {};
+
+static_assert(std::is_abstract_v<Calendar>);
+static_assert(!std::is_abstract_v<TestCalendar>);
+static_assert(!std::is_abstract_v<GregorianCalendar>);
+
+} // namespace
 
 // ===========================================================================
 // DateTime::AddDays / AddHours / AddMinutes / AddSeconds / AddMilliseconds
@@ -100,108 +113,108 @@ TEST(CalendarTests, CurrentEra_IsZero) {
 }
 
 TEST(CalendarTests, GetYear) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2025, 6, 10);
     EXPECT_EQ(cal.GetYear(d), 2025);
 }
 
 TEST(CalendarTests, GetMonth) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2025, 6, 10);
     EXPECT_EQ(cal.GetMonth(d), 6);
 }
 
 TEST(CalendarTests, GetDayOfMonth) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2025, 6, 10);
     EXPECT_EQ(cal.GetDayOfMonth(d), 10);
 }
 
 TEST(CalendarTests, GetDayOfWeek_Monday) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2025, 6, 9); // known Monday
     EXPECT_EQ(cal.GetDayOfWeek(d), DayOfWeek::Monday);
 }
 
 TEST(CalendarTests, GetDayOfYear_Jan1_Is1) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 1, 1);
     EXPECT_EQ(cal.GetDayOfYear(d), 1);
 }
 
 TEST(CalendarTests, GetHour) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 1, 1, 14, 30, 0);
     EXPECT_EQ(cal.GetHour(d), 14);
 }
 
 TEST(CalendarTests, GetMinute) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 1, 1, 0, 45, 0);
     EXPECT_EQ(cal.GetMinute(d), 45);
 }
 
 TEST(CalendarTests, GetSecond) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 1, 1, 0, 0, 59);
     EXPECT_EQ(cal.GetSecond(d), 59);
 }
 
 TEST(CalendarTests, GetMilliseconds) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 1, 1, 0, 0, 0, 123);
     EXPECT_EQ(cal.GetMilliseconds(d), 123);
 }
 
 TEST(CalendarTests, GetEra_IsCurrentEra) {
-    Calendar cal;
+    TestCalendar cal;
     EXPECT_EQ(cal.GetEra(DateTime()), Calendar::CurrentEra);
 }
 
 TEST(CalendarTests, GetErasCount_Is1) {
-    Calendar cal;
+    TestCalendar cal;
     EXPECT_EQ(cal.GetErasCount(), 1);
 }
 
 TEST(CalendarTests, IsLeapYear_2000_True) {
-    Calendar cal;
+    TestCalendar cal;
     EXPECT_TRUE(cal.IsLeapYear(2000));
 }
 
 TEST(CalendarTests, IsLeapYear_1900_False) {
-    Calendar cal;
+    TestCalendar cal;
     EXPECT_FALSE(cal.IsLeapYear(1900));
 }
 
 TEST(CalendarTests, IsLeapYear_2024_True) {
-    Calendar cal;
+    TestCalendar cal;
     EXPECT_TRUE(cal.IsLeapYear(2024));
 }
 
 TEST(CalendarTests, IsLeapYear_2023_False) {
-    Calendar cal;
+    TestCalendar cal;
     EXPECT_FALSE(cal.IsLeapYear(2023));
 }
 
 TEST(CalendarTests, GetDaysInMonth_Feb_LeapYear) {
-    Calendar cal;
+    TestCalendar cal;
     EXPECT_EQ(cal.GetDaysInMonth(2000, 2), 29);
     EXPECT_EQ(cal.GetDaysInMonth(2024, 2), 29);
 }
 
 TEST(CalendarTests, GetDaysInMonth_Feb_NonLeap) {
-    Calendar cal;
+    TestCalendar cal;
     EXPECT_EQ(cal.GetDaysInMonth(2021, 2), 28);
     EXPECT_EQ(cal.GetDaysInMonth(1900, 2), 28);
 }
 
 TEST(CalendarTests, GetDaysInMonth_January_31) {
-    Calendar cal;
+    TestCalendar cal;
     EXPECT_EQ(cal.GetDaysInMonth(2021, 1), 31);
 }
 
 TEST(CalendarTests, GetDaysInMonth_April_30) {
-    Calendar cal;
+    TestCalendar cal;
     EXPECT_EQ(cal.GetDaysInMonth(2021, 4), 30);
 }
 
@@ -209,26 +222,26 @@ TEST(CalendarTests, GetDaysInMonth_April_30) {
 // undefined behavior (no bounds check), not a thrown exception; real .NET's base
 // implementation (via DateTime.DaysInMonth) validates month first.
 TEST(CalendarTests, GetDaysInMonth_OutOfRangeMonth_Throws) {
-    Calendar cal;
+    TestCalendar cal;
     EXPECT_THROW(cal.GetDaysInMonth(2021, 0), System::ArgumentOutOfRangeException);
     EXPECT_THROW(cal.GetDaysInMonth(2021, 13), System::ArgumentOutOfRangeException);
     EXPECT_THROW(cal.GetDaysInMonth(2021, -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(CalendarTests, GetDaysInYear_Leap_366) {
-    Calendar cal;
+    TestCalendar cal;
     EXPECT_EQ(cal.GetDaysInYear(2000), 366);
     EXPECT_EQ(cal.GetDaysInYear(2024), 366);
 }
 
 TEST(CalendarTests, GetDaysInYear_NonLeap_365) {
-    Calendar cal;
+    TestCalendar cal;
     EXPECT_EQ(cal.GetDaysInYear(2021), 365);
     EXPECT_EQ(cal.GetDaysInYear(1900), 365);
 }
 
 TEST(CalendarTests, AddYears_Simple) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2020, 6, 15);
     DateTime r = cal.AddYears(d, 3);
     EXPECT_EQ(r.getYearProperty(),  2023);
@@ -242,7 +255,7 @@ TEST(CalendarTests, AddYears_Simple) {
 // (GregorianCalendar.cs: AddYears delegates to AddMonths, which clamps `if (d > days) d =
 // days;`).
 TEST(CalendarTests, AddYears_Feb29_ClampsToFeb28InNonLeapYear) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2024, 2, 29); // 2024 is a leap year
     DateTime r = cal.AddYears(d, 1); // 2025 is not a leap year
     EXPECT_EQ(r.getYearProperty(),  2025);
@@ -251,7 +264,7 @@ TEST(CalendarTests, AddYears_Feb29_ClampsToFeb28InNonLeapYear) {
 }
 
 TEST(CalendarTests, AddMonths_CrossesYear) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 11, 30);
     DateTime r = cal.AddMonths(d, 3);
     EXPECT_EQ(r.getYearProperty(),  2022);
@@ -261,7 +274,7 @@ TEST(CalendarTests, AddMonths_CrossesYear) {
 }
 
 TEST(CalendarTests, AddMonths_Negative) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 3, 15);
     DateTime r = cal.AddMonths(d, -2);
     EXPECT_EQ(r.getYearProperty(),  2021);
@@ -276,19 +289,19 @@ TEST(CalendarTests, AddMonths_Negative) {
 // repro that AddMonths(<year 9999 date>, INT_MAX) silently produced a nonsensical negative
 // year instead of throwing.
 TEST(CalendarTests, AddMonths_AboveMaximum_Throws) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 3, 15);
     EXPECT_THROW(cal.AddMonths(d, 120001), System::ArgumentOutOfRangeException);
 }
 
 TEST(CalendarTests, AddMonths_BelowMinimum_Throws) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 3, 15);
     EXPECT_THROW(cal.AddMonths(d, -120001), System::ArgumentOutOfRangeException);
 }
 
 TEST(CalendarTests, AddMonths_ExtremeValue_DoesNotOverflow) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 3, 15);
     EXPECT_THROW(cal.AddMonths(d, INT_MAX), System::ArgumentOutOfRangeException);
     EXPECT_THROW(cal.AddMonths(d, INT_MIN), System::ArgumentOutOfRangeException);
@@ -299,14 +312,14 @@ TEST(CalendarTests, AddMonths_ExtremeValue_DoesNotOverflow) {
 // exclusive (> not >=) -- this instead confirms a large-but-comfortably-in-range value (100
 // years) is not spuriously rejected by the new check.
 TEST(CalendarTests, AddMonths_LargeButInRange_DoesNotThrow) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 3, 15);
     EXPECT_NO_THROW(cal.AddMonths(d, 1200));
     EXPECT_NO_THROW(cal.AddMonths(d, -1200));
 }
 
 TEST(CalendarTests, AddDays_Via_Calendar) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 1, 31);
     DateTime r = cal.AddDays(d, 1);
     EXPECT_EQ(r.getMonthProperty(), 2);
@@ -314,7 +327,7 @@ TEST(CalendarTests, AddDays_Via_Calendar) {
 }
 
 TEST(CalendarTests, AddHours_Via_Calendar) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 6, 15, 22, 0, 0);
     DateTime r = cal.AddHours(d, 3);
     EXPECT_EQ(r.getDayProperty(),  16);
@@ -322,7 +335,7 @@ TEST(CalendarTests, AddHours_Via_Calendar) {
 }
 
 TEST(CalendarTests, AddMinutes_Via_Calendar) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 6, 15, 23, 50, 0);
     DateTime r = cal.AddMinutes(d, 20);
     EXPECT_EQ(r.getDayProperty(),    16);
@@ -330,7 +343,7 @@ TEST(CalendarTests, AddMinutes_Via_Calendar) {
 }
 
 TEST(CalendarTests, AddSeconds_Via_Calendar) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 6, 15, 0, 0, 58);
     DateTime r = cal.AddSeconds(d, 5);
     EXPECT_EQ(r.getMinuteProperty(), 1);
@@ -339,7 +352,7 @@ TEST(CalendarTests, AddSeconds_Via_Calendar) {
 
 TEST(CalendarTests, GetWeekOfYear_Approximate) {
     // Just checks it returns a value in the valid range [1, 53]
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 3, 15);
     int w = cal.GetWeekOfYear(d, CalendarWeekRule::FirstDay, DayOfWeek::Monday);
     EXPECT_GE(w, 1);
@@ -353,32 +366,32 @@ TEST(CalendarTests, GetWeekOfYear_Approximate) {
 // ===========================================================================
 
 TEST(CalendarTests, GetWeekOfYear_FirstDay_SundayStart) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 1, 4); // Monday
     EXPECT_EQ(cal.GetWeekOfYear(d, CalendarWeekRule::FirstDay, DayOfWeek::Sunday), 2);
 }
 
 TEST(CalendarTests, GetWeekOfYear_FirstDay_RespectsFirstDayOfWeek) {
     // Same date, different firstDayOfWeek must change the result.
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 1, 4);
     EXPECT_EQ(cal.GetWeekOfYear(d, CalendarWeekRule::FirstDay, DayOfWeek::Wednesday), 1);
 }
 
 TEST(CalendarTests, GetWeekOfYear_FirstFullWeek_DiffersFromFirstDay) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 1, 4);
     EXPECT_EQ(cal.GetWeekOfYear(d, CalendarWeekRule::FirstFullWeek, DayOfWeek::Sunday), 1);
 }
 
 TEST(CalendarTests, GetWeekOfYear_FirstFourDayWeek) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 1, 4);
     EXPECT_EQ(cal.GetWeekOfYear(d, CalendarWeekRule::FirstFourDayWeek, DayOfWeek::Sunday), 1);
 }
 
 TEST(CalendarTests, GetWeekOfYear_InvalidFirstDayOfWeek_Throws) {
-    Calendar cal;
+    TestCalendar cal;
     DateTime d(2021, 1, 4);
     EXPECT_THROW(cal.GetWeekOfYear(d, CalendarWeekRule::FirstDay, static_cast<DayOfWeek>(7)),
                  System::ArgumentOutOfRangeException);
@@ -389,32 +402,32 @@ TEST(CalendarTests, GetWeekOfYear_InvalidFirstDayOfWeek_Throws) {
 // ===========================================================================
 
 TEST(CalendarTests, TwoDigitYearMax_DefaultsTo2049) {
-    Calendar cal;
+    TestCalendar cal;
     EXPECT_EQ(cal.getTwoDigitYearMaxProperty(), 2049);
 }
 
 TEST(CalendarTests, ToFourDigitYear_BelowMaxCentury_UsesCurrentCentury) {
-    Calendar cal; // TwoDigitYearMax defaults to 2049
+    TestCalendar cal; // TwoDigitYearMax defaults to 2049
     EXPECT_EQ(cal.ToFourDigitYear(30), 2030);
 }
 
 TEST(CalendarTests, ToFourDigitYear_AboveMaxCentury_UsesPreviousCentury) {
-    Calendar cal; // TwoDigitYearMax defaults to 2049
+    TestCalendar cal; // TwoDigitYearMax defaults to 2049
     EXPECT_EQ(cal.ToFourDigitYear(50), 1950);
 }
 
 TEST(CalendarTests, ToFourDigitYear_YearAtOrAbove100_ReturnedAsIs) {
-    Calendar cal;
+    TestCalendar cal;
     EXPECT_EQ(cal.ToFourDigitYear(2024), 2024);
 }
 
 TEST(CalendarTests, ToFourDigitYear_NegativeYear_Throws) {
-    Calendar cal;
+    TestCalendar cal;
     EXPECT_THROW(cal.ToFourDigitYear(-1), System::ArgumentOutOfRangeException);
 }
 
 TEST(CalendarTests, ToFourDigitYear_RespectsCustomTwoDigitYearMax) {
-    Calendar cal;
+    TestCalendar cal;
     cal.setTwoDigitYearMaxProperty(2099);
     EXPECT_EQ(cal.ToFourDigitYear(99), 2099);
     EXPECT_EQ(cal.getTwoDigitYearMaxProperty(), 2099);

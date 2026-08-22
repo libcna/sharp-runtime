@@ -1,11 +1,15 @@
 <!-- SPDX-License-Identifier: MIT -->
 <!-- Copyright (c) Robert Vokac and contributors -->
 
-# Migration — `MarshalAsAttribute` gets .NET's field types, and the two COM enums arrive (ticket #1980, group G-5)
+# Migration — interop metadata gets .NET's field types (ticket #1980, group G-5)
 
 *2026-08-19.* `MarshalAsAttribute::Value` becomes get-only, `ArraySubType` becomes an
 `UnmanagedType`, `SizeParamIndex` becomes a `short`, two absent fields arrive, and
 `VarEnum` / `ComInterfaceType` / `ClassInterfaceType` are added.
+
+The final-audit follow-up in §8 applies the two COM enums to `InterfaceTypeAttribute` and
+`ClassInterfaceAttribute`; the original G-5 implementation added their types but accidentally
+left both owning attributes as mutable, untyped `intcs` objects.
 
 **This is a public source break**, landed under **SA-8** (the `Value` half) and **SA-5** (the
 types and the additions), with SA-2's five conditions discharged.
@@ -32,6 +36,9 @@ where only a marshalling kind is meaningful, which is the whole reason the enum 
 | `VarEnum` | absent | added | `VarEnum.cs` |
 | `ComInterfaceType` | absent | added | `ComInterfaceType.cs` |
 | `ClassInterfaceType` | absent | added | `ClassInterfaceType.cs` |
+| `InterfaceTypeAttribute::Value` | public mutable `intcs` | private typed state, get-only `ComInterfaceType` | `InterfaceTypeAttribute.cs` |
+| `ClassInterfaceAttribute::Value` | public mutable `intcs` | private typed state, get-only `ClassInterfaceType` | `ClassInterfaceAttribute.cs` |
+| both COM attribute classes | derivable, `intcs` constructor only | `final`, enum and raw-`shortcs` constructors | corresponding attribute sources |
 
 `ArraySubType` and `SafeArraySubType` default to **0**, which is **not a declared enumerator** in
 either enum (`UnmanagedType` starts at `Bool = 2`). That is deliberate and is the same reasoning
@@ -61,6 +68,13 @@ attr = MarshalAsAttribute(UnmanagedType::I4);   // now: the type is fixed at con
 
 attr.ArraySubType = 7;                   // was
 attr.ArraySubType = UnmanagedType::I4;   // now
+
+InterfaceTypeAttribute oldI(static_cast<SharpRuntime::intcs>(2)); // was
+oldI.Value = 1;                                                    // was writable
+
+InterfaceTypeAttribute i(ComInterfaceType::InterfaceIsIDispatch); // now, preferred
+InterfaceTypeAttribute rawI(static_cast<SharpRuntime::shortcs>(2)); // compatibility route
+i.getValueProperty();                    // now typed and get-only
 ```
 
 **First-party migration was one site**, a test, and the compiler found it.
@@ -109,8 +123,35 @@ executable moved. Module graph unchanged at 41/93.
 `MarshalAsAttribute` appears in **zero** places in `cna` and **zero** in `mobile-eggbert`. Neither
 repository was modified.
 
-## 7. Scope
+## 7. Scope at the original landing
 
-This closes **G-5** of #1980. G-1, G-2 and G-4 landed earlier the same day. **Only G-3 remains** —
+At the time this was recorded as closing **G-5** of #1980. G-1, G-2 and G-4 had landed earlier the
+same day and **only G-3 remained** —
 reparenting `AmbiguousImplementationException` and five attributes and sealing them, a vtable
 *and* layout change that SA-3 explicitly excludes.
+
+## 8. Final-audit COM-attribute follow-up (2026-08-22)
+
+The original implementation added `ComInterfaceType` and `ClassInterfaceType` but never connected
+them to the two attributes that own those contracts. Both classes still exposed public mutable
+`intcs Value` and accepted only `intcs`, exactly the residual clause in SR-AUD-167.
+
+`InterfaceTypeAttribute` and `ClassInterfaceAttribute` are now `final`. Each stores its enum in a
+private field, returns that enum from `getValueProperty()`, and provides the two .NET construction
+routes: the strongly typed enum and the raw 16-bit compatibility value. The raw constructor casts
+the value without rejecting unnamed values, matching the metadata compatibility overload.
+
+The enum underlying type remains `SharpRuntime::intcs`, so replacing the public integer field with
+the private enum field does not grow either object. Layout relationship tests verify that the
+typed field replaces rather than supplements the old state.
+
+Two Runtime tests pin finality, getter return type, absence of public `Value`, both constructors,
+named values, unnamed raw-short values and layout. The negative fixture grows from four to
+**eight sites**; the four new sites independently reject reading/writing the old fields and
+deriving from either class. Its baseline exercises both typed and raw-short construction.
+
+The explicitly accepted `MarshalTypeRef`/`SafeArrayUserDefinedSubType` reflection deviation is
+unchanged. No reflection or interop execution subsystem was added.
+
+Focused validation after both final-audit repairs: `SharpRuntimeTests_Runtime` **207/207** and the
+two affected negative fixtures **18/18 sites rejected**.

@@ -4,19 +4,10 @@
 //
 // `System::Net::WebSockets` gated-behaviour pins.
 //
-// docs/SystemNetWebSocketsNamespaceReviewPlan.md §19 requires that SR-AUD-247, SR-AUD-250,
-// SR-AUD-251 and SR-AUD-252 each carry a blocked ticket **and a pin**, and §13 requires #2095's
-// measured fragmentation behaviour to be pinned. #2090 landed the first three pins (the layout
-// probe, #2088's CCF-019 ownership `static_assert`, and the 16 KiB handshake cap). This file
-// completes the set.
-//
-// **These tests assert what the code does TODAY, not what it should do.** Every one of them
-// documents a defect whose repair is BLOCKED. They exist so that an approved repair cannot land
-// silently: when one of these tickets is unblocked and implemented, the corresponding pin
-// FAILS, and that failure is the signal to update this file in the same change.
-//
-// Nothing here is an endorsement, and none of these findings is remediated by this file
-// existing.
+// docs/SystemNetWebSocketsNamespaceReviewPlan.md originally required pins while SR-AUD-247,
+// SR-AUD-250, SR-AUD-251 and SR-AUD-252 awaited their implementation tickets. Those tickets have
+// since landed; the former disclosure pins were inverted in place into regressions for the
+// repaired contracts. The file also retains #2095's measured fragmentation coverage.
 #include <gtest/gtest.h>
 #include <optional>
 
@@ -213,7 +204,7 @@ void noConfig(ClientWebSocketOptions&) {}
 } // namespace
 
 // ===========================================================================
-// SR-AUD-250 → #2092, BLOCKED: the inner exception is discarded
+// SR-AUD-250 → #2092, REPAIRED: the inner exception is preserved
 // ===========================================================================
 
 TEST(WebSocketsGatedBehaviourPins, Fix2092_WebSocketExceptionKeepsItsInnerException) {
@@ -280,7 +271,7 @@ TEST(WebSocketsGatedBehaviourPins, Fix2092_Win32ExceptionItselfCarriesTheCause) 
 }
 
 // ===========================================================================
-// SR-AUD-251 → #2093, BLOCKED: every CancellationToken is ignored
+// SR-AUD-251 → #2093, REPAIRED: cancellation aborts the WebSocket
 // ===========================================================================
 
 TEST(WebSocketsGatedBehaviourPins, Fix2093_AnAlreadyCancelledTokenPreventsTheOperation) {
@@ -383,7 +374,7 @@ TEST(WebSocketsGatedBehaviourPins, Fix2093_EveryOneOfTheFiveMembersHonoursTheTok
 }
 
 // ===========================================================================
-// SR-AUD-252 → #2094, BLOCKED: KeepAliveInterval/Timeout are inert
+// SR-AUD-252 → #2094, REPAIRED: keep-alive strategies are active
 // ===========================================================================
 
 TEST(WebSocketsGatedBehaviourPins, Fix2094_TheDefaultStrategyIsAnUnsolicitedPong) {
@@ -750,22 +741,14 @@ TEST(WebSocketsGatedBehaviourPins, Fix2095_TheTailOfANonFinalFrameDoesNotClaimTh
 }
 
 // ===========================================================================
-// #2096, BLOCKED: what is deliberately NOT pinned, and why
+// #2096, REPAIRED: synchronized state and stable socket ownership
 // ===========================================================================
 
-// §7.11 — `state_` is written from task threads and read by `getStateProperty()` with no
-// synchronisation, and `sendFrame`/`readFrame` dereference `socket_` with no null check after
-// `Dispose()` has reset it.
-//
-// **No behavioural pin is written for #2096, deliberately.** A data race and a null dereference
-// are undefined behaviour, not behaviour: a test that "passes" today would be asserting on the
-// outcome of UB, which is neither stable nor meaningful, and a test that races on purpose would
-// be flaky by construction. This is the same reasoning plan §4.6 gives for SR-AUD-247, whose pin
-// is therefore a compile-time `static_assert` on the ownership MODEL
-// (`ClientWebSocketFrameValidationTests`) rather than a behavioural assertion.
-//
-// #2096 is recorded here so that a reader looking for its pin finds this explanation instead of
-// concluding one was forgotten.
+// The public state getters and their task-thread writers now synchronize through stateMutex_,
+// and each I/O operation takes a strong local socket reference before releasing that mutex.
+// `ClientWebSocketConcurrencyTests` carries the deterministic lifecycle and all-five-async-member
+// regressions; the field-for-field probe in `ClientWebSocketFrameValidationTests` pins the
+// corresponding shared socket and mutex layout change.
 
 
 // ===========================================================================================

@@ -98,11 +98,10 @@ namespace System::Buffers {
          * `_array` and tests `array is null`. The port's natural equivalent would be a
          * `std::unique_ptr<std::vector<T>>`, which would even make the object *smaller*. It was
          * rejected deliberately: `reset()` frees the storage **deterministically**, whereas
-         * `clear() + shrink_to_fit()` today is non-binding — and half (b) of this ticket, a
-         * `Memory<T>` retained across `Dispose()`, is still open. Turning that latent
-         * use-after-free from "usually survives" into "always broken" while nothing yet fixes it
-         * would be a practical regression dressed as parity. The storage lifetime is therefore
-         * left exactly as it was.
+         * `clear() + shrink_to_fit()` today is non-binding. A `Memory<T>` retained across
+         * `Dispose()` is outside the documented lifetime of that non-owning view either way;
+         * the final audit classifies that managed-lifetime difference as an accepted deviation.
+         * The storage handling is therefore left exactly as it was.
          *
          * `sizeof(MemoryPoolHeapOwner_<int>)` 32 → 40 under `docs/StandingApprovals.md` SA-3.
          */
@@ -122,11 +121,11 @@ namespace System::Buffers {
          * @return The rented block.
          * @throws System::ObjectDisposedException if `Dispose()` has already run (#2056).
          *
-         * @warning **Half (b) of #2056 is still open**: a `Memory<T>` obtained *before*
+         * @warning **Accepted lifetime deviation (SR-AUD-071b):** a `Memory<T>` obtained *before*
          *          `Dispose()` keeps a pointer and a length over storage `Dispose()` may have
-         *          released. Repairing that is a `Memory<T>` ownership change in `Core.Base`,
-         *          not a change to this type, and this member cannot defend against it — by the
-         *          time the caller holds the `Memory`, this object is no longer in the path.
+         *          released. `Memory<T>` is deliberately a non-owning C++ view, so callers must
+         *          not retain it past the owner's lifetime. The final reconciliation records
+         *          that lifetime boundary as the accepted SR-AUD-071b deviation.
          */
         System::Memory<T> getMemoryProperty() override {
             System::ObjectDisposedException::ThrowIf(disposed_, "MemoryPool<T>.Rent()");

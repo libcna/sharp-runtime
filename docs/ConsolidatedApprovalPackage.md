@@ -3,6 +3,11 @@
 
 # Consolidated approval package — `System::Diagnostics` and `System::Text`
 
+> **Historical approval snapshot (2026-08-04).** This is no longer an active decision request:
+> the decisions subsequently landed. Use `plan.sqlite3` for current ticket state and
+> `docs/AuditFindingsReconciliation.md` for current finding dispositions; the body remains the
+> evidence and cost record at the time approval was sought.
+
 Written 2026-08-04 on branch `feature/remediation-batch-approval-packages-next-review`.
 
 This is the **single place a decision is requested** for the twelve approval-sensitive tickets in

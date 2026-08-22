@@ -647,25 +647,29 @@ void Process::WaitForExit() {
 #if defined(SHARP_RUNTIME_PROCESS_POSIX)
     if (!impl_->started) throw System::InvalidOperationException("No process is associated with this object.");
     if (impl_->isCurrentProcess) return;
-    if (impl_->hasExited) return;
-    int status = 0;
-    // Retry on EINTR (#2024, SR-AUD-272).  This overload's contract is "blocks the calling
-    // thread until the associated process terminates"; before this loop, any signal whose
-    // handler was installed without SA_RESTART made waitpid fail with EINTR and this function
-    // return with the child still running -- measured at 1000 ms into a 3 s child.
-    pid_t r;
-    do {
-        r = ::waitpid(impl_->pid, &status, 0);
-    } while (r < 0 && errno == EINTR);
-    if (r == impl_->pid) {
-        impl_->hasExited = true;
-        impl_->exitCode = WIFEXITED(status) ? WEXITSTATUS(status)
-                         : WIFSIGNALED(status) ? (128 + WTERMSIG(status))
-                         : -1;
+    if (!impl_->hasExited) {
+        int status = 0;
+        // Retry on EINTR (#2024, SR-AUD-272).  This overload's contract is "blocks the calling
+        // thread until the associated process terminates"; before this loop, any signal whose
+        // handler was installed without SA_RESTART made waitpid fail with EINTR and this function
+        // return with the child still running -- measured at 1000 ms into a 3 s child.
+        pid_t r;
+        do {
+            r = ::waitpid(impl_->pid, &status, 0);
+        } while (r < 0 && errno == EINTR);
+        if (r == impl_->pid) {
+            impl_->hasExited = true;
+            impl_->exitCode = WIFEXITED(status) ? WEXITSTATUS(status)
+                             : WIFSIGNALED(status) ? (128 + WTERMSIG(status))
+                             : -1;
+        }
     }
     // #2032: THE one place .NET waits for the output streams, and this overload is
     // `WaitForExit(Timeout.Infinite)` in .NET too (`Process.cs`). Having no deadline, it is the
     // only one that CAN wait for a pipe whose write end an inherited grandchild may still hold.
+    // These joins remain required even when a prior finite wait or HasExited poll already reaped
+    // the direct child: reaping the process and completing its redirected streams are separate
+    // operations, and the unbounded overload promises both.
     if (impl_->stdoutReader.joinable()) impl_->stdoutReader.join();
     if (impl_->stderrReader.joinable()) impl_->stderrReader.join();
 #else

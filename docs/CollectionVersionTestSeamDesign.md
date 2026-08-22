@@ -908,3 +908,20 @@ document that fell behind, not the enforcement.**
 | `SortedSetVersionAccess` | `System/Collections/Generic/SortedSet.hpp` | `collections_sorted_set_version_negative.cpp` |
 | `KeyMaterialAccess` | `System/Security/Cryptography/detail/SecureMemory.hpp` | `security_cryptography_key_material_negative.cpp` |
 
+---
+
+## Current state, re-measured by the final audit on 2026-08-22
+
+The Timer start-order repair adds a fourth seam and one specialization:
+`TimerStartAccess<System::Timers::Timer>`. Its sole definition is in
+`TimerLifecyclePinTests.cpp`; `timers_start_hook_negative.cpp` proves that consumers see only the
+incomplete template and cannot reach the private hook storage. The checker now reports **4 seams /
+21 definitions**. Earlier measurements remain historical snapshots.
+
+The final Socket liveness review adds a fifth seam and one specialization:
+`SocketAsyncStartAccess<System::Net::Sockets::Socket>`. Its sole definition is in
+`SocketsGatedBehaviourPins.cpp`; `socket_async_start_hook_negative.cpp` rejects access to the
+private Task-start hook and in-flight count from ordinary consumers. It deterministically injects
+a failure after registration but before Task construction, proving rollback cannot strand a
+destructor. The checker now reports **5 seams / 22 definitions**; the Timer and earlier figures
+above remain dated measurements rather than silently rewritten history.

@@ -40,12 +40,12 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdio>
 #include <fstream>
 #include <memory>
 #include <sstream>
 #include <string>
 
+#include "TestTemporaryDirectory.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/Xml/Linq/SaveOptions.hpp"
 #include "System/Xml/Linq/XDocument.hpp"
@@ -262,7 +262,8 @@ TEST(XLinqDocTypeSerializationTests, TheRepairAppliesThroughTheDocumentDoor) {
 }
 
 TEST(XLinqDocTypeSerializationTests, TheRepairAppliesThroughSaveToFile) {
-    const std::string path = "build-tmp/2200_doctype_save.xml";
+    SharpRuntime::Tests::TestTemporaryDirectory temporary;
+    const std::string path = temporary.path("doctype-save.xml");
     auto doc = std::make_shared<XDocument>();
     doc->Add(std::make_shared<XDocumentType>("r", "", "a\"b", ""));
     doc->Add(std::make_shared<XElement>(XName("r")));
@@ -274,7 +275,6 @@ TEST(XLinqDocTypeSerializationTests, TheRepairAppliesThroughSaveToFile) {
     buf << in.rdbuf();
     in.close();
     EXPECT_NE(buf.str().find("SYSTEM 'a\"b'"), std::string::npos) << buf.str();
-    std::remove(path.c_str());
 }
 
 TEST(XLinqDocTypeSerializationTests, ARejectedDeclarationWritesNothingToTheStream) {

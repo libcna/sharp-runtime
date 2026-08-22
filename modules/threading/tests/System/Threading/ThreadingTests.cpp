@@ -242,7 +242,7 @@ TEST(ThreadingTests, Interlocked_Add_Long_ReturnsSum) {
 }
 
 // ---------------------------------------------------------------------------
-// Monitor (stub — all no-ops that return true)
+// Monitor — registry-backed mutual exclusion and wait-set behaviour
 // ---------------------------------------------------------------------------
 
 TEST(ThreadingTests, Monitor_Enter_DoesNotThrow) {

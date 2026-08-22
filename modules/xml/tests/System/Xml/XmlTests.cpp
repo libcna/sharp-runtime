@@ -9,9 +9,9 @@
 // XStreamingElement/comparer/Extensions coverage. See XmlDomTests.cpp for the classic
 // XmlDocument DOM API and XmlSupportTests.cpp for XmlException/XmlConvert/XmlQualifiedName/enum
 // coverage.
-#include <cstdio>
 #include <fstream>
 #include <gtest/gtest.h>
+#include "TestTemporaryDirectory.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/NotImplementedException.hpp"
 #include "System/Xml/XmlException.hpp"
@@ -989,7 +989,8 @@ TEST(XDocumentTests, Load_MissingFile_Throws) {
 }
 
 TEST(XDocumentTests, Load_ExistingFile_ReturnsParsedDocument) {
-    const char* path = "xdocument_load_test.xml";
+    SharpRuntime::Tests::TestTemporaryDirectory temporary;
+    const std::string path = temporary.path("xdocument.xml");
     {
         std::ofstream ofs(path);
         ofs << "<root><child>value</child></root>";
@@ -997,5 +998,4 @@ TEST(XDocumentTests, Load_ExistingFile_ReturnsParsedDocument) {
     auto doc = XDocument::Load(path);
     ASSERT_NE(doc->getRootProperty(), nullptr);
     EXPECT_EQ(doc->getRootProperty()->getNameProperty().getLocalNameProperty(), "root");
-    std::remove(path);
 }

@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <atomic>
 #include <memory>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/EventHandler.hpp"
@@ -11,6 +12,11 @@
 
 namespace System::Threading {
     class Timer;
+}
+
+namespace SharpRuntime::Testing {
+    template <typename TOwner>
+    struct TimerStartAccess;
 }
 
 namespace System::Timers {
@@ -26,30 +32,41 @@ namespace System::Timers {
      * in this runtime — `Elapsed` is always raised directly from the timer's background thread,
      * matching how `System::Threading::Timer` itself already works here).
      *
-     * @note Lifetime contract: the background timer callback captures `this` directly (see
-     * Timer.cpp's `startTimerThread()`), and the underlying `System::Threading::Timer::Dispose()`
-     * detaches its thread rather than joining it. Destroying (or `Close()`-ing) a `Timer` does
-     * not guarantee an in-flight callback invocation has finished — a callback that is already
-     * executing when the `Timer` is destroyed can dereference a dangling `this`. Callers must
-     * ensure a `Timer` outlives any callback it might still be dispatching, e.g. by not
-     * destroying it from within its own `Elapsed` handler and by providing external
-     * synchronization if destruction can race with a pending tick. This is the same class of
-     * this-capture-into-background-thread hazard documented on `Socket`'s async methods and
-     * `ClientWebSocket`'s Send/ReceiveAsync — not redesigned here for the same reason: fixing it
-     * needs a broader ownership change (e.g. `enable_shared_from_this`/`weak_ptr` in the
-     * callback), out of scope for a single audit pass.
+     * @note Lifetime contract: the background callback owns a small shared lifetime gate, not a
+     * raw capture of this object. Destruction first prevents any pending tick from entering and
+     * then waits for an already-entered callback to leave before the Timer's members are
+     * destroyed. `Close()` itself deliberately remains non-blocking — as in .NET, an event that
+     * is already executing may finish after `Close()` returns — and is therefore safe to call
+     * from inside an `Elapsed` handler without a self-join deadlock. Destroying the Timer from
+     * inside one of its own handlers remains unsupported: a later handler in the same multicast
+     * snapshot would receive an already-destroyed sender. Call `Close()` there instead.
      */
     class Timer : public System::Object {
+        friend struct SharpRuntime::Testing::TimerStartAccess<Timer>;
+
+        struct CallbackLifetime;
+        using BeforeArmTestHook = void (*)();
+
         double interval_ = 100;
-        bool enabled_ = false;
-        bool autoReset_ = true;
+        // The one-shot callback writes Enabled from the worker while Close()/Stop() may write it
+        // from the caller. It must not be the last data race left after adding the lifetime gate.
+        std::atomic<bool> enabled_{false};
+        // Elapsed may read this on the worker while a handler or caller changes AutoReset.
+        std::atomic<bool> autoReset_{true};
         bool initializing_ = false;
         bool delayedEnable_ = false;
         std::unique_ptr<System::Threading::Timer> timer_;
-        std::shared_ptr<int> cookie_;
+        // Replaces the old shared_ptr<int> cookie without changing Timer's object layout. Pending
+        // callbacks use its generation; entered callbacks keep destruction waiting safely.
+        std::shared_ptr<CallbackLifetime> callbackLifetime_;
+        // Test-only scheduling seam. The production value is always null; the one authoritative
+        // specialisation lives in TimerLifecyclePinTests.cpp and lets the regression hold Start
+        // after the paused worker is constructed but before its gated transfer and arming.
+        static std::atomic<BeforeArmTestHook> beforeArmTestHook_;
 
         void updateTimer();
         void startTimerThread();
+        void stopTimerThread(bool waitForCallbacks);
 
     public:
         /**
@@ -119,12 +136,12 @@ namespace System::Timers {
         Timer& operator=(const Timer&) = delete;
 
         /** @return true if Elapsed is raised repeatedly (every Interval) while Enabled. */
-        [[nodiscard]] bool getAutoResetProperty() const { return autoReset_; }
+        [[nodiscard]] bool getAutoResetProperty() const { return autoReset_.load(); }
         /** @brief Sets whether Elapsed is raised repeatedly while Enabled. */
         void setAutoResetProperty(bool value);
 
         /** @return true if the timer is currently running. */
-        [[nodiscard]] bool getEnabledProperty() const { return enabled_; }
+        [[nodiscard]] bool getEnabledProperty() const { return enabled_.load(); }
         /** @brief Starts (true) or stops (false) the timer. */
         void setEnabledProperty(bool value);
 
@@ -162,7 +179,14 @@ namespace System::Timers {
         /** @brief Applies any Enabled value set since BeginInit() and resumes normal operation. */
         void EndInit();
 
-        /** @brief Stops and releases the underlying timer resources. */
+        /**
+         * @brief Stops and releases the underlying timer resources.
+         *
+         * Does not wait for an `Elapsed` handler that already entered; that handler may finish
+         * after this call returns. Destruction does wait, unless attempted from that handler's own
+         * thread (an unsupported destroy-from-handler pattern). Calling Close from a handler is
+         * supported and does not self-join.
+         */
         void Close();
         /** @brief Equivalent to Close(). */
         void Dispose() { Close(); }

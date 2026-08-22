@@ -27,16 +27,20 @@ repository-internal impact is nil.
 **Why a flag and not .NET's own discriminator.** .NET needs no flag: it nulls `_array` and tests
 `array is null`. The port's natural equivalent is `std::unique_ptr<std::vector<T>>`, which would
 even make the object *smaller* — and it was rejected on purpose. `reset()` frees the storage
-**deterministically**, where `clear() + shrink_to_fit()` is non-binding. Half (b) of #2056 —
-below — is still open, and turning its latent use-after-free from "usually survives" into
-"always broken" while nothing yet fixes it would be a practical regression dressed as parity.
-The storage lifetime is therefore left exactly as it was, and a test says so.
+**deterministically**, where `clear() + shrink_to_fit()` is non-binding. When #2056 landed,
+half (b) below had not yet received its final disposition, and turning the retained view from
+"usually survives" into "always broken" while that contract was unsettled would have been a
+practical regression dressed as parity. The storage lifetime was therefore left exactly as it
+was, and a test says so. The 2026-08-22 disposition immediately below supersedes that interim
+"open" state.
 
-**Half (b) is still open.** A `Memory<T>` obtained *before* `Dispose()` still keeps a pointer and
-a length over storage the owner may have released. `getMemoryProperty()` cannot defend against
-it — by the time the caller holds the `Memory`, the owner is no longer in the path — and
-repairing it is a `Memory<T>` ownership change in `Core.Base`. It stays pinned as unfixed rather
-than letting half a repair look whole.
+**Final disposition of half (b), 2026-08-22.** A `Memory<T>` obtained *before* `Dispose()` still
+keeps a pointer and a length over storage the owner may have released. `Memory<T>` is explicitly
+a non-owning C++ view, like `std::span`; its vector constructor already requires the backing
+vector to outlive it. Sharp-runtime has no GC that can reproduce the managed array-reference
+lifetime without replacing that public model across Core.Base. The final audit therefore records
+this as an `accepted-deviation`, not as an open implementation defect. Callers must not retain or
+dereference the view after `Dispose()` or owner destruction.
 
 ## 2. #2057 — `default` enumerates nothing, `Empty` enumerates one segment
 

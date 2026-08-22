@@ -421,16 +421,12 @@ static_assert(sizeof(ClientWebSocket) == sizeof(ClientWebSocketLayoutProbe),
 static_assert(alignof(ClientWebSocket) == alignof(ClientWebSocketLayoutProbe),
               "ClientWebSocket alignment moved");
 
-// #2088 / SR-AUD-247 / CCF-019. The finding is that every async member captures a raw `this`
-// with no owner liveness, and that SendAsync/ReceiveAsync additionally capture the caller's
-// buffer by reference. CCF-019's family design is UNSELECTED (#2066 records two competing
-// options and no decision across six sites), so this review deliberately did not pick one.
-// What it CAN do is pin the ownership model, exactly as #2066's pin does: the day someone
-// changes ClientWebSocket to be shared-ownership-aware, this stops compiling and the change is
-// visible instead of silent.
+// #2088 / SR-AUD-247 / CCF-019 selected an internal RAII in-flight-work boundary. The object
+// deliberately did not become enable_shared_from_this: its destructor wakes blocked I/O and
+// waits for every registered async body. Keep that public ownership model pinned independently
+// of the private AsyncOperations field pinned by the layout probe above.
 static_assert(!std::is_base_of_v<std::enable_shared_from_this<ClientWebSocket>, ClientWebSocket>,
-              "ClientWebSocket's ownership model changed. That is the CCF-019 repair shape and "
-              "it is BLOCKED pending #2066's family design selection -- see #2088.");
+              "#2088 uses an internal RAII liveness boundary, not shared self-ownership");
 
 TEST(ClientWebSocketFrameValidationTests, LayoutAndOwnershipModelArePinned) {
     // The static_asserts above are the real guard; this makes the pin visible in the suite.

@@ -3,12 +3,14 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <algorithm>
-#include <cctype>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 #include "System/ArgumentNullException.hpp"
+#include "System/Globalization/detail/UnicodeCategoryLookup.hpp"
 #include "System/Security/Principal/IPrincipal.hpp"
+#include "System/detail/Utf8Scalar.hpp"
 
 namespace System::Security::Principal {
 
@@ -28,10 +30,30 @@ namespace System::Security::Principal {
         std::shared_ptr<IIdentity> identity_;
         std::vector<std::string> roles_;
 
-        static bool equalsIgnoreCase(const std::string& a, const std::string& b) {
-            return a.size() == b.size() &&
-                   std::equal(a.begin(), a.end(), b.begin(),
-                              [](unsigned char x, unsigned char y) { return std::tolower(x) == std::tolower(y); });
+        static std::uint32_t nextOrdinalFold(const std::string& text, std::size_t& offset) noexcept {
+            std::uint32_t codePoint = 0;
+            std::size_t length = 0;
+            if (System::detail::TryDecodeUtf8Scalar(text, offset, codePoint, length)) {
+                offset += length;
+                return System::Globalization::detail::LookupToUpperInvariant(codePoint);
+            }
+
+            // System::String cannot contain malformed UTF-8 in this port's supported contract,
+            // but std::string can. Keep such bytes deterministic and distinct from every valid
+            // Unicode scalar instead of feeding them to locale-dependent ctype functions.
+            const auto raw = static_cast<unsigned char>(text[offset++]);
+            return 0x110000u + raw;
+        }
+
+        static bool equalsOrdinalIgnoreCase(const std::string& a, const std::string& b) noexcept {
+            std::size_t aOffset = 0;
+            std::size_t bOffset = 0;
+            while (aOffset < a.size() && bOffset < b.size()) {
+                if (nextOrdinalFold(a, aOffset) != nextOrdinalFold(b, bOffset)) {
+                    return false;
+                }
+            }
+            return aOffset == a.size() && bOffset == b.size();
         }
 
     public:
@@ -52,7 +74,7 @@ namespace System::Security::Principal {
 
         [[nodiscard]] bool IsInRole(const std::string& role) const override {
             return std::any_of(roles_.begin(), roles_.end(),
-                                [&](const std::string& r) { return equalsIgnoreCase(r, role); });
+                                [&](const std::string& r) { return equalsOrdinalIgnoreCase(r, role); });
         }
     };
 

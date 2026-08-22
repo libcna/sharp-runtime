@@ -855,10 +855,9 @@ TEST(Fix2384Unit2b, Decl2384_TenMembersAreAbsentBecauseFloatItselfLacksThem) {
 }
 
 // =================================================================================================
-// #2384 unit 3 -- the conversion operators, `from` direction, on BOTH types.
-//
-// The `to` direction is blocked on ticket #2395; the reason is measured and pinned below rather
-// than described, because it is the kind of hazard that reads as theoretical until it is shown.
+// #2384 unit 3 -- conversion operators in both directions on BOTH types. Ticket #2395 resolved
+// the raw-bits constructor collision by naming the bit-pattern factory before the value-taking
+// constructors landed.
 // =================================================================================================
 
 TEST(Fix2384Unit3, EveryFromConversionTruncatesTowardZero) {

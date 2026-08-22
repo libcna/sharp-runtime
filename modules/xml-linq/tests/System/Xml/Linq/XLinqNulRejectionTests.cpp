@@ -45,12 +45,12 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdio>
 #include <fstream>
 #include <memory>
 #include <sstream>
 #include <string>
 
+#include "TestTemporaryDirectory.hpp"
 #include "System/Xml/Linq/SaveOptions.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/Xml/Linq/XAttribute.hpp"
@@ -276,8 +276,8 @@ TEST(XLinqNulRejectionTests, TheGuardAppliesThroughTheDocumentAndFileDoors) {
     EXPECT_THROW((void)doc->ToString(SaveOptions::DisableFormatting), XmlException);
     EXPECT_THROW((void)doc->ToString(), XmlException);
 
-    const std::string path = "build-tmp/2201_nul_save.xml";
-    std::remove(path.c_str());
+    SharpRuntime::Tests::TestTemporaryDirectory temporary;
+    const std::string path = temporary.path("nul-save.xml");
     EXPECT_THROW(doc->Save(path, SaveOptions::DisableFormatting), XmlException);
     // The file may exist and hold the partial prefix written before the offending child was
     // reached -- that is unchanged by this ticket and is how every mid-stream rejection in this
@@ -289,7 +289,6 @@ TEST(XLinqNulRejectionTests, TheGuardAppliesThroughTheDocumentAndFileDoors) {
         EXPECT_EQ(buf.str().find('\0'), std::string::npos) << "a saved file carried a NUL";
     }
     in.close();
-    std::remove(path.c_str());
 }
 
 TEST(XLinqNulRejectionTests, ARejectedStartTagWritesNothingToTheStream) {

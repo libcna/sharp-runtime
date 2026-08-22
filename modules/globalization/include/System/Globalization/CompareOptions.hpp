@@ -10,6 +10,10 @@ namespace System::Globalization {
  *
  * C++ counterpart of .NET System.Globalization.CompareOptions.
  * Values may be combined with the | operator.
+ *
+ * The enum preserves the .NET API values, but this port's no-ICU CompareInfo subset supports only
+ * None, IgnoreCase, Ordinal and OrdinalIgnoreCase. It rejects the linguistic options explicitly;
+ * their presence here is an API-shape promise, not a claim that collation data is available.
  */
 enum class CompareOptions {
     None             = 0x00000000, ///< Use default comparison rules.

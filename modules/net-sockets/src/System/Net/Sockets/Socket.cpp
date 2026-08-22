@@ -67,6 +67,8 @@ namespace {
 
 namespace System::Net::Sockets {
 
+std::atomic<Socket::BeforeAsyncTaskTestHook> Socket::beforeAsyncTaskTestHook_{nullptr};
+
 using SharpRuntime::bytecs;
 using SharpRuntime::intcs;
 using SharpRuntime::longcs;
@@ -263,14 +265,16 @@ Socket::Socket(AddressFamily addressFamily, SocketType socketType, ProtocolType 
 // become enable_shared_from_this, ~Socket stays noexcept, Socket stays move-assignable and
 // non-copyable, and the async return types are unchanged.
 //
-// NOTE the order in waitForAsyncOperations(): shutdown() FIRST, then wait, then Close(). A
-// worker blocked in recv()/accept() will not return on its own, and closing the descriptor
-// before it does would leave that worker operating on a number the process may already have
-// reused for something else.
+// NOTE the teardown order: shutdown() FIRST, then wait, then close. A worker blocked in
+// recv()/send()/connect() may not return on its own, and closing the descriptor first would leave
+// that worker operating on a number the process may already have reused. Source-side moves use a
+// non-destructive wait instead: shutdown() is irreversible and the descriptor must remain usable
+// after transfer (#2417).
 struct Socket::AsyncOperations {
     std::mutex              mutex;
     std::condition_variable idle;
     int                     inFlight = 0;
+    int                     shutdownSensitive = 0;
     /// Set by the boundary before it waits. Only AcceptAsync observes it -- see that member for
     /// why `shutdown()` alone cannot cross the boundary for a listening socket.
     bool                    stopping = false;
@@ -281,58 +285,82 @@ Socket::Socket(intcs fd, System::Net::Sockets::AddressFamily family, System::Net
     : fd_(fd), addressFamily_(family), socketType_(type), protocolType_(protocol), connected_(fd >= 0),
       asyncOps_(std::make_shared<AsyncOperations>()) {}
 
-struct Socket::AsyncOperationScope {
+struct Socket::AsyncOperationRegistration {
     std::shared_ptr<AsyncOperations> ops;
-    ~AsyncOperationScope() {
-        if (!ops) return;
+    bool interruptWithShutdown;
+
+    AsyncOperationRegistration(std::shared_ptr<AsyncOperations> operations,
+                               bool requiresShutdown)
+        : ops(std::move(operations)), interruptWithShutdown(requiresShutdown) {
+        std::lock_guard<std::mutex> lock(ops->mutex);
+        ++ops->inFlight;
+        if (interruptWithShutdown) ++ops->shutdownSensitive;
+    }
+
+    ~AsyncOperationRegistration() {
         {
             std::lock_guard<std::mutex> lock(ops->mutex);
             --ops->inFlight;
+            if (interruptWithShutdown) --ops->shutdownSensitive;
         }
         ops->idle.notify_all();
     }
 };
 
-std::shared_ptr<Socket::AsyncOperations> Socket::beginAsyncOperation() {
-    auto ops = asyncOps_;
-    {
-        std::lock_guard<std::mutex> lock(ops->mutex);
-        ++ops->inFlight;
-    }
-    return ops;
+std::shared_ptr<Socket::AsyncOperationRegistration>
+Socket::beginAsyncOperation(bool interruptWithShutdown) {
+    // The registration itself owns the count. If allocating/converting the Task callable or
+    // launching std::async throws, the last registration reference rolls the count back. Once
+    // the body starts it moves the captured reference into a body-local variable, so the count
+    // is released when work FINISHES rather than when a caller later drops the Task (#2417).
+    return std::make_shared<AsyncOperationRegistration>(asyncOps_, interruptWithShutdown);
 }
 
-void Socket::waitForAsyncOperations() noexcept {
+int Socket::asyncOperationCountForTesting() const {
+    std::lock_guard<std::mutex> lock(asyncOps_->mutex);
+    return asyncOps_->inFlight;
+}
+
+void Socket::waitForAsyncOperations(bool discardDescriptor) noexcept {
     if (!asyncOps_) return;
+    bool needsShutdown = false;
     {
         std::unique_lock<std::mutex> lock(asyncOps_->mutex);
         asyncOps_->stopping = true;
         if (asyncOps_->inFlight == 0) return;
+        needsShutdown = discardDescriptor && asyncOps_->shutdownSensitive != 0;
     }
 #if !defined(__EMSCRIPTEN__)
-    // Wake a worker blocked in recv()/accept(). shutdown() is deliberate rather than close():
-    // it unblocks without retiring the descriptor number, so the worker's own syscall returns an
-    // error on a descriptor that is still its own.
-    if (fd_ >= 0) ::shutdown(static_cast<int>(fd_), SHUT_RDWR);
+    // Wake workers blocked in connect()/recv()/send() only when this descriptor will immediately
+    // be discarded. shutdown() is irreversible: using it to drain the source side of a move would
+    // transfer a disabled socket. Source moves therefore stop AcceptAsync through its bounded
+    // poll loop but let the other operations complete naturally (#2417).
+    if (needsShutdown && fd_ >= 0) ::shutdown(static_cast<int>(fd_), SHUT_RDWR);
 #endif
     std::unique_lock<std::mutex> lock(asyncOps_->mutex);
     asyncOps_->idle.wait(lock, [this] { return asyncOps_->inFlight == 0; });
 }
 
 Socket::~Socket() {
-    waitForAsyncOperations();
     Close();
 }
 
-// #2134: the moved-FROM socket keeps its own AsyncOperations rather than handing it over. Any
-// async body already in flight captured `other`'s address, so it is `other`'s destructor that
-// must wait for it -- moving the guard away would leave that destructor with nothing to wait on
-// and put the use-after-free back. The destination starts with a fresh, empty guard, which is
-// correct because no body can yet have captured it.
+// #2134/#2417: the moved-FROM socket keeps its own AsyncOperations rather than handing it over.
+// Any async body already in flight captured `other`'s address, so the move itself must cross
+// `other`'s boundary BEFORE reading or replacing any of its fields. Waiting only in the later
+// destructor is too late: the transfer of fd_/connected_/bound_ would race that body. Once the
+// wait has completed, the destination starts with a fresh, empty guard; no body can yet have
+// captured its address.
 Socket::Socket(Socket&& other) noexcept
-    : fd_(other.fd_), addressFamily_(other.addressFamily_), socketType_(other.socketType_),
-      protocolType_(other.protocolType_), connected_(other.connected_), bound_(other.bound_),
-      blocking_(other.blocking_), asyncOps_(std::make_shared<AsyncOperations>()) {
+    : asyncOps_(std::make_shared<AsyncOperations>()) {
+    other.waitForAsyncOperations(false);
+    fd_ = other.fd_;
+    addressFamily_ = other.addressFamily_;
+    socketType_ = other.socketType_;
+    protocolType_ = other.protocolType_;
+    connected_ = other.connected_;
+    bound_ = other.bound_;
+    blocking_ = other.blocking_;
     other.fd_ = -1;
     other.connected_ = false;
     other.bound_ = false;
@@ -341,9 +369,13 @@ Socket::Socket(Socket&& other) noexcept
 Socket& Socket::operator=(Socket&& other) noexcept {
     if (this != &other) {
         // Same boundary as the destructor, and for the same reason: this object's descriptor and
-        // fields are about to be replaced while an async body may still be reading them.
-        waitForAsyncOperations();
+        // fields are about to be replaced while an async body may still be reading them. Close
+        // performs the destructive drain before retiring the destination descriptor.
         Close();
+        // The source has its OWN raw-this bodies. Cross that boundary before reading a single
+        // source field; otherwise move-assignment is safe for the destination and still races
+        // the object being moved from.
+        other.waitForAsyncOperations(false);
         fd_ = other.fd_;
         addressFamily_ = other.addressFamily_;
         socketType_ = other.socketType_;
@@ -354,6 +386,15 @@ Socket& Socket::operator=(Socket&& other) noexcept {
         other.fd_ = -1;
         other.connected_ = false;
         other.bound_ = false;
+
+        // waitForAsyncOperations() is terminal for destruction, but move-assignment keeps this
+        // object alive and reusable. Its old guard now has no work, so reopen it for operations
+        // which capture the destination after the transfer. Without this reset every later
+        // AcceptAsync observes `stopping` and aborts immediately.
+        {
+            std::lock_guard<std::mutex> lock(asyncOps_->mutex);
+            asyncOps_->stopping = false;
+        }
     }
     return *this;
 }
@@ -429,7 +470,7 @@ SocketReceiveFromResult Socket::ReceiveFrom(std::vector<bytecs>&, const System::
     throw System::PlatformNotSupportedException("Socket is not supported on Emscripten.");
 }
 void Socket::Shutdown(SocketShutdown) {}
-void Socket::Close() {}
+void Socket::Close() { waitForAsyncOperations(true); }
 bool Socket::Poll(longcs, SelectMode) const {
     throw System::PlatformNotSupportedException("Socket is not supported on Emscripten.");
 }
@@ -767,6 +808,9 @@ void Socket::Shutdown(SocketShutdown how) {
 }
 
 void Socket::Close() {
+    // Public Close has the same raw-this obligation as destruction: wake and drain every task
+    // before retiring a descriptor number that the process may immediately reuse (#2417).
+    waitForAsyncOperations(true);
     if (validFd(fd_)) {
         closeSk(fd_);
         fd_ = -1;
@@ -920,9 +964,11 @@ System::Threading::Tasks::TaskT<bool> Socket::ConnectAsync(const System::Net::En
     // #2134: registered on THIS thread, before the task exists. Doing it inside the body would
     // leave a window in which the socket is destroyed before the body starts, the destructor's
     // wait sees no operation, and the boundary does nothing at all.
-    auto ops = beginAsyncOperation();
-    return System::Threading::Tasks::TaskT<bool>([this, copy, ops]() {
-        AsyncOperationScope release{ops};
+    auto registration = beginAsyncOperation(true);
+    if (auto hook = beforeAsyncTaskTestHook_.load(); hook != nullptr) hook();
+    return System::Threading::Tasks::TaskT<bool>(
+        [this, copy, registration = std::move(registration)]() mutable {
+        [[maybe_unused]] auto active = std::move(registration);
         Connect(copy);
         return true;
     });
@@ -941,9 +987,12 @@ System::Threading::Tasks::TaskT<std::shared_ptr<Socket>> Socket::AcceptAsync() {
     // and only calls `Accept()` once the descriptor is actually readable. `Accept()`'s own
     // behaviour is unchanged for every caller: from the outside this is still one blocking
     // accept, and the synchronous `Accept()` is untouched.
-    auto ops = beginAsyncOperation();
-    return System::Threading::Tasks::TaskT<std::shared_ptr<Socket>>([this, ops]() {
-        AsyncOperationScope release{ops};
+    auto registration = beginAsyncOperation(false);
+    if (auto hook = beforeAsyncTaskTestHook_.load(); hook != nullptr) hook();
+    return System::Threading::Tasks::TaskT<std::shared_ptr<Socket>>(
+        [this, registration = std::move(registration)]() mutable {
+        [[maybe_unused]] auto active = std::move(registration);
+        const auto& ops = active->ops;
         for (;;) {
             {
                 std::lock_guard<std::mutex> lock(ops->mutex);
@@ -964,18 +1013,23 @@ System::Threading::Tasks::TaskT<std::shared_ptr<Socket>> Socket::AcceptAsync() {
 }
 
 System::Threading::Tasks::TaskT<intcs> Socket::SendAsync(std::vector<bytecs> buffer, SocketFlags flags) {
-    auto ops = beginAsyncOperation();
-    return System::Threading::Tasks::TaskT<intcs>([this, buffer = std::move(buffer), flags, ops]() {
-        AsyncOperationScope release{ops};
+    auto registration = beginAsyncOperation(true);
+    if (auto hook = beforeAsyncTaskTestHook_.load(); hook != nullptr) hook();
+    return System::Threading::Tasks::TaskT<intcs>(
+        [this, buffer = std::move(buffer), flags,
+         registration = std::move(registration)]() mutable {
+        [[maybe_unused]] auto active = std::move(registration);
         return Send(buffer, flags);
     });
 }
 
 System::Threading::Tasks::TaskT<intcs> Socket::ReceiveAsync(std::shared_ptr<std::vector<bytecs>> buffer,
                                                               SocketFlags flags) {
-    auto ops = beginAsyncOperation();
-    return System::Threading::Tasks::TaskT<intcs>([this, buffer, flags, ops]() {
-        AsyncOperationScope release{ops};
+    auto registration = beginAsyncOperation(true);
+    if (auto hook = beforeAsyncTaskTestHook_.load(); hook != nullptr) hook();
+    return System::Threading::Tasks::TaskT<intcs>(
+        [this, buffer, flags, registration = std::move(registration)]() mutable {
+        [[maybe_unused]] auto active = std::move(registration);
         return Receive(*buffer, flags);
     });
 }

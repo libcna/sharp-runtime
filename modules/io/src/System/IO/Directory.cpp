@@ -5,6 +5,7 @@
 #include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/IOException.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/UnauthorizedAccessException.hpp"
 
 #include <filesystem>
 #include <regex>
@@ -14,6 +15,51 @@ namespace System::IO {
     namespace {
         void ThrowIfNullOrEmpty(const std::string& path, const std::string& paramName) {
             if (path.empty()) throw System::ArgumentException("Path cannot be the empty string.", paramName);
+        }
+
+        [[noreturn]] void ThrowEnumerationError(const std::string& path,
+                                                const std::error_code& error) {
+            if (error == std::errc::permission_denied) {
+                throw System::UnauthorizedAccessException(
+                    "Access to the path '" + path + "' is denied.");
+            }
+            if (error == std::errc::no_such_file_or_directory ||
+                error == std::errc::not_a_directory) {
+                throw DirectoryNotFoundException(
+                    "Could not find a part of the path '" + path + "'.");
+            }
+            throw IOException("Failed to enumerate directory '" + path + "': " +
+                              error.message());
+        }
+
+        template <typename Visitor>
+        void ForEachDirectoryEntry(const std::string& path, Visitor&& visitor) {
+            std::error_code error;
+            std::filesystem::directory_iterator iterator(path, error);
+            if (error) ThrowEnumerationError(path, error);
+
+            const std::filesystem::directory_iterator end;
+            while (iterator != end) {
+                visitor(*iterator);
+                iterator.increment(error);
+                if (error) ThrowEnumerationError(path, error);
+            }
+        }
+
+        bool IsRegularFile(const std::filesystem::directory_entry& entry,
+                           const std::string& directoryPath) {
+            std::error_code error;
+            const bool result = entry.is_regular_file(error);
+            if (error) ThrowEnumerationError(directoryPath, error);
+            return result;
+        }
+
+        bool IsDirectory(const std::filesystem::directory_entry& entry,
+                         const std::string& directoryPath) {
+            std::error_code error;
+            const bool result = entry.is_directory(error);
+            if (error) ThrowEnumerationError(directoryPath, error);
+            return result;
         }
     }
 
@@ -55,17 +101,16 @@ namespace System::IO {
     }
 
     std::vector<std::string> Directory::GetFiles(const std::string& path) {
-        if (!Exists(path)) throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
         std::vector<std::string> result;
-        for (const auto& entry : std::filesystem::directory_iterator(path))
-            if (entry.is_regular_file())
+        ForEachDirectoryEntry(path, [&](const std::filesystem::directory_entry& entry) {
+            if (IsRegularFile(entry, path))
                 result.push_back(entry.path().string());
+        });
         return result;
     }
 
     std::vector<std::string> Directory::GetFiles(const std::string& path,
                                                   const std::string& searchPattern) {
-        if (!Exists(path)) throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
         // Convert glob pattern (*.txt) to regex
         // Verified against FileSystemName.cs's TranslateWin32Expression: real .NET
         // special-cases "*.*" (legacy DOS 8.3 compatibility) to match every file, with or
@@ -84,27 +129,32 @@ namespace System::IO {
         }
         std::regex rx(regexPat, std::regex_constants::icase);
         std::vector<std::string> result;
-        for (const auto& entry : std::filesystem::directory_iterator(path)) {
-            if (entry.is_regular_file()) {
+        ForEachDirectoryEntry(path, [&](const std::filesystem::directory_entry& entry) {
+            if (IsRegularFile(entry, path)) {
                 std::string fname = entry.path().filename().string();
                 if (std::regex_match(fname, rx))
                     result.push_back(entry.path().string());
             }
-        }
+        });
         return result;
     }
 
     std::vector<std::string> Directory::GetDirectories(const std::string& path) {
-        if (!Exists(path)) throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
         std::vector<std::string> result;
-        for (const auto& entry : std::filesystem::directory_iterator(path))
-            if (entry.is_directory())
+        ForEachDirectoryEntry(path, [&](const std::filesystem::directory_entry& entry) {
+            if (IsDirectory(entry, path))
                 result.push_back(entry.path().string());
+        });
         return result;
     }
 
     std::string Directory::GetCurrentDirectory() {
-        return std::filesystem::current_path().string();
+        std::error_code error;
+        const auto current = std::filesystem::current_path(error);
+        if (error) {
+            throw IOException("Failed to get current directory: " + error.message());
+        }
+        return current.string();
     }
 
     void Directory::SetCurrentDirectory(const std::string& path) {

@@ -65,12 +65,12 @@ namespace System::Text::Json::Nodes {
          * it. This loop runs before `properties_` is released, so every value is still fully alive
          * here.
          *
-         * Only values whose parent link still names *this* object are detached: a value that was
-         * moved to another container, or one shared with a copy-constructed object (whose values
-         * still report the original as their parent), is left untouched. A retained value is
-         * therefore left in exactly the state `Remove`/`SetItem`/`Clear` already produce — no
-         * parent, its own root, and re-attachable. Non-throwing, so it is safe during exception
-         * unwinding and after a partially constructed derived object.
+         * Only values whose parent link still names *this* object are detached. Copy and move are
+         * deleted for JsonNode containers, so this guard records the ownership invariant rather
+         * than implying a copy-constructed sharing mode. A retained value is therefore left in
+         * exactly the state `Remove`/`SetItem`/`Clear` produce — no parent, its own root, and
+         * re-attachable. Non-throwing, so it is safe during exception unwinding and after a
+         * partially constructed derived object.
          *
          * The remaining subtree is then released **iteratively** rather than by letting
          * `properties_` recurse into it: a deeply nested tree used to overflow the stack while
@@ -147,8 +147,8 @@ namespace System::Text::Json::Nodes {
             } else {
                 if (value) value->AssignParent(this);
                 properties_.emplace_back(propertyName, std::move(value));
-            ++version_;   // #1889
             }
+            ++version_;   // #1889: replacement changes the enumerated value even at equal count.
         }
 
         /** @brief Removes all properties from the object. */

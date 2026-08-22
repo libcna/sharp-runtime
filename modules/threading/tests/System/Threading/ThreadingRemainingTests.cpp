@@ -1007,10 +1007,10 @@ TEST(ThreadPoolTests, SetMinMaxThreads_ReturnsTrue) {
     EXPECT_TRUE(ThreadPool::SetMaxThreads(8, 8));
 }
 
-// Timer: not unit-tested here — the implementation uses a detached std::thread
-// that captures `this` by raw pointer, leading to dangling-pointer UB when the
-// Timer object is destroyed before the thread wakes up.  Functional testing of
-// Timer requires a fix to the implementation (e.g. a wakeup CV + join on Dispose).
+// System::Threading::Timer owns its callback state through shared_ptr, so its detached worker does
+// not capture the wrapper by raw pointer. Its scheduling/lifetime coverage lives in the focused
+// threading boundary tests; System::Timers::Timer's separate event-wrapper lifetime regression
+// lives in TimerLifecyclePinTests in that component.
 
 // ===========================================================================
 // Threading exceptions

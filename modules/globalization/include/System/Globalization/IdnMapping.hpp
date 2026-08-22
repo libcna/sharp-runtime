@@ -14,9 +14,11 @@ namespace System::Globalization {
  * @brief Supports the use of non-ASCII characters for Internet domain names.
  *
  * C++ counterpart of .NET System.Globalization.IdnMapping.
- * Implements Punycode (RFC 3492) / IDNA (RFC 3490) encoding and decoding.
- * GetAscii() converts a Unicode domain name to its ACE (xn--) ASCII representation;
- * GetUnicode() reverses the conversion. ASCII-only labels are passed through unchanged.
+ * Implements a bounded UTF-8 IDN subset around Punycode (RFC 3492), label/name length checks,
+ * optional STD3 ASCII checks, and UCD-16.0 unassigned-code-point validation. It does not claim the
+ * full RFC 3490 Nameprep mapping, normalization, or contextual rules. GetAscii() converts non-ASCII
+ * labels to their ACE (xn--) representation and deterministically ASCII-lowercases ASCII labels;
+ * GetUnicode() decodes ACE labels and verifies that the result round-trips through GetAscii().
  */
 class IdnMapping {
 public:
@@ -32,6 +34,8 @@ public:
      * @brief Gets a value indicating whether unassigned Unicode code points are allowed.
      *
      * C++ counterpart of .NET IdnMapping.AllowUnassigned.
+     * Unassigned means UnicodeCategory::OtherNotAssigned in the runtime's pinned UCD 16.0
+     * tables; this bounded policy does not imply that full IDNA Nameprep is implemented.
      * @return true if unassigned code points are permitted; otherwise false.
      */
     [[nodiscard]] bool getAllowUnassignedProperty() const { return allowUnassigned_; }
@@ -40,7 +44,7 @@ public:
      * @brief Sets whether unassigned Unicode code points are allowed.
      *
      * C++ counterpart of .NET IdnMapping.AllowUnassigned setter.
-     * @param v true to allow unassigned code points; false to reject them.
+     * @param v true to allow UCD-16.0 unassigned code points; false to reject them.
      */
     void setAllowUnassignedProperty(bool v) { allowUnassigned_ = v; }
 
@@ -64,7 +68,7 @@ public:
      * @brief Converts a Unicode (UTF-8) domain name to its Punycode ASCII form.
      *
      * C++ counterpart of .NET IdnMapping.GetAscii(string).
-     * Labels already in ASCII are passed through unchanged.
+     * Labels already in ASCII are emitted with deterministic ASCII-lowercase casing.
      * @param unicode The Unicode domain name to encode.
      * @return The ACE (xn--) ASCII representation.
      */

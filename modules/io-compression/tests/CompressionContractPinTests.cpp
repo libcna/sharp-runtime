@@ -2,15 +2,14 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 //
-// Ticket #2151 — the closing ticket of the System::IO::Compression review (#2147).
+// Ticket #2151 began as the closing pin ticket of the System::IO::Compression review (#2147).
+// #2150 subsequently added all three ZLibCompressionOptions constructors and inverted the first
+// group below. This file now pins the resulting contract in both directions:
 //
-// Zero executable production change. This file pins the two things the review deliberately did NOT
-// change, so neither can land silently:
-//
-//   1. the ABSENCE of the three stream types' ZLibCompressionOptions constructors -- the remaining
-//      half of SR-AUD-259, which is a public surface addition and belongs to the BLOCKED #2150;
-//   2. the raw-pointer contract #2146 established and #2151 wrote into the six codec headers,
-//      asserted at the doors the header text names, so the documentation cannot drift from the code.
+//   1. DeflateStream, GZipStream and ZLibStream all expose the options constructor without
+//      rebinding any pre-existing constructor call;
+//   2. the raw-pointer contract #2146 established and #2151 wrote into the six codec headers is
+//      asserted at the named doors, so the documentation cannot drift from the code.
 //
 // NOTE on the ticket's original acceptance criterion: it also asked for pins on "the current
 // CompressionMode acceptance, the current Write-after-Close silence, and the current

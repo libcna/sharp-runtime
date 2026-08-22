@@ -7,6 +7,7 @@ export PYTHONDONTWRITEBYTECODE=1
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+mkdir -p "$REPO_ROOT/build-tmp"
 
 BUILD_DIR="${1:-build}"
 
@@ -20,6 +21,36 @@ echo "==> Validating module boundaries"
 python3 scripts/validate_module_boundaries.py
 python3 test/validate_module_boundaries_test.py
 python3 scripts/generate_component_catalog.py --check
+
+echo "==> Validating audit disposition metadata"
+python3 scripts/reconcile_audit_findings.py
+python3 scripts/validate_audit_findings.py
+python3 test/validate_audit_findings_test.py
+
+echo "==> Validating planning database consistency"
+python3 scripts/db_consistency_check.py
+
+echo "==> Validating local/GitHub selective-component matrix parity"
+python3 scripts/validate_selective_component_matrix.py
+python3 test/validate_selective_component_matrix_test.py
+
+echo "==> Validating safe .NET type-index output handling"
+python3 test/index_dotnet_types_test.py
+
+echo "==> Validating source/planning inventory cross-reference"
+python3 test/source_header_inventory_test.py
+python3 scripts/source_header_inventory.py \
+    --csv "$REPO_ROOT/build-tmp/source_header_inventory.csv"
+
+echo "==> Validating committed Unicode tables (offline, exact when SA-4 source is available)"
+python3 scripts/gen_unicode_tables.py --verify
+python3 test/gen_unicode_tables_test.py
+
+echo "==> Validating GoogleTest summary accounting"
+python3 test/parse_gtest_summary_test.py
+
+echo "==> Validating repository-local temporary paths"
+python3 test/temporary_path_policy_test.py
 
 echo "==> Validating test-only access seams (ticket #1800)"
 python3 scripts/check_version_seam_odr.py
@@ -38,7 +69,7 @@ echo "==> Configuring ($BUILD_DIR)"
 cmake -S . -B "$BUILD_DIR" >/dev/null
 
 echo "==> Building (checking for zero warnings/errors)"
-BUILD_LOG="$(mktemp)"
+BUILD_LOG="$(TMPDIR="$REPO_ROOT/build-tmp" mktemp)"
 trap 'rm -f "$BUILD_LOG"' EXIT
 
 if ! cmake --build "$BUILD_DIR" --parallel "$BUILD_JOBS" > "$BUILD_LOG" 2>&1; then

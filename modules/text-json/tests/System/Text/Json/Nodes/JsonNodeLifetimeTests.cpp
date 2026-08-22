@@ -659,6 +659,20 @@ TEST(JsonNodeLifetimeTests, Fix1889_EveryMutatingDoorInvalidatesAndNonMutatingRe
         auto probe = stale(o, [&]{ o.Remove("k2"); });
         EXPECT_THROW(probe(), System::InvalidOperationException) << "JsonObject::Remove";
     }
+    {   // JsonObject::SetItem replacement -- count and key order are unchanged.
+        JsonObject o; o.Add("k", str("v"));
+        auto probe = stale(o, [&]{ o.SetItem("k", str("replacement")); });
+        EXPECT_THROW(probe(), System::InvalidOperationException)
+            << "JsonObject::SetItem replacement must invalidate a stale enumerator";
+    }
+    {   // Assigning the identical node is the documented no-op and must keep iterators current.
+        auto value = str("v");
+        JsonObject o; o.Add("k", value);
+        auto it = o.begin();
+        o.SetItem("k", value);
+        EXPECT_NO_THROW((void)*it)
+            << "JsonObject::SetItem of the same shared_ptr must remain a no-op";
+    }
 
     // ...and a READ must not invalidate. If it did, no caller could iterate at all.
     {

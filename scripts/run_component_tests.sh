@@ -23,31 +23,43 @@ if [ "${#TEST_BINARIES[@]}" -eq 0 ]; then
     exit 1
 fi
 
-TEST_LOG_DIR="$(mktemp -d)"
+mkdir -p "$REPO_ROOT/build-tmp"
+TEST_LOG_DIR="$(TMPDIR="$REPO_ROOT/build-tmp" mktemp -d)"
 trap 'rm -rf "$TEST_LOG_DIR"' EXIT
 
-TOTAL_TESTS=0
+TOTAL_RUN=0
+TOTAL_PASSED=0
+TOTAL_FAILED=0
+TOTAL_SKIPPED=0
 for TEST_BINARY in "${TEST_BINARIES[@]}"; do
     TEST_NAME="$(basename "$TEST_BINARY")"
     TEST_LOG="$TEST_LOG_DIR/$TEST_NAME.log"
 
-    if ! "$TEST_BINARY" >"$TEST_LOG" 2>&1; then
-        echo "FAIL: $TEST_NAME failed" >&2
+    TEST_EXIT_STATUS=0
+    "$TEST_BINARY" >"$TEST_LOG" 2>&1 || TEST_EXIT_STATUS=$?
+
+    if ! IFS=$'\t' read -r TEST_RUN TEST_PASSED TEST_FAILED TEST_SKIPPED < <(
+        python3 "$REPO_ROOT/scripts/parse_gtest_summary.py" "$TEST_LOG"
+    ); then
+        echo "FAIL: could not read a consistent test summary from $TEST_NAME" >&2
+        tail -40 "$TEST_LOG" >&2
+        exit 1
+    fi
+
+    echo "    $TEST_NAME: $TEST_RUN run, $TEST_PASSED passed, $TEST_FAILED failed, $TEST_SKIPPED skipped"
+
+    if [ "$TEST_EXIT_STATUS" -ne 0 ] || [ "$TEST_FAILED" -ne 0 ] || [ "$TEST_SKIPPED" -ne 0 ]; then
+        echo "FAIL: $TEST_NAME is not a zero-failure/zero-skip result "\
+             "(exit=$TEST_EXIT_STATUS, failed=$TEST_FAILED, skipped=$TEST_SKIPPED)" >&2
         grep -E "FAILED|\[  FAILED  \]" "$TEST_LOG" >&2 || true
         tail -40 "$TEST_LOG" >&2
         exit 1
     fi
 
-    SUMMARY_LINE="$(grep -E '^\[==========\] [0-9]+ tests? from .* ran\.' "$TEST_LOG" | tail -1)"
-    if [ -z "$SUMMARY_LINE" ]; then
-        echo "FAIL: could not read the test count from $TEST_NAME" >&2
-        tail -40 "$TEST_LOG" >&2
-        exit 1
-    fi
-
-    TEST_COUNT="$(sed -E 's/^\[==========\] ([0-9]+) tests? from .*/\1/' <<<"$SUMMARY_LINE")"
-    TOTAL_TESTS=$((TOTAL_TESTS + TEST_COUNT))
-    echo "    $TEST_NAME: $TEST_COUNT passed"
+    TOTAL_RUN=$((TOTAL_RUN + TEST_RUN))
+    TOTAL_PASSED=$((TOTAL_PASSED + TEST_PASSED))
+    TOTAL_FAILED=$((TOTAL_FAILED + TEST_FAILED))
+    TOTAL_SKIPPED=$((TOTAL_SKIPPED + TEST_SKIPPED))
 done
 
-echo "    $TOTAL_TESTS tests passed across ${#TEST_BINARIES[@]} executables"
+echo "    $TOTAL_RUN tests run across ${#TEST_BINARIES[@]} executables: $TOTAL_PASSED passed, $TOTAL_FAILED failed, $TOTAL_SKIPPED skipped"

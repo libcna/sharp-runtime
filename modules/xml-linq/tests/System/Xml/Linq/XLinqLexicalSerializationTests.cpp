@@ -35,6 +35,7 @@
 #include <memory>
 #include <string>
 
+#include "TestTemporaryDirectory.hpp"
 #include "System/Xml/Linq/SaveOptions.hpp"
 #include "System/Xml/Linq/XCData.hpp"
 #include "System/Xml/Linq/XComment.hpp"
@@ -277,7 +278,8 @@ TEST(XLinqLexicalSerializationTests, TheRepairAppliesThroughTheDocumentDoor) {
 }
 
 TEST(XLinqLexicalSerializationTests, TheRepairAppliesThroughSaveToFile) {
-    const std::string path = "build-tmp/2196_save_probe.xml";
+    SharpRuntime::Tests::TestTemporaryDirectory temporary;
+    const std::string path = temporary.path("save-probe.xml");
     auto root = std::make_shared<XElement>(XName("r"));
     root->Add(std::make_shared<XCData>("left]]>right"));
     root->Add(std::make_shared<XComment>("c--d"));
@@ -286,7 +288,6 @@ TEST(XLinqLexicalSerializationTests, TheRepairAppliesThroughSaveToFile) {
     auto reloaded = XElement::Load(path);
     ASSERT_NE(reloaded, nullptr);
     EXPECT_EQ(reloaded->getValueProperty(), "left]]>right");
-    std::remove(path.c_str());
 }
 
 // --- The node kinds this ticket deliberately does NOT repair -----------------------------------

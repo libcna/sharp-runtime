@@ -101,3 +101,16 @@ it is the only place the contract is written down; the note is at the site.
 
 `cna` and `mobile-eggbert` reference `System::Diagnostics::Process` in **zero** code sites.
 Neither was modified.
+
+## 6. Final-audit follow-up: an already-reaped child still needs the unbounded join
+
+The first implementation put the reader joins in parameterless `WaitForExit()`, but left them
+behind `if (hasExited) return`. A preceding finite wait or `HasExited` poll could therefore reap
+the direct child; a later parameterless call returned immediately even while a grandchild still
+held redirected stdout and the reader thread had not reached EOF. Process exit and redirected
+stream completion are two different conditions, and the unbounded overload promises both.
+
+Ticket #2417 now skips only the redundant `waitpid` when `hasExited` is already true and always
+joins both readers afterwards. The regression reaps through a finite wait while a delayed
+inherited writer remains, then proves parameterless `WaitForExit()` does not return until the
+marker byte has been captured. The finite doors remain deadline-bounded and unchanged.

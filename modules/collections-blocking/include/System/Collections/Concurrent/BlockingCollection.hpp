@@ -105,12 +105,14 @@ namespace System::Collections::Concurrent {
         }
 
         static intcs validateTimeout(const System::TimeSpan& timeout) {
-            if (timeout.getTicksProperty() == System::Threading::Timeout::InfiniteTimeSpan) {
-                return System::Threading::Timeout::Infinite;
-            }
-            const double milliseconds = timeout.getTotalMillisecondsProperty();
-            if (timeout.getTicksProperty() < System::Threading::Timeout::InfiniteTimeSpan ||
-                milliseconds > static_cast<double>(std::numeric_limits<intcs>::max())) {
+            // .NET truncates TotalMilliseconds toward zero before validating the integral
+            // timeout. Do the same directly in ticks: [-1.9999ms, -1ms] becomes the -1
+            // infinite sentinel, while (-1ms, 0) becomes the valid zero timeout. Validating
+            // raw ticks first incorrectly rejected both fractional ranges (SR-AUD-003).
+            const auto milliseconds =
+                timeout.getTicksProperty() / System::TimeSpan::TicksPerMillisecond;
+            if (milliseconds < System::Threading::Timeout::Infinite ||
+                milliseconds > static_cast<SharpRuntime::longcs>(std::numeric_limits<intcs>::max())) {
                 throw System::ArgumentOutOfRangeException("timeout");
             }
             return static_cast<intcs>(milliseconds);

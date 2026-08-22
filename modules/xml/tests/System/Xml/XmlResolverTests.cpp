@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <fstream>
+#include "TestTemporaryDirectory.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/Xml/XmlException.hpp"
 #include "System/Xml/XmlSecureResolver.hpp"
@@ -11,7 +12,8 @@
 using namespace System::Xml;
 
 TEST(XmlUrlResolverTests, GetEntity_LocalFile_ReturnsContents) {
-    std::string path = "/tmp/sharp_rt_xmlurlresolver_test.txt";
+    SharpRuntime::Tests::TestTemporaryDirectory temporary;
+    const std::string path = temporary.path("resolver.txt");
     {
         std::ofstream out(path);
         out << "hello resolver";
@@ -20,7 +22,6 @@ TEST(XmlUrlResolverTests, GetEntity_LocalFile_ReturnsContents) {
     System::Uri uri(std::string("file://") + path);
     std::any result = resolver.GetEntity(uri, "", std::nullopt);
     EXPECT_EQ(std::any_cast<std::string>(result), "hello resolver");
-    std::remove(path.c_str());
 }
 
 TEST(XmlUrlResolverTests, GetEntity_UnsupportedScheme_Throws) {
@@ -30,8 +31,9 @@ TEST(XmlUrlResolverTests, GetEntity_UnsupportedScheme_Throws) {
 }
 
 TEST(XmlUrlResolverTests, GetEntity_MissingFile_Throws) {
+    SharpRuntime::Tests::TestTemporaryDirectory temporary;
     XmlUrlResolver resolver;
-    System::Uri uri(std::string("file:///tmp/sharp_rt_does_not_exist_xyz.txt"));
+    System::Uri uri(std::string("file://") + temporary.path("missing.txt"));
     EXPECT_THROW(resolver.GetEntity(uri, "", std::nullopt), XmlException);
 }
 

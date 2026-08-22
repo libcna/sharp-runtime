@@ -39,17 +39,15 @@ namespace System {
      *    uses reference equality and is marked [EditorBrowsable(Never)].
      *  - GetHashCode is content-based (consistent with content-based Equals).
      *
-     * Two divergences from .NET are KNOWN, MEASURED and DEFERRED under ticket #2106, because
-     * neither can be settled without the .NET reference tree, which is absent. Both are pinned
-     * by tests so no resolution can land silently:
-     *  - <b>SR-AUD-185</b> -- ToString() performs no UTF-8 validation, so invalid bytes are
-     *    returned unchanged where .NET's decoder substitutes U+FFFD. See ToString().
+     * One measured divergence from .NET is intentional and permanent under ticket #2106:
      *  - <b>SR-AUD-186</b> -- every construction path COPIES its source, including the
      *    ReadOnlyMemory ones, which current .NET wraps. The finding's implicit direction is
      *    INVERTED: .NET's behaviour is the aliasing one and this port's is the defensive one,
-     *    so "fixing" it means making BinaryData alias caller memory it does not own. That also
-     *    needs a decision about which .NET overload is meant -- BinaryData(byte[]) copies,
-     *    BinaryData(ReadOnlyMemory&lt;byte&gt;) wraps. See FromBytes.
+     *    so "fixing" it would make BinaryData alias caller memory it does not own, permitting
+     *    later caller mutation and lifetime errors. BinaryData(byte[]) copies in .NET while
+     *    BinaryData(ReadOnlyMemory&lt;byte&gt;) wraps; this C++ surface deliberately gives both the
+     *    owning-copy contract. SR-AUD-185's invalid-UTF-8 replacement behaviour was repaired by
+     *    that same ticket. See ToString() and FromBytes().
      */
     class BinaryData {
         std::vector<uint8_t> bytes_;
@@ -160,7 +158,8 @@ namespace System {
          * Current .NET's BinaryData(ReadOnlyMemory&lt;byte&gt;) WRAPS its argument and observes
          * the caller's later writes; this overload snapshots them instead, so the result is
          * independent of the source's lifetime and of any later mutation. That divergence is
-         * SR-AUD-186, deferred under #2106 and pinned by test -- see the class doc-comment.
+         * SR-AUD-186, accepted permanently under #2106 and pinned by test -- see the class
+         * doc-comment.
          *
          * @param data Byte data to copy.
          * @return New BinaryData instance.
@@ -174,7 +173,7 @@ namespace System {
          * and sets the media type.
          *
          * Copies for the same reason as the single-argument overload above, and diverges from
-         * .NET in the same way (SR-AUD-186, deferred under #2106).
+         * .NET in the same way (SR-AUD-186, accepted permanently under #2106).
          *
          * @param data      Byte data to copy.
          * @param mediaType MIME type string.

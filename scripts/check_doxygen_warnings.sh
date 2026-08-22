@@ -11,7 +11,8 @@ readonly EXPECTED_DOXYGEN_VERSION="1.9.8"
 readonly MAX_WARNING_COUNT=2675
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WARNING_LOG="$(mktemp)"
+mkdir -p "$REPO_ROOT/build-tmp"
+WARNING_LOG="$(TMPDIR="$REPO_ROOT/build-tmp" mktemp)"
 trap 'rm -f "$WARNING_LOG"' EXIT
 
 if ! command -v doxygen >/dev/null; then

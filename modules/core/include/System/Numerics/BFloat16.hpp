@@ -30,23 +30,15 @@ using SharpRuntime::intcs;
  * Arithmetic is performed by promoting to float, computing, then converting back
  * with IEEE round-to-nearest-even.
  *
- * @note Status: Partial. The deviations below are **declared, not accidental** — their
- *   absence being undeclared is what let SR-AUD-176 be raised as a defect, and #2340
- *   measured that this port had already decided every one of them for `System::Half`,
- *   the other 16-bit float here (`Half.hpp`'s own status block). The two types are kept
- *   consistent with each other on purpose; reopening any line below must move BOTH, which
- *   is ticket **#2383**.
- *   - The ~40 explicit/implicit conversion operators .NET defines to and from every other
- *     numeric primitive (byte, sbyte, short, ushort, uint, ulong, nint, nuint, char,
- *     decimal, Int128, UInt128, plus their `checked` variants — a C# 11 language feature
- *     with no C++ equivalent) are not ported; every one is defined in .NET as a trivial
- *     `(BFloat16)(float)value` round-trip, so a caller writes the same thing in one line
- *     through the `float` conversion this type already has.
- *   - The static math surface mirroring `System.MathF` (`Abs`, `Sign`, `Clamp`, `CopySign`,
- *     `MaxMagnitude`/`MinMagnitude`, `BitIncrement`/`BitDecrement`, and the trigonometric,
- *     exponential, logarithmic, root, hyperbolic and power families) is not ported for the
- *     same reason: widen to `float`, call the existing `System::Single`/`std::` equivalent,
- *     narrow back. Duplicating it here adds no capability, only forwarding boilerplate.
+ * @note Status: Partial. Tickets #2382/#2384 reconciled the practical value surface with
+ *   `System::Half`; the remaining deviations below are declared limitations of the C++ model,
+ *   not forgotten implementation work (SR-AUD-176).
+ *   - Tickets #2382 and #2384 added the practical conversion and static-math surface: the
+ *     integral and floating-point constructors/operators below, plus the `System::MathF`
+ *     forwarding families. Those members intentionally widen through `float`, matching the
+ *     representation and arithmetic model of this type.
+ *   - Conversions whose source or destination has no direct sharp-runtime C++ counterpart
+ *     (`Decimal`, `Int128`, `UInt128`, and C# `checked` conversion operators) remain absent.
  *   - Generic-math interface conformance is out of scope, consistent with this codebase's
  *     position on C# generic-math machinery everywhere else. .NET's `BFloat16` implements
  *     **36** interfaces and its `ref/` surface is **193** public members; none of the
@@ -197,16 +189,6 @@ public:
     [[nodiscard]] uint16_t getBitsProperty() const { return bits_; }
 
     /** Converts to float (lossless — BFloat16 is a subset of float32). */
-    // -----------------------------------------------------------------------------------
-    // #2384 unit 3: the conversion operators, `from BFloat16` direction only.
-    //
-    // The `to BFloat16` direction is blocked on the same decision as Half's -- see Half.hpp for
-    // the measurement. In short: `BFloat16(uint16_t)` here is the RAW BIT PATTERN, and adding any
-    // value-taking integer constructor lets C++ overload resolution hijack every
-    // `BFloat16(<int literal>)` call, because an exact `int` match beats an `int -> uint16_t`
-    // conversion. 46 first-party sites use the raw form. Ticket #2395.
-    // -----------------------------------------------------------------------------------
-
     /** @brief Converts to `char16_t`, truncating toward zero. */
     // ---------------------------------------------------------------------------------------
     // #2384 unit 3, the `to` direction -- unblocked by #2395.

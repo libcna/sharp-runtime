@@ -81,8 +81,8 @@ friends already produced `"Infinity"` before this ticket, so the type was incons
 and no longer short-circuits an empty format. Both were mutations that could not be caught, and
 both for good reason: `Single::ToString` already answers `"NaN"`/`"Infinity"`/`"-Infinity"` at
 every format kind, and once `ToString()` became `Single::ToString(value, "")` the empty-format
-branch was the *same call* rather than a check. `System::Half` has both guards and both are dead
-there for the same reason — which is **#2383**'s business, not this ticket's.
+branch was the *same call* rather than a check. `System::Half` had both guards and both were dead
+there for the same reason. The later sibling-wide surface decision is **#2384**.
 
 ## 5. Evidence
 
@@ -106,11 +106,11 @@ Eleven mutations, nine caught, two equivalences deleted:
 in **exactly one** of zero / subnormal / normal / non-finite, which is what makes the four
 predicates a partition rather than four independent claims.
 
-The declined surface is pinned by a `static_assert` that `Abs`, `BitIncrement`, `CopySign` and
-`Sqrt` are **absent**, with a message naming #2383 — so adding one to `BFloat16` alone fails the
-build. The `requires` clauses take a **dependent** parameter, because gcc evaluates a
-non-dependent one eagerly and hard-errors instead of yielding false (measured on #2299, recorded
-in CLAUDE.md, and hit again here).
+At this ticket's checkpoint, the then-declined surface was pinned by a `static_assert` that `Abs`,
+`BitIncrement`, `CopySign` and `Sqrt` were absent. #2384 later inverted those pins for both
+16-bit-float types together. The historical `requires` clauses took a dependent parameter because
+gcc evaluates a non-dependent one eagerly and hard-errors instead of yielding false (measured on
+#2299 and hit again here).
 
 ## 6. Downstream, measured
 

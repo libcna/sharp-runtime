@@ -38,8 +38,9 @@ namespace System::Threading {
      * vs. real .NET's `bool` success indicator. The implemented core (due-time/period rescheduling,
      * pause via dueTime=-1, mid-callback Change() handling) is verified against real .NET's
      * TimerQueueTimer behavior and uses shared_ptr-based state ownership specifically to avoid a
-     * dangling-`this` hazard in the background thread (contrast with System::Timers::Timer, a
-     * different type in a different namespace, which has a documented `this`-capture hazard).
+     * dangling-`this` hazard in the background thread. `System::Timers::Timer`, the public event
+     * wrapper in a different module, now applies its own shared lifetime gate before dispatching
+     * through this type, so neither layer relies on a raw owner capture surviving a detached worker.
      */
     class Timer {
         // Shared state owned jointly by the Timer and the background thread.

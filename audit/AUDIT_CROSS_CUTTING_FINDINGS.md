@@ -1,5 +1,12 @@
 # Cross-cutting findings
 
+> **Final-reconciliation note (2026-08-22).** This is a chronological evidence log. Statements
+> below such as “open”, “blocked”, or “unselected” describe the checkpoint at which their section
+> was written; they are not the current status ledger. The authoritative
+> `AUDIT_FINDINGS_INDEX.md` plus `docs/AuditFindingsReconciliation.md` now record CCF-019 and every
+> other in-scope implementation family as closed. Historical prose is retained so the decisions
+> remain auditable rather than retroactively rewritten.
+
 This file records patterns demonstrated by two or more per-file reports.  It
 starts empty deliberately: a pattern is not inferred from a broad grep alone.
 Each future entry must link the independent reports and separate confirmed

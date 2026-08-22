@@ -2,7 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <algorithm>
+#include <cstddef>
 #include <string>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -17,29 +17,23 @@ using SharpRuntime::intcs;
  * @brief Provides iteration over and retrieval of text elements in a string.
  *
  * C++ counterpart of .NET System.Globalization.StringInfo.
- * In this stub, text elements are treated as UTF-8 byte SEQUENCES (a single ASCII byte, or a
- * complete multi-byte UTF-8 character kept together) rather than full Unicode grapheme clusters
- * — combining-character grouping (e.g. a base letter followed by a combining accent forming one
- * user-perceived character) is not implemented. This matches the UTF-8-aware decoding already
- * used by TextElementEnumerator::MoveNext() — every entry point on this class (GetNextTextElement,
- * GetNextTextElementLength, ParseCombiningCharacters, LengthInTextElements, and
- * GetTextElementEnumerator) is consistent with that decoding, so none of them truncate or
- * mis-split a multi-byte character.
+ * In this practical subset, a text element is one Unicode scalar encoded as UTF-8 rather than a
+ * full extended grapheme cluster. Combining sequences, emoji ZWJ sequences and regional-indicator
+ * pairs therefore remain separate elements. Every entry point shares the same scalar boundary
+ * rule with TextElementEnumerator: a valid multi-byte scalar is never split, while each malformed
+ * input byte is a deterministic one-byte element.
  */
 class StringInfo {
     std::string string_;
 
-    // Returns the byte length of the UTF-8 sequence starting at str[index] (index must be a
-    // valid, in-bounds position). Matches TextElementEnumerator::MoveNext()'s decode logic
-    // exactly, clamped so it never reads past the end of str.
-    static size_t utf8ElementLength(const std::string& str, size_t index) {
-        unsigned char c = static_cast<unsigned char>(str[index]);
-        size_t len = 1;
-        if      ((c & 0x80) == 0x00) len = 1;
-        else if ((c & 0xE0) == 0xC0) len = 2;
-        else if ((c & 0xF0) == 0xE0) len = 3;
-        else if ((c & 0xF8) == 0xF0) len = 4;
-        return std::min(len, str.size() - index);
+    /** Byte offsets of every scalar-based element, followed by the string-end sentinel. */
+    static std::vector<std::size_t> elementOffsets(const std::string& str) {
+        std::vector<std::size_t> offsets;
+        for (std::size_t i = 0; i < str.size(); i += detail::Utf8TextElementLength(str, i)) {
+            offsets.push_back(i);
+        }
+        offsets.push_back(str.size());
+        return offsets;
     }
 
 public:
@@ -78,14 +72,12 @@ public:
      * @brief Gets the number of text elements in the string.
      *
      * C++ counterpart of .NET StringInfo.LengthInTextElements.
-     * Counts UTF-8 byte-sequence elements (see the class doc-comment) — a multi-byte character
-     * counts as one element, not one per byte.
+     * Counts scalar-based elements (see the class doc-comment) — a valid multi-byte scalar counts
+     * as one element, not one per byte.
      * @return The number of text elements in the string.
      */
     [[nodiscard]] intcs getLengthInTextElementsProperty() const {
-        intcs count = 0;
-        for (size_t i = 0; i < string_.size(); i += utf8ElementLength(string_, i)) ++count;
-        return count;
+        return static_cast<intcs>(elementOffsets(string_).size() - 1);
     }
 
     /**
@@ -97,8 +89,12 @@ public:
      * @throws System::ArgumentOutOfRangeException if @p startingTextElement is out of range.
      */
     [[nodiscard]] std::string SubstringByTextElements(intcs startingTextElement) const {
-        return SubstringByTextElements(startingTextElement,
-                                       static_cast<intcs>(string_.size()) - startingTextElement);
+        const auto offsets = elementOffsets(string_);
+        const std::size_t count = offsets.size() - 1;
+        if (startingTextElement < 0 || static_cast<std::size_t>(startingTextElement) >= count) {
+            throw System::ArgumentOutOfRangeException("startingTextElement");
+        }
+        return string_.substr(offsets[static_cast<std::size_t>(startingTextElement)]);
     }
 
     /**
@@ -113,16 +109,18 @@ public:
      */
     [[nodiscard]] std::string SubstringByTextElements(intcs startingTextElement,
                                                        intcs lengthInTextElements) const {
-        size_t length = string_.size();
-        if (static_cast<unsigned int>(startingTextElement) >= static_cast<unsigned int>(length)) {
+        const auto offsets = elementOffsets(string_);
+        const std::size_t count = offsets.size() - 1;
+        if (startingTextElement < 0 || static_cast<std::size_t>(startingTextElement) >= count) {
             throw System::ArgumentOutOfRangeException("startingTextElement");
         }
-        if (static_cast<unsigned int>(lengthInTextElements) >
-            static_cast<unsigned int>(length - static_cast<size_t>(startingTextElement))) {
+        const std::size_t start = static_cast<std::size_t>(startingTextElement);
+        if (lengthInTextElements < 0 ||
+            static_cast<std::size_t>(lengthInTextElements) > count - start) {
             throw System::ArgumentOutOfRangeException("lengthInTextElements");
         }
-        return string_.substr(static_cast<size_t>(startingTextElement),
-                              static_cast<size_t>(lengthInTextElements));
+        const std::size_t end = start + static_cast<std::size_t>(lengthInTextElements);
+        return string_.substr(offsets[start], offsets[end] - offsets[start]);
     }
 
     /**
@@ -136,15 +134,17 @@ public:
      * @param index The zero-based byte index (default 0).
      * @return The text element (1-4 bytes) starting at @p index, or an empty string if @p index
      *         is exactly str.size() (the end of the string).
-     * @throws System::ArgumentOutOfRangeException if @p index is negative or greater than
-     *         str.size().
+     * @throws System::ArgumentOutOfRangeException if @p index is negative, greater than
+     *         str.size(), or in the middle of a valid UTF-8 scalar.
      */
     static std::string GetNextTextElement(const std::string& str, intcs index = 0) {
         if (index < 0 || index > static_cast<int>(str.size()))
             throw System::ArgumentOutOfRangeException("index");
         if (index == static_cast<int>(str.size())) return {};
-        size_t i = static_cast<size_t>(index);
-        return str.substr(i, utf8ElementLength(str, i));
+        const size_t i = static_cast<size_t>(index);
+        if (!detail::IsUtf8TextElementBoundary(str, i))
+            throw System::ArgumentOutOfRangeException("index");
+        return str.substr(i, detail::Utf8TextElementLength(str, i));
     }
 
     /**
@@ -157,14 +157,16 @@ public:
      * @param index The zero-based byte index (default 0).
      * @return The element's byte length (1-4) if @p index is a valid element position; 0 if
      *         @p index is exactly str.size() (the end of the string).
-     * @throws System::ArgumentOutOfRangeException if @p index is negative or greater than
-     *         str.size().
+     * @throws System::ArgumentOutOfRangeException if @p index is negative, greater than
+     *         str.size(), or in the middle of a valid UTF-8 scalar.
      */
     static intcs GetNextTextElementLength(const std::string& str, intcs index = 0) {
         if (index < 0 || index > static_cast<int>(str.size()))
             throw System::ArgumentOutOfRangeException("index");
         if (index == static_cast<int>(str.size())) return 0;
-        return static_cast<intcs>(utf8ElementLength(str, static_cast<size_t>(index)));
+        if (!detail::IsUtf8TextElementBoundary(str, static_cast<std::size_t>(index)))
+            throw System::ArgumentOutOfRangeException("index");
+        return static_cast<intcs>(detail::Utf8TextElementLength(str, static_cast<size_t>(index)));
     }
 
     /**
@@ -179,8 +181,10 @@ public:
      */
     static std::vector<intcs> ParseCombiningCharacters(const std::string& str) {
         std::vector<intcs> result;
-        for (size_t i = 0; i < str.size(); i += utf8ElementLength(str, i))
-            result.push_back(static_cast<intcs>(i));
+        const auto offsets = elementOffsets(str);
+        result.reserve(offsets.size() - 1);
+        for (std::size_t i = 0; i + 1 < offsets.size(); ++i)
+            result.push_back(static_cast<intcs>(offsets[i]));
         return result;
     }
 
@@ -202,12 +206,11 @@ public:
      * @param str   The string to enumerate.
      * @param index The zero-based byte index at which to start enumeration.
      * @return A TextElementEnumerator positioned before the first element at @p index.
-     * @throws System::ArgumentOutOfRangeException if @p index is negative or greater than the string length.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative, greater than the
+     *         string length, or in the middle of a valid UTF-8 scalar.
      */
     static TextElementEnumerator GetTextElementEnumerator(const std::string& str, intcs index) {
-        if (index < 0 || index > static_cast<int>(str.size()))
-            throw System::ArgumentOutOfRangeException("index");
-        return TextElementEnumerator(str.substr(index));
+        return TextElementEnumerator(str, index);
     }
 };
 

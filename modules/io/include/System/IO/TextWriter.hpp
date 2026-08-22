@@ -106,11 +106,10 @@ namespace System::IO {
         /**
          * @brief Closes the writer.
          *
-         * <b>This base implementation does nothing.</b> StringWriter does not override it, so
-         * after Close() a Write still appends and ToString() still returns the text. That is
-         * SR-AUD-343 on the writer side; it is still open, and for the same reason as
-         * TextReader::Close() -- recording the closed state is an object-layout change in a
-         * public type, and the decision is ticket #2098, BLOCKED on Approval IO-1.
+         * This base implementation deliberately does nothing, matching .NET's `TextWriter`
+         * base. Concrete resource-owning writers implement their own lifecycle: `StringWriter`
+         * and `StreamWriter` override this member, record a closed state, and reject subsequent
+         * writes (ticket #2098 / SR-AUD-343).
          */
         virtual void Close() {}
 

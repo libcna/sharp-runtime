@@ -2,16 +2,16 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 //
-// Ticket #2061 — behaviour pins for every System::Buffers finding this batch did NOT
-// repair, so a future approved option cannot land silently and a future reader cannot
-// mistake a documented gap for an accident.
+// Ticket #2061 — behaviour and layout pins for the System::Buffers audit decisions, so a
+// future contract change cannot land silently and a future reader cannot mistake a declared
+// limitation for an accident.
 //
-// These tests assert what the code does TODAY. Several of them pin behaviour that
-// DIVERGES from .NET; each says so, names the blocked ticket that would change it, and
-// must be updated together with that ticket. See docs/BuffersNamespaceReviewPlan.md.
+// These tests assert what the code does TODAY. Where behaviour intentionally diverges from
+// .NET, the case says so and must move together with that decision. See the migration documents
+// named at the individual pins.
 //
-// Nothing here approves, implements or preselects any part of #2056, #2057, #2058,
-// #2059 or #2060.
+// The original #2056--#2060 decisions have since been resolved or explicitly accepted; these
+// remain regression pins for their resulting contracts.
 #include <gtest/gtest.h>
 #include "System/SequencePosition.hpp"
 #include <type_traits>
@@ -54,10 +54,10 @@ using System::Buffers::Text::Utf8Parser;
 
 static_assert(sizeof(ReadOnlySequence<int>) == 40,
               "#2057 added exactly one member -- the has-a-buffer discriminator, 32 -> 40 -- "
-              "under docs/StandingApprovals.md SA-3. #2058 is still open and any further data "
-              "member here needs its own approval.");
+              "under docs/StandingApprovals.md SA-3. #2058 declares the single-segment subset; "
+              "any further data member here needs its own approval.");
 static_assert(sizeof(ReadOnlySequence<int>::Enumerator) == 16,
-              "#2057/#2058 would change the enumerator's object layout");
+              "withdrawing #2058's single-segment subset would change the enumerator's layout");
 static_assert(sizeof(MemoryPoolHeapOwner_<int>) == 40,
               "#2056(a) added exactly one member -- the terminal disposed flag, 32 -> 40 -- "
               "under docs/StandingApprovals.md SA-3. Any further data member here is a new "
@@ -77,8 +77,8 @@ TEST(BuffersLayoutPinTests, LayoutsAreStaticallyAsserted) {
 }
 
 // ===========================================================================
-// SR-AUD-071 — half (a) LANDED (#2056). Half (b) is still open, and is pinned
-// as such rather than quietly bundled.
+// SR-AUD-071 — half (a) LANDED (#2056). Half (b) is the explicitly accepted
+// non-owning-view lifetime boundary, and is pinned so it cannot change silently.
 // ===========================================================================
 
 TEST(MemoryOwnerDisposedPinTests, Fix2056_GetMemoryAfterDisposeThrows) {
@@ -110,12 +110,12 @@ TEST(MemoryOwnerDisposedPinTests, Fix2056_AZeroLengthRentIsNowDistinguishableFro
     EXPECT_THROW((void)dead->getMemoryProperty(), System::ObjectDisposedException);
 }
 
-TEST(MemoryOwnerDisposedPinTests, Pin2056b_MemoryRetainedAcrossDisposeStillKeepsItsStaleLength) {
-    // HALF (b) IS STILL OPEN, and this pin says so rather than letting half a repair look
-    // whole. A Memory<T> obtained BEFORE Dispose keeps a pointer and a length over storage the
-    // owner has released. getMemoryProperty() cannot defend against it -- by the time the
-    // caller holds the Memory, this object is no longer in the path -- and repairing it is a
-    // Memory<T> ownership change in Core.Base.
+TEST(MemoryOwnerDisposedPinTests, AcceptedDeviation_RetainedViewKeepsMetadataButMustNotBeRead) {
+    // A Memory<T> obtained BEFORE Dispose keeps a pointer and length over storage the owner
+    // releases. Memory<T> is an explicitly non-owning C++ view, so this metadata remains but
+    // the view is no longer valid. Making it own the vector would silently replace the runtime's
+    // documented borrowing model across Core.Base; the final audit records that as an accepted
+    // lifetime deviation rather than unfinished implementation.
     //
     // Reading THROUGH the view is deliberately not attempted: it is undefined behaviour and
     // would make this suite unrunnable under AddressSanitizer.
@@ -126,19 +126,17 @@ TEST(MemoryOwnerDisposedPinTests, Pin2056b_MemoryRetainedAcrossDisposeStillKeeps
     owner->Dispose();
 
     EXPECT_EQ(retained.getLengthProperty(), 16)
-        << "if this becomes 0, the ownership half of #2056 has landed and this pin must be "
-           "updated in that change";
+        << "the non-owning view retains its value metadata after its lifetime has ended";
 }
 
-TEST(MemoryOwnerDisposedPinTests, Fix2056_TheStorageLifetimeIsDELIBERATELYUnchanged) {
+TEST(MemoryOwnerDisposedPinTests, AcceptedDeviation_DisposeDoesNotPromiseViewLiveness) {
     // .NET needs no flag: it nulls _array and tests `array is null`. The port's natural
     // equivalent is a unique_ptr, which would even make the object SMALLER -- and it was
     // rejected on purpose. reset() frees the storage DETERMINISTICALLY, where clear() +
-    // shrink_to_fit() is non-binding; with half (b) still open, that would turn a latent
-    // use-after-free from "usually survives" into "always broken" while nothing yet fixes it.
+    // shrink_to_fit() is non-binding. Neither representation makes a retained non-owning view
+    // valid; callers must observe the documented lifetime boundary.
     //
-    // This case exists so that reasoning is a decision on the record rather than a comment: if
-    // a future change adopts the null discriminator, it must confront half (b) at the same time.
+    // This case pins only the observable metadata, never a right to dereference the dead view.
     auto owner = MemoryPool<int>::Shared().Rent(16);
     auto retained = owner->getMemoryProperty();
     owner->Dispose();

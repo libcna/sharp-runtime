@@ -3,6 +3,10 @@
 
 # Five independently reviewed `modules/core` findings (#2317 ownership pool, part 1)
 
+> **Historical review snapshot (2026-08-11).** Statements below that findings “stay confirmed”
+> and tickets remain `todo`/`needs_user` record this review's landing state. They are superseded by
+> `docs/AuditFindingsReconciliation.md` and the current `plan.sqlite3` ticket rows.
+
 Reviewed 2026-08-11. **These five are not a family.** They were picked in the order #2317
 records, they live in five different headers, and they have five different root causes. The
 only property they share is that #2317 was holding their ownership because no other open

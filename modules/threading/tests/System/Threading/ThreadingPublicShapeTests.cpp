@@ -7,10 +7,10 @@
 //
 // Ticket #1971 landed the two members of #1958's Group A that were verified compatible by
 // measurement: SR-AUD-214 (AsyncLocal<T> must commit the new value before notifying) and
-// SR-AUD-189 (ThreadPool's configuration setters must validate and store). The third member
-// §20.3 listed, SR-AUD-215, was EXCLUDED after that verification and stays with the blocked
-// #1958; see the ExecutionContext section at the bottom of this file, which pins the current
-// contract so the exclusion is visible rather than merely recorded in a document.
+// SR-AUD-189 (ThreadPool's configuration setters must validate and store). SR-AUD-215 was later
+// closed as an accepted practical-subset deviation: ExecutionContext has no ambient asynchronous
+// flow in this runtime, so Capture() returns null and Run() invokes synchronously even with null.
+// The section at the bottom pins that explicit no-flow contract.
 #include <gtest/gtest.h>
 
 #include <atomic>
@@ -259,26 +259,26 @@ TEST_F(ThreadPoolConfigurationTest, ConcurrentConfiguration_KeepsTheInvariant) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// SR-AUD-215 -- NOT repaired here; this pins why, so the exclusion is testable
+// SR-AUD-215 -- accepted synchronous no-flow subset; the disposition is testable
 //
 // #1958's Group A listed ExecutionContext::Run rejecting a null context as compatible. Measured
 // (build-probe/1971_probe1_group_a.cpp): the default constructor is private, Capture() returns
 // nullptr unconditionally, and CreateCopy() is a non-static member needing an instance -- so a
 // consumer has NO way to obtain a non-null ExecutionContext*. Rejecting null would therefore
 // make Run throw for every call that can be written, including the canonical
-// Run(Capture(), callback, state) that works today. The finding stays with the blocked #1958.
+// Run(Capture(), callback, state) that works today. The final audit records this as an accepted
+// deviation rather than leaving it hidden behind the now-complete umbrella ticket #1958.
 // ---------------------------------------------------------------------------------------------
 
-TEST(ExecutionContextExclusionTests, NoReachableWayToObtainANonNullContext_SeeTicket1958) {
+TEST(ExecutionContextSubsetTests, NoReachableWayToObtainANonNullContext) {
     EXPECT_EQ(ExecutionContext::Capture(), nullptr);
     EXPECT_FALSE(std::is_default_constructible<ExecutionContext>::value)
         << "if this becomes true, SR-AUD-215's exclusion must be re-examined";
 }
 
-TEST(ExecutionContextExclusionTests, RunWithCapturedContext_StillInvokes_SeeTicket1958) {
+TEST(ExecutionContextSubsetTests, RunWithCapturedContextInvokesSynchronously) {
     bool invoked = false;
     ExecutionContext::Run(ExecutionContext::Capture(), [&](void*) { invoked = true; }, nullptr);
     EXPECT_TRUE(invoked)
-        << "the only ExecutionContext::Run call a consumer can write must keep working until "
-           "#1958's SR-AUD-215 decision is taken";
+        << "the declared no-flow subset must keep its canonical Capture/Run call usable";
 }

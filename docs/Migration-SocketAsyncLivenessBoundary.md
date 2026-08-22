@@ -3,9 +3,10 @@
 
 # Migration — `Socket`'s async liveness boundary (ticket #2134)
 
-*2026-08-17.* `System::Net::Sockets::Socket`'s destructor and move-assignment now **wait** for any
-in-flight `ConnectAsync`/`AcceptAsync`/`SendAsync`/`ReceiveAsync` body before releasing the
-descriptor.
+*2026-08-17; final-audit follow-up 2026-08-22.* `System::Net::Sockets::Socket`'s destructor,
+public `Close()`, move constructor and both sides of move-assignment now **wait** for any in-flight
+`ConnectAsync`/`AcceptAsync`/`SendAsync`/`ReceiveAsync` body before releasing, replacing or
+transferring the descriptor.
 
 **No public signature changed**, and every one of #2139's four pins survives: `Socket` does not
 become `enable_shared_from_this`, `~Socket` stays `noexcept`, `Socket` stays move-assignable and
@@ -49,8 +50,13 @@ than literals.
     // now: waits here until the accept body has finished
 ```
 
-The wait is **bounded**, not open-ended, and the same boundary applies to move-assignment, which
-replaces the descriptor and every field while a body may still be reading them.
+Teardown is crossable: `AcceptAsync` observes a stop flag in bounded poll slices, while
+`ConnectAsync`/`SendAsync`/`ReceiveAsync` are interrupted with `shutdown()` before a descriptor
+that will be discarded is closed. A **source-side move is intentionally different**: shutdown is
+irreversible, so it stops a pending accept but lets blocking connect/send/receive work finish
+naturally before transferring the still-usable descriptor. Such a move can therefore wait for its
+peer; preserving the resource and promising a bounded cancellation cannot both be true with the
+portable socket primitives this runtime exposes.
 
 **To migrate:** nothing, if you already awaited your tasks before dropping the socket — that is
 the case the boundary is a no-op for. If you deliberately abandoned a socket with work in flight,
@@ -60,9 +66,9 @@ the destructor now pauses where it previously returned into undefined behaviour.
 
 A body interrupted by the boundary throws
 `SocketException(SocketError::OperationAborted, "AcceptAsync: the socket was destroyed while the
-accept was pending.")` rather than returning a `Socket` built from a dead descriptor. Retrieving
-the task's result after the socket is gone therefore raises, instead of handing back something
-unusable.
+accept was pending.")` rather than returning a `Socket` built from a dead descriptor. The same
+diagnostic is used when `Close()` or a move stops the accept; the descriptor itself remains usable
+after a source move.
 
 ## 4. Why `AcceptAsync` is implemented differently from its three siblings
 
@@ -83,9 +89,24 @@ Per `docs/StandingApprovals.md` SA-2 condition 5, both consumer checkouts were s
 `ReceiveAsync` — **zero sites in both**. Neither repository was modified. Both must still be
 rebuilt, as every consumer must.
 
-## 6. What this does not close
+## 6. Final-audit closure
 
-**CCF-019 remains open.** This ticket settles the boundary for `Socket` only. `HttpClient`
-(#2066), `ClientWebSocket` (#2088) and `ThreadPool`/`SynchronizationContext` (#1959) have the same
-shape and are not repaired here; the owned-tree members (SR-AUD-327, SR-AUD-333) are a different
-problem again.
+The paragraph that originally followed here said CCF-019 remained open. That was accurate when
+#2134 landed, but is historical now: `HttpClient` was repaired by #2066,
+`ClientWebSocket` by #2088, and the ThreadPool/SynchronizationContext lifetime family by #1959.
+The final reconciliation rechecked those implementations and the current audit index supersedes
+that checkpoint.
+
+The same recheck found four residual `Socket` boundary holes and closed them under #2417:
+
+- move construction and the source side of move-assignment now drain raw-`this` work before any
+  source field is read or cleared;
+- a drained move-assignment destination reopens its guard for new async operations;
+- the caller-side registration is RAII-owned before Task construction, so allocation or launch
+  failure cannot leak an in-flight count;
+- public `Close()` uses the same teardown boundary as destruction.
+
+The source-move path was then separated from destructive teardown after a connected-socket
+regression proved that shutdown-and-transfer merely replaced a race with a disabled resource.
+A pending `ReceiveAsync` now delays the move until its peer supplies data; the moved-to socket is
+then exercised bidirectionally. SR-AUD-263 and CCF-019 are therefore fully remediated, not deferred.

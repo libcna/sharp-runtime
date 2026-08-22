@@ -2430,9 +2430,11 @@ TEST(HttpClientStatusLineParseTests, VersionTokenMustBeHttpDigitDotDigit) {
     }
 }
 
-// PINNED CHOICE, not a verified match: HTTP/9.9 satisfies the grammar, so a
-// version this port does not speak is reported rather than treated as a parse
-// error. .NET's behaviour is unknown here (/rv/tmp/runtime/ absent).
+// PINNED SUBSET DEVIATION, now verified against the available reference: .NET's
+// HttpConnection accepts only HTTP/1.x here, while this small parser accepts any
+// digit-dot-digit version token and preserves only the status/reason fields. The
+// broader grammar is explicit rather than an evidence gap; changing it is a
+// compatibility decision for this protocol subset.
 TEST(HttpClientStatusLineParseTests, UnknownButWellFormedVersionIsAccepted) {
     EXPECT_EQ(HttpClient::parseStatusLine("HTTP/9.9 200 OK").statusCode, 200);
     EXPECT_EQ(HttpClient::parseStatusLine("HTTP/0.9 200 OK").statusCode, 200);

@@ -4,26 +4,27 @@
 //
 // #2139 -- the System::Net::Sockets review's gated and measured behaviours, pinned.
 //
-// Two kinds of pin live here, and they mean opposite things:
+// This file began as two kinds of pin with opposite meanings:
 //
 //   * A GATED pin records behaviour that is currently WRONG and is waiting on a decision --
-//     #2134 (CCF-019, unapproved) and #2138 (how far this port carries IPv6, needs_user). A
+//     #2134 (CCF-019, then unapproved) and #2138 (how far this port carries IPv6). A
 //     failure here does NOT mean something regressed; it means somebody took the decision, and
 //     the pin is what makes that visible instead of silent.
 //   * A MEASURED-POSITIVE pin records something the review checked and found correct, so a later
 //     change cannot quietly undo it while everyone assumes it was covered.
 //
-// #2134 is pinned by SHAPE, deliberately. A racing use-after-free reproduction of a lifetime bug
-// is flaky by construction (the reason #2096 already recorded), and a data race is undefined
-// behaviour rather than behaviour. What can be pinned exactly is that the ownership model has not
-// changed -- which is precisely what the CCF-019 repair would change.
+// Both gated decisions later landed. The sections are retained in place but their assertions are
+// now the positive repaired contracts. Ticket #2417 adds deterministic move-source and task-start
+// exception regressions after a final review found two residual holes in #2134's boundary.
 #include <gtest/gtest.h>
+#include <atomic>
 #include <optional>
 #include <thread>
 #include <chrono>
 
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -50,38 +51,72 @@ using System::Net::Sockets::TcpClient;
 using System::Net::Sockets::TcpListener;
 using System::Net::Sockets::UdpClient;
 
+namespace SharpRuntime::Testing {
+
+template <>
+struct SocketAsyncStartAccess<System::Net::Sockets::Socket> {
+    static void setBeforeTaskHook(void (*hook)()) {
+        System::Net::Sockets::Socket::beforeAsyncTaskTestHook_.store(hook);
+    }
+
+    static int inFlight(const System::Net::Sockets::Socket& socket) {
+        return socket.asyncOperationCountForTesting();
+    }
+};
+
+} // namespace SharpRuntime::Testing
+
+namespace {
+
+void throwBeforeSocketTaskConstruction() {
+    throw std::runtime_error("injected async task construction failure");
+}
+
+class ScopedSocketAsyncTaskHook final {
+public:
+    ScopedSocketAsyncTaskHook() {
+        SharpRuntime::Testing::SocketAsyncStartAccess<Socket>::setBeforeTaskHook(
+            &throwBeforeSocketTaskConstruction);
+    }
+
+    ~ScopedSocketAsyncTaskHook() {
+        SharpRuntime::Testing::SocketAsyncStartAccess<Socket>::setBeforeTaskHook(nullptr);
+    }
+
+    void clear() {
+        SharpRuntime::Testing::SocketAsyncStartAccess<Socket>::setBeforeTaskHook(nullptr);
+    }
+
+    ScopedSocketAsyncTaskHook(const ScopedSocketAsyncTaskHook&) = delete;
+    ScopedSocketAsyncTaskHook& operator=(const ScopedSocketAsyncTaskHook&) = delete;
+};
+
+} // namespace
+
 // ===========================================================================================
 // GATED — #2134 / SR-AUD-263 / CCF-019: the ownership model, pinned by shape
 // ===========================================================================================
 //
-// Every repair option changes one of these four facts:
-//   * shared ownership (`enable_shared_from_this<Socket>`) changes the base list;
-//   * a joining `~Socket` gains a throw path, so the destructor stops being noexcept;
-//   * move-assignment is what makes "destroyed or moved while a worker runs" reachable at all;
-//   * handing back `shared_ptr<Socket>` from `AcceptAsync` is the current signature, and a
-//     shared-ownership redesign is the thing most likely to alter it.
+// Ticket #2134 selected an internal RAII in-flight-work boundary, preserving these four public
+// shape facts while making destruction and move-assignment wait safely for async work.
 static_assert(!std::is_base_of_v<std::enable_shared_from_this<Socket>, Socket>,
-              "#2134/CCF-019 pin: Socket has gained shared self-ownership -- the CCF-019 repair "
-              "landed. Update this pin deliberately; it is not a regression.");
+              "#2134/CCF-019 pin: the repair uses an internal RAII boundary, not shared self-ownership");
 static_assert(std::is_nothrow_destructible_v<Socket>,
-              "#2134/CCF-019 pin: ~Socket has gained a throw path, which is what a joining "
-              "destructor would do. Update this pin deliberately.");
+              "#2134/CCF-019 pin: the joining destructor remains noexcept");
 static_assert(std::is_move_assignable_v<Socket>,
-              "#2134/CCF-019 pin: Socket is no longer move-assignable. Move-assignment while an "
-              "async worker runs is the reachability half of SR-AUD-263.");
+              "#2134/CCF-019 pin: move-assignment retains the same in-flight-work boundary");
 static_assert(!std::is_copy_constructible_v<Socket> && !std::is_copy_assignable_v<Socket>,
               "Socket must stay non-copyable: two owners of one descriptor is a double close.");
 
 TEST(SocketsGatedBehaviourPins, THEGATEDPINTheAsyncMembersStillReturnTheirCurrentShapes) {
-    // A shared-ownership redesign is expected to change at least one of these.
+    // The internal boundary did not need to change either public return type.
     static_assert(std::is_same_v<decltype(std::declval<Socket&>().AcceptAsync()),
                                  System::Threading::Tasks::TaskT<std::shared_ptr<Socket>>>);
     static_assert(std::is_same_v<decltype(std::declval<Socket&>().SendAsync(
                                      std::vector<SharpRuntime::bytecs>{})),
                                  System::Threading::Tasks::TaskT<SharpRuntime::intcs>>);
-    SUCCEED() << "SR-AUD-263 is UNREPAIRED and blocked on CCF-019 approval; the four async "
-                 "members still capture a raw `this` with no liveness boundary. Socket.hpp's "
-                 "own @warning states the caller-side contract that stands in for a fix.";
+    SUCCEED() << "SR-AUD-263 was repaired by #2134's internal RAII liveness boundary while "
+                 "preserving the async members' public shapes.";
 }
 
 // ===========================================================================================
@@ -556,6 +591,218 @@ TEST(SocketsGatedBehaviourPins, Fix2134_MoveAssignmentAlsoCrossesTheBoundary) {
     ASSERT_TRUE(pending.getIsCompletedProperty())
         << "move-assignment returned while an async body was still running";
     EXPECT_THROW((void)pending.getResultProperty(), System::Net::Sockets::SocketException);
+}
+
+TEST(SocketsGatedBehaviourPins, Fix2417_MoveConstructorCrossesTheSourceBoundary) {
+    // Every async body captures the SOURCE address. The original move constructor copied and
+    // cleared its descriptor fields immediately, leaving source destruction to wait only later;
+    // that is a data race while the pending AcceptAsync still calls Poll()/Accept() through the
+    // source object. Moving must first abort and drain that work, then transfer the descriptor.
+    Socket source(System::Net::Sockets::AddressFamily::InterNetwork,
+                  System::Net::Sockets::SocketType::Stream,
+                  System::Net::Sockets::ProtocolType::Tcp);
+    source.Bind(IPEndPoint(IPAddress::Loopback, 0));
+    source.Listen(1);
+    const auto local = std::dynamic_pointer_cast<IPEndPoint>(source.getLocalEndPointProperty());
+    ASSERT_NE(local, nullptr);
+    const auto originalHandle = source.getHandleProperty();
+
+    auto staleSourceWork = source.AcceptAsync();
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    Socket moved(std::move(source));
+
+    EXPECT_EQ(SharpRuntime::Testing::SocketAsyncStartAccess<Socket>::inFlight(source), 0)
+        << "move construction returned while source async work still owned the source object";
+    EXPECT_THROW((void)staleSourceWork.getResultProperty(),
+                 System::Net::Sockets::SocketException);
+    EXPECT_EQ(moved.getHandleProperty(), originalHandle);
+
+    // Draining the old source guard must not poison the destination's fresh guard or retire the
+    // listening descriptor. The moved-to socket remains usable for new asynchronous work.
+    auto accepted = moved.AcceptAsync();
+    Socket client(System::Net::Sockets::AddressFamily::InterNetwork,
+                  System::Net::Sockets::SocketType::Stream,
+                  System::Net::Sockets::ProtocolType::Tcp);
+    client.Connect(*local);
+    EXPECT_NE(accepted.getResultProperty(), nullptr);
+}
+
+TEST(SocketsGatedBehaviourPins, Fix2417_MoveAssignmentDrainsSourceAndReopensDestination) {
+    Socket source(System::Net::Sockets::AddressFamily::InterNetwork,
+                  System::Net::Sockets::SocketType::Stream,
+                  System::Net::Sockets::ProtocolType::Tcp);
+    source.Bind(IPEndPoint(IPAddress::Loopback, 0));
+    source.Listen(1);
+    const auto local = std::dynamic_pointer_cast<IPEndPoint>(source.getLocalEndPointProperty());
+    ASSERT_NE(local, nullptr);
+    const auto originalHandle = source.getHandleProperty();
+
+    auto staleSourceWork = source.AcceptAsync();
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+    Socket destination(System::Net::Sockets::AddressFamily::InterNetwork,
+                       System::Net::Sockets::SocketType::Dgram,
+                       System::Net::Sockets::ProtocolType::Udp);
+    destination = std::move(source);
+
+    EXPECT_EQ(SharpRuntime::Testing::SocketAsyncStartAccess<Socket>::inFlight(source), 0)
+        << "move assignment returned while source async work still owned the source object";
+    EXPECT_THROW((void)staleSourceWork.getResultProperty(),
+                 System::Net::Sockets::SocketException);
+    EXPECT_EQ(destination.getHandleProperty(), originalHandle);
+
+    // waitForAsyncOperations marks a guard stopping even when it had zero work. The destination
+    // guard must be reopened after assignment; otherwise this AcceptAsync aborts immediately.
+    auto accepted = destination.AcceptAsync();
+    Socket client(System::Net::Sockets::AddressFamily::InterNetwork,
+                  System::Net::Sockets::SocketType::Stream,
+                  System::Net::Sockets::ProtocolType::Tcp);
+    client.Connect(*local);
+    EXPECT_NE(accepted.getResultProperty(), nullptr);
+}
+
+TEST(SocketsGatedBehaviourPins, Fix2417_SourceMovePreservesAConnectedSocketAfterPendingReceive) {
+    // shutdown() is an acceptable way to cross the boundary only when the descriptor will be
+    // discarded. The first source-move repair used it for ReceiveAsync and then transferred the
+    // irreversibly shutdown descriptor. Hold a receive pending, prove move waits naturally, feed
+    // that receive, and finally exercise the moved-to connection in BOTH directions.
+    Socket listener(System::Net::Sockets::AddressFamily::InterNetwork,
+                    System::Net::Sockets::SocketType::Stream,
+                    System::Net::Sockets::ProtocolType::Tcp);
+    listener.Bind(IPEndPoint(IPAddress::Loopback, 0));
+    listener.Listen(1);
+    const auto local = std::dynamic_pointer_cast<IPEndPoint>(listener.getLocalEndPointProperty());
+    ASSERT_NE(local, nullptr);
+
+    Socket peer(System::Net::Sockets::AddressFamily::InterNetwork,
+                System::Net::Sockets::SocketType::Stream,
+                System::Net::Sockets::ProtocolType::Tcp);
+    peer.Connect(*local);
+    auto source = listener.Accept();
+    ASSERT_NE(source, nullptr);
+
+    auto firstBuffer = std::make_shared<std::vector<SharpRuntime::bytecs>>(1);
+    auto pendingReceive = source->ReceiveAsync(firstBuffer);
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+    std::optional<Socket> moved;
+    std::atomic<bool> moveReturned{false};
+    std::thread mover([&] {
+        moved.emplace(std::move(*source));
+        moveReturned.store(true);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+    // On the broken shutdown-based source boundary, move has already returned here with a
+    // disabled descriptor. Join before reporting that path so a failed assertion never strands
+    // a joinable test thread.
+    if (moveReturned.load()) {
+        mover.join();
+        ADD_FAILURE() << "source move interrupted pending ReceiveAsync instead of preserving the socket";
+        return;
+    }
+
+    const std::vector<SharpRuntime::bytecs> firstByte{0x31};
+    int sent = -1;
+    try {
+        sent = peer.Send(firstByte);
+    } catch (...) {
+        // Closing the peer still releases the pending receive, so the mover can always be joined
+        // before this test reports a socket-preservation failure.
+        peer.Close();
+    }
+    int received = -1;
+    try {
+        received = pendingReceive.getResultProperty();
+    } catch (...) {
+    }
+    mover.join();
+    ASSERT_EQ(sent, 1);
+    ASSERT_EQ(received, 1);
+    EXPECT_EQ((*firstBuffer)[0], firstByte[0]);
+    ASSERT_TRUE(moved.has_value());
+
+    const std::vector<SharpRuntime::bytecs> fromMoved{0x42};
+    std::vector<SharpRuntime::bytecs> atPeer(1);
+    ASSERT_EQ(moved->Send(fromMoved), 1);
+    ASSERT_EQ(peer.Receive(atPeer), 1);
+    EXPECT_EQ(atPeer[0], fromMoved[0]);
+
+    const std::vector<SharpRuntime::bytecs> fromPeer{0x53};
+    std::vector<SharpRuntime::bytecs> atMoved(1);
+    ASSERT_EQ(peer.Send(fromPeer), 1);
+    ASSERT_EQ(moved->Receive(atMoved), 1);
+    EXPECT_EQ(atMoved[0], fromPeer[0]);
+}
+
+TEST(SocketsGatedBehaviourPins, Fix2417_CloseDrainsPendingAsyncWorkBeforeRetiringTheDescriptor) {
+    // Public Close used to bypass the destructor's boundary and retire fd_ while ReceiveAsync
+    // still used this object. Linux commonly leaves that already-entered recv blocked even after
+    // close, making the leaked in-flight registration directly observable.
+    Socket listener(System::Net::Sockets::AddressFamily::InterNetwork,
+                    System::Net::Sockets::SocketType::Stream,
+                    System::Net::Sockets::ProtocolType::Tcp);
+    listener.Bind(IPEndPoint(IPAddress::Loopback, 0));
+    listener.Listen(1);
+    const auto local = std::dynamic_pointer_cast<IPEndPoint>(listener.getLocalEndPointProperty());
+    ASSERT_NE(local, nullptr);
+
+    Socket peer(System::Net::Sockets::AddressFamily::InterNetwork,
+                System::Net::Sockets::SocketType::Stream,
+                System::Net::Sockets::ProtocolType::Tcp);
+    peer.Connect(*local);
+    auto closing = listener.Accept();
+    ASSERT_NE(closing, nullptr);
+
+    auto buffer = std::make_shared<std::vector<SharpRuntime::bytecs>>(1);
+    auto pendingReceive = closing->ReceiveAsync(buffer);
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    ASSERT_EQ(SharpRuntime::Testing::SocketAsyncStartAccess<Socket>::inFlight(*closing), 1);
+
+    closing->Close();
+    const int afterClose =
+        SharpRuntime::Testing::SocketAsyncStartAccess<Socket>::inFlight(*closing);
+
+    // Keep this regression safe if the boundary is removed: wake a recv that a plain close may
+    // have left alive before asking the Task for its result or destroying its owner.
+    if (afterClose != 0) {
+        try {
+            (void)peer.Send(std::vector<SharpRuntime::bytecs>{0x64});
+        } catch (...) {
+        }
+    }
+    try {
+        (void)pendingReceive.getResultProperty();
+    } catch (const System::Net::Sockets::SocketException&) {
+    }
+    EXPECT_EQ(afterClose, 0)
+        << "Close returned while raw-this async work still owned the socket";
+    EXPECT_EQ(closing->getHandleProperty(), -1);
+}
+
+TEST(SocketsGatedBehaviourPins, Fix2417_FailedTaskStartRollsBackItsRegistration) {
+    Socket listener(System::Net::Sockets::AddressFamily::InterNetwork,
+                    System::Net::Sockets::SocketType::Stream,
+                    System::Net::Sockets::ProtocolType::Tcp);
+    listener.Bind(IPEndPoint(IPAddress::Loopback, 0));
+    listener.Listen(1);
+    const auto local = std::dynamic_pointer_cast<IPEndPoint>(listener.getLocalEndPointProperty());
+    ASSERT_NE(local, nullptr);
+
+    ScopedSocketAsyncTaskHook hook;
+    EXPECT_THROW((void)listener.AcceptAsync(), std::runtime_error);
+    EXPECT_EQ(SharpRuntime::Testing::SocketAsyncStartAccess<Socket>::inFlight(listener), 0)
+        << "a Task construction failure leaked its caller-side async registration";
+
+    // The rollback is not merely an internal count: after clearing the seam the same socket can
+    // start and complete real work, and its eventual destructor has nothing stale to wait for.
+    hook.clear();
+    auto accepted = listener.AcceptAsync();
+    Socket client(System::Net::Sockets::AddressFamily::InterNetwork,
+                  System::Net::Sockets::SocketType::Stream,
+                  System::Net::Sockets::ProtocolType::Tcp);
+    client.Connect(*local);
+    EXPECT_NE(accepted.getResultProperty(), nullptr);
 }
 
 TEST(SocketsGatedBehaviourPins, Fix2134_LayoutPin_TheCostOfTheBoundary) {

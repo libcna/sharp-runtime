@@ -18,6 +18,7 @@
 //      would be a guess. Each is pinned here at its MEASURED current behaviour, so no answer
 //      can land silently and a future ticket that changes one must say so.
 #include <gtest/gtest.h>
+#include "TestTemporaryDirectory.hpp"
 
 #include <cstddef>
 #include <filesystem>
@@ -267,11 +268,11 @@ TEST(XmlContractPinTests, Fix2082_WhereAnAmpersandIsNotMarkupIsSkipped) {
 // rewritten on save, which is the half that loses data.
 
 namespace {
-// Writes @p xml to a temporary file and returns the path. Kept file-local because only these two
-// cases need a file at all; the repository's TMPDIR is redirected to build-tmp/ by the gate.
-std::string writeTempXml(const char* stem, const std::string& xml) {
-    const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / (std::string("sr2361_") + stem + ".xml");
+// Writes @p xml below a caller-owned unique temporary directory.
+std::string writeTempXml(const SharpRuntime::Tests::TestTemporaryDirectory& temporary,
+                         const char* stem,
+                         const std::string& xml) {
+    const std::filesystem::path path = temporary.path(std::string(stem) + ".xml");
     std::ofstream out(path, std::ios::binary);
     out << xml;
     out.close();
@@ -280,7 +281,8 @@ std::string writeTempXml(const char* stem, const std::string& xml) {
 } // namespace
 
 TEST(XmlContractPinTests, Fix2361_LoadFromAFileRejectsAnUndeclaredEntityToo) {
-    const std::string path = writeTempXml("undeclared", "<r>&nope;</r>");
+    SharpRuntime::Tests::TestTemporaryDirectory temporary;
+    const std::string path = writeTempXml(temporary, "undeclared", "<r>&nope;</r>");
     XmlDocument d;
     EXPECT_THROW(d.Load(path), System::Xml::XmlException);
 
@@ -289,13 +291,14 @@ TEST(XmlContractPinTests, Fix2361_LoadFromAFileRejectsAnUndeclaredEntityToo) {
     // "<r>&amp;nope;</r>" -- the document's own text changed with no diagnostic anywhere.
     XmlDocument viaString;
     EXPECT_THROW(viaString.LoadXml("<r>&nope;</r>"), System::Xml::XmlException);
-    std::filesystem::remove(path);
 }
 
 TEST(XmlContractPinTests, Fix2361_LoadFromAFileKeepsEveryOtherAnswerItHad) {
+    SharpRuntime::Tests::TestTemporaryDirectory temporary;
     // The invariance rows. Reading the bytes here rather than letting tinyxml2 read them must not
     // change what a legal document does, and must not change what a MISSING one does.
     const std::string path = writeTempXml(
+        temporary,
         "legal",
         "<!DOCTYPE r [<!ENTITY greeting \"hello\">]>"
         "<p:r xmlns:p='urn:x'><!-- &nope; --><![CDATA[&nope;]]>&greeting;&amp;&#65;</p:r>");
@@ -309,18 +312,15 @@ TEST(XmlContractPinTests, Fix2361_LoadFromAFileKeepsEveryOtherAnswerItHad) {
     EXPECT_THROW(missing.Load(path + ".no-such-file"), System::Xml::XmlException);
 
     // ...and so does a file whose CONTENT is malformed, which is a different failure again.
-    const std::string bad = writeTempXml("malformed", "<r><unclosed></r>");
+    const std::string bad = writeTempXml(temporary, "malformed", "<r><unclosed></r>");
     XmlDocument m;
     EXPECT_THROW(m.Load(bad), System::Xml::XmlException);
 
     // The undeclared-PREFIX check (#2083) always ran at this door and still does.
-    const std::string prefixed = writeTempXml("prefix", "<p:r/>");
+    const std::string prefixed = writeTempXml(temporary, "prefix", "<p:r/>");
     XmlDocument pfx;
     EXPECT_THROW(pfx.Load(prefixed), System::Xml::XmlException);
 
-    std::filesystem::remove(path);
-    std::filesystem::remove(bad);
-    std::filesystem::remove(prefixed);
 }
 
 // ===========================================================================

@@ -2,10 +2,11 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <cctype>
-#include <cwctype>
+#include <cstdint>
 #include <string>
+#include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/Globalization/detail/InvariantCase.hpp"
 #include "System/InvalidOperationException.hpp"
 
 namespace System::Globalization {
@@ -17,8 +18,10 @@ using SharpRuntime::intcs;
  * @brief Defines text properties and behaviors, such as casing, that are specific to a writing system.
  *
  * C++ counterpart of .NET System.Globalization.TextInfo.
- * This implementation performs locale-insensitive ASCII casing; full Unicode locale-aware
- * casing is not supported.
+ * This practical subset performs deterministic invariant Unicode simple casing using the pinned
+ * UCD 16.0 tables. The retained culture name does not select culture-tailored casing: Turkish I,
+ * context-sensitive sigma and multi-scalar expansions remain outside the supported contract.
+ * ToTitleCase uses the same invariant mappings and Unicode category boundaries.
  */
 class TextInfo {
 public:
@@ -129,8 +132,9 @@ public:
      * @return The lowercase equivalent.
      */
     [[nodiscard]] charcs ToLower(charcs c) const {
-        if (c < 128) return static_cast<charcs>(std::tolower(static_cast<int>(c)));
-        return static_cast<charcs>(std::towlower(static_cast<wint_t>(c)));
+        const auto codePoint = static_cast<std::uint32_t>(c);
+        if (codePoint >= 0xD800u && codePoint <= 0xDFFFu) return c;
+        return static_cast<charcs>(detail::LookupToLowerInvariant(codePoint));
     }
 
     /**
@@ -141,9 +145,7 @@ public:
      * @return The lowercase string.
      */
     [[nodiscard]] std::u16string ToLower(const std::u16string& str) const {
-        std::u16string result = str;
-        for (auto& c : result) c = ToLower(c);
-        return result;
+        return detail::MapUtf16Invariant(str, detail::InvariantCaseMapping::Lower);
     }
 
     /**
@@ -154,10 +156,7 @@ public:
      * @return The lowercase string.
      */
     [[nodiscard]] std::string ToLower(const std::string& str) const {
-        std::string result = str;
-        for (auto& c : result)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        return result;
+        return detail::MapUtf8Invariant(str, detail::InvariantCaseMapping::Lower);
     }
 
     /**
@@ -168,8 +167,9 @@ public:
      * @return The uppercase equivalent.
      */
     [[nodiscard]] charcs ToUpper(charcs c) const {
-        if (c < 128) return static_cast<charcs>(std::toupper(static_cast<int>(c)));
-        return static_cast<charcs>(std::towupper(static_cast<wint_t>(c)));
+        const auto codePoint = static_cast<std::uint32_t>(c);
+        if (codePoint >= 0xD800u && codePoint <= 0xDFFFu) return c;
+        return static_cast<charcs>(detail::LookupToUpperInvariant(codePoint));
     }
 
     /**
@@ -180,9 +180,7 @@ public:
      * @return The uppercase string.
      */
     [[nodiscard]] std::u16string ToUpper(const std::u16string& str) const {
-        std::u16string result = str;
-        for (auto& c : result) c = ToUpper(c);
-        return result;
+        return detail::MapUtf16Invariant(str, detail::InvariantCaseMapping::Upper);
     }
 
     /**
@@ -193,17 +191,14 @@ public:
      * @return The uppercase string.
      */
     [[nodiscard]] std::string ToUpper(const std::string& str) const {
-        std::string result = str;
-        for (auto& c : result)
-            c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        return result;
+        return detail::MapUtf8Invariant(str, detail::InvariantCaseMapping::Upper);
     }
 
     /**
      * @brief Converts the specified string to title case.
      *
      * C++ counterpart of .NET TextInfo.ToTitleCase(string).
-     * Each word starts with an uppercase letter; remaining letters are lowercased --
+     * Each word starts with an invariant simple-uppercase scalar; remaining scalars are lowercased --
      * EXCEPT a word that is entirely uppercase (no lowercase letters at all, e.g. "USA",
      * "NASA") is left unchanged, matching .NET's real behavior of preserving acronyms
      * (TextInfo.cs's `hasLowerCase` flag, "in line with Word 2000 behavior of
@@ -214,36 +209,101 @@ public:
      * @return The title-cased string.
      */
     [[nodiscard]] std::string ToTitleCase(const std::string& str) const {
-        std::string result = str;
-        std::size_t i = 0;
-        // Matches real .NET's word-boundary detection (TextInfo.cs's c_wordSeparatorMask):
-        // whitespace AND most punctuation categories (dash, open/close, quote, other
-        // punctuation, symbols, etc.) are word separators -- NOT just whitespace. Letters and
-        // digits are never separators. The apostrophe is a documented exception (real .NET
-        // gives it bespoke mid-word handling this port doesn't replicate, but excluding it
-        // from the separator set here reproduces the same observable result for the common
-        // case, e.g. "o'brien" -> "O'brien"). Previously splitting only on whitespace meant a
-        // hyphenated word like "mary-jane" was treated as one word and title-cased as
-        // "Mary-jane" instead of "Mary-Jane" -- confirmed via a standalone repro before this
-        // fix, matching real .NET's actual documented behavior for punctuation-separated words.
-        auto isWordBoundary = [](unsigned char c) {
-            return std::isspace(c) || (std::ispunct(c) && c != '\'');
+        struct Token {
+            std::uint32_t codePoint;
+            char rawByte;
+            bool valid;
         };
-        while (i < result.size()) {
-            if (isWordBoundary(static_cast<unsigned char>(result[i]))) { ++i; continue; }
-            std::size_t wordStart = i;
-            while (i < result.size() && !isWordBoundary(static_cast<unsigned char>(result[i]))) ++i;
-            std::size_t wordEnd = i;
-            bool hasLower = false;
-            for (std::size_t j = wordStart; j < wordEnd; ++j) {
-                if (std::islower(static_cast<unsigned char>(result[j]))) { hasLower = true; break; }
+        std::vector<Token> tokens;
+        tokens.reserve(str.size());
+        for (std::size_t offset = 0; offset < str.size();) {
+            std::uint32_t codePoint = 0;
+            std::size_t length = 0;
+            if (System::detail::TryDecodeUtf8Scalar(str, offset, codePoint, length)) {
+                tokens.push_back({codePoint, 0, true});
+                offset += length;
+            } else {
+                tokens.push_back({0, str[offset], false});
+                ++offset;
             }
-            result[wordStart] = static_cast<char>(std::toupper(static_cast<unsigned char>(result[wordStart])));
-            if (hasLower) {
-                for (std::size_t j = wordStart + 1; j < wordEnd; ++j)
-                    result[j] = static_cast<char>(std::tolower(static_cast<unsigned char>(result[j])));
+        }
+
+        const auto categoryOf = [](const Token& token) {
+            return detail::LookupUnicodeCategory(token.codePoint);
+        };
+        const auto isLetter = [&](const Token& token) {
+            return token.valid && categoryOf(token) <= UnicodeCategory::OtherLetter;
+        };
+        const auto isWordBoundary = [&](const Token& token) {
+            if (!token.valid) return true;
+            const auto category = categoryOf(token);
+            return (category >= UnicodeCategory::SpaceSeparator &&
+                    category <= UnicodeCategory::Format) ||
+                   (category >= UnicodeCategory::ConnectorPunctuation &&
+                    category <= UnicodeCategory::OtherSymbol);
+        };
+
+        std::string result;
+        result.reserve(str.size());
+        const auto appendOriginal = [&](const Token& token) {
+            if (token.valid) System::detail::AppendUtf8Scalar(result, token.codePoint);
+            else result.push_back(token.rawByte);
+        };
+        const auto appendRange = [&](std::size_t begin, std::size_t end, bool lower) {
+            for (std::size_t j = begin; j < end; ++j) {
+                if (!tokens[j].valid) {
+                    result.push_back(tokens[j].rawByte);
+                    continue;
+                }
+                const std::uint32_t mapped = lower
+                    ? detail::LookupToLowerInvariant(tokens[j].codePoint)
+                    : tokens[j].codePoint;
+                System::detail::AppendUtf8Scalar(result, mapped);
             }
-            // else: all-uppercase acronym -- leave characters after the first unchanged.
+        };
+
+        std::size_t i = 0;
+        while (i < tokens.size()) {
+            // .NET starts a title-cased word at a letter, not merely at the first scalar after a
+            // separator. Thus digits and combining marks are copied until a later letter starts.
+            if (!isLetter(tokens[i])) {
+                appendOriginal(tokens[i]);
+                ++i;
+                continue;
+            }
+
+            const auto firstCategory = categoryOf(tokens[i]);
+            System::detail::AppendUtf8Scalar(
+                result, detail::LookupToUpperInvariant(tokens[i].codePoint));
+            bool hasLower = firstCategory == UnicodeCategory::LowercaseLetter;
+            ++i;
+            std::size_t lowercaseStart = i;
+
+            while (i < tokens.size()) {
+                if (isLetter(tokens[i])) {
+                    if (categoryOf(tokens[i]) == UnicodeCategory::LowercaseLetter) {
+                        hasLower = true;
+                    }
+                    ++i;
+                    continue;
+                }
+
+                // .NET flushes the prefix at an apostrophe and always lowercases the remainder.
+                // That preserves an acronym before it ("USA'S" -> "USA's") while handling an
+                // uppercase surname tail ("O'BRIEN" -> "O'brien").
+                if (tokens[i].valid && tokens[i].codePoint == U'\'') {
+                    appendRange(lowercaseStart, i + 1, hasLower);
+                    ++i;
+                    lowercaseStart = i;
+                    hasLower = true;
+                    continue;
+                }
+
+                if (isWordBoundary(tokens[i])) break;
+                ++i;
+            }
+
+            appendRange(lowercaseStart, i, hasLower);
         }
         return result;
     }

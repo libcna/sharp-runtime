@@ -1,21 +1,23 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-22 — branch **`next`**, working tree clean. Gate **17,741 across 38
-executables: 17,741 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs
-with every executable run separately and continuing past failures, zero build warnings at
-`--parallel 2`. Graph **41 / 95**, seams **3 / 20**, negative fixtures **53 / 269**.*
+*Last verified: 2026-08-22 — branch **`next`**. Gate **17,778 across 38 executables: 17,778
+passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs with every executable
+run separately and continuing past failures, zero build warnings over a cache-disabled clean build
+at `--parallel 2`. Graph **41 / 95**, seams **5 / 22**, negative fixtures **55 / 284**. Final
+sanitizer/local-CI recording remains active under #2417; no implementation item remains open.*
 
-## Status: the post-audit queue is empty
+## Status: implementation complete; final verification active
 
-Measured 2026-08-20, not estimated:
+Measured 2026-08-22, not estimated:
 
 | | |
 |---|---|
 | `ticket` done | **2,406** |
+| `ticket` doing | **1** — #2417 final gate/recording |
 | `ticket` **todo** | **0** |
 | `ticket` blocked | 3 |
 | `ticket` wontfix | 5 |
-| `task` | fully classified — 1,082 ported, 15,119 ignored |
+| `task` | fully classified — 1,087 ported, 140 ignore, 14,980 ignored |
 
 **The three blocked tickets are not unfinished work; they are work this container lacks the means to
 do.** Each was measured rather than assumed:
@@ -29,12 +31,13 @@ The five `wontfix` entries are recorded decisions with their reasons.
 
 ## 2026-08-22 — final audit reconciliation
 
-The audit index was reconciled against `next`: **293 remediated, 43 confirmed,
-28 confirmed (design-complete), 364 total**. Eleven stale statuses were closed,
-including SR-AUD-012, 146, 150, 151, 204, 210, 237, 240, 245, 280 and 326.
-The three new repairs are lifetime-safe `ReadOnlyObservableCollection` and
-`Regex::NextMatch`, plus full-domain `RandomNumberGenerator::GetInt32`
-arithmetic. See `docs/AuditFindingsReconciliation.md`.
+The audit index was reconciled against `next`: **343 remediated, 19 accepted-deviation,
+2 false-positive, 0 confirmed, 0 confirmed (design-complete), 364 total**. Every one of the
+previous 71 `confirmed*` rows was reviewed against current implementation and tests. Already-fixed
+rows now cite their closing work; real internal defects were repaired; practical-subset limits are
+explicit accepted deviations. SR-AUD-071/071b is internally consistent. The final diff review also
+closed residual `Socket`, `Timer` and `Process::WaitForExit()` lifetime/order defects. See
+`docs/AuditFindingsReconciliation.md`.
 
 ## What closed the queue
 

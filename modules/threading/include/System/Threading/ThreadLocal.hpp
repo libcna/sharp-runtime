@@ -123,7 +123,7 @@ namespace System::Threading {
     public:
         /** Constructs a ThreadLocal with default-constructed values. */
         ThreadLocal() = default;
-        /** Constructs a ThreadLocal; the trackAllValues flag is accepted but not used. */
+        /** Constructs a ThreadLocal; when requested, Values tracks values created by every thread. */
         explicit ThreadLocal(bool trackAllValues) : trackAllValues_(trackAllValues) {}
         /**
          * @brief Constructs a ThreadLocal that calls valueFactory to create the initial value.

@@ -2,6 +2,11 @@
 
 # Remaining approval decisions — authoritative packet (2026-08-02)
 
+> **Historical approval snapshot.** This packet was authoritative on 2026-08-02, but its
+> present-tense pending/blocked states are no longer current. The decisions subsequently landed.
+> Use `plan.sqlite3` for current ticket state and `docs/AuditFindingsReconciliation.md` for the
+> final audit disposition; only #1773, #1962 and #2381 remain externally blocked.
+
 ## 1. Authority, scope, and how to use this packet
 
 This file supersedes its earlier six-group packet. Groups A, D, E, and F are

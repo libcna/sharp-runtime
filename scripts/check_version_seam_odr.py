@@ -5,13 +5,19 @@
 
 A *test-only access seam* is a class template that a production header
 DECLARES inside ``namespace SharpRuntime::Testing`` and never defines, and that
-one or more production classes befriend. Two exist today:
+one or more production classes befriend. The current examples include:
 
 * ``CollectionVersionAccess`` -- declared by
   ``System/Collections/detail/MutationCounter.hpp``, befriended by fifteen
   collections and by ``detail::BasicMutationCounter``;
 * ``SortedSetVersionAccess`` -- declared by
   ``System/Collections/Generic/SortedSet.hpp``.
+* ``KeyMaterialAccess`` -- declared by the security-cryptography secure-memory
+  detail header.
+* ``TimerStartAccess`` -- declared by ``System/Timers/Timer.hpp`` for the
+  deterministic paused-worker publication regression.
+* ``SocketAsyncStartAccess`` -- declared by ``System/Net/Sockets/Socket.hpp``
+  for deterministic caller-side async-registration rollback coverage.
 
 Because the declaration is production and the definition is test-only, a
 consumer can never name a complete type -- which is the point. But nothing in

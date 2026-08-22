@@ -39,6 +39,12 @@ to an equal element, and re-rendering is **idempotent** — a second pass change
 already in the renderer's canonical form round-trips byte for byte. A caller using `GetRawText` as a
 value carrier is unaffected; only one reading it as *source text* is.
 
+The same representation limit applies to `JsonProperty::ToString()`. .NET returns the original
+property slice beginning at the opening quote of its name and ending at the value. This port now
+returns the complete property in canonical re-rendered form — JSON-escaped name, `:`, and the
+re-rendered value — so it no longer drops the name and separator, but it still cannot preserve the
+source's whitespace or escape spelling. For example, `"a" : 1e+01` becomes `"a":10.0`.
+
 ## Pins
 
 `JsonGatedBehaviourPins.PIN2118GetRawTextReRendersRatherThanReturningSourceText` was **renamed and

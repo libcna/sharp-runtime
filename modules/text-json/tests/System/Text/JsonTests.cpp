@@ -108,6 +108,16 @@ TEST(JsonTests, EnumerateObject_PreservesDocumentOrder) {
     EXPECT_EQ(names[2], "m");
 }
 
+TEST(JsonTests, JsonPropertyToStringIncludesEscapedNameSeparatorAndCanonicalValue) {
+    auto doc = JsonDocument::Parse(R"({"a\"b" : { "nested" : 1e+01 }})");
+    const auto properties = doc->getRootElementProperty().EnumerateObject();
+    ASSERT_EQ(properties.size(), 1u);
+
+    EXPECT_EQ(properties[0].getNameProperty(), "a\"b");
+    EXPECT_EQ(properties[0].ToString(), R"("a\"b":{"nested":10.0})");
+    EXPECT_NO_THROW((void)JsonDocument::Parse("{" + properties[0].ToString() + "}"));
+}
+
 TEST(JsonTests, TryGetPropertyFound) {
     auto doc = JsonDocument::Parse(R"({"key":"value"})");
     System::Text::Json::JsonElement out;

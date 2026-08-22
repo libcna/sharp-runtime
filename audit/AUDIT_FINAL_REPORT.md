@@ -1,5 +1,10 @@
 # Sharp Runtime audit final report
 
+> **Historical audit-closure snapshot (2026-07-25).** The counts and present-tense status
+> statements below describe the evidence-only audit at its original closure, before remediation.
+> Current dispositions are authoritative in [AUDIT_FINDINGS_INDEX.md](AUDIT_FINDINGS_INDEX.md)
+> and [the final reconciliation](../docs/AuditFindingsReconciliation.md).
+
 ## Outcome
 
 The evidence-only repository audit is complete. Every one of the 1,748

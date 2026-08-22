@@ -32,6 +32,7 @@
 #include <string>
 #include <vector>
 
+#include "TestTemporaryDirectory.hpp"
 #include "System/Xml/Linq/SaveOptions.hpp"
 #include "System/Xml/Linq/XAttribute.hpp"
 #include "System/Xml/Linq/XDocument.hpp"
@@ -347,7 +348,8 @@ TEST(XLinqNamespaceTests, RoundTrip_ThroughTheDocumentDoor) {
 }
 
 TEST(XLinqNamespaceTests, RoundTrip_ThroughSaveToFile) {
-    const std::string path = "build-tmp/2197_ns_probe.xml";
+    SharpRuntime::Tests::TestTemporaryDirectory temporary;
+    const std::string path = temporary.path("namespace-save.xml");
     auto root = std::make_shared<XElement>(XNamespace::Get("urn:file") + "root");
     root->Add(std::make_shared<XAttribute>(XNamespace::Get("urn:file") + "a", "1"));
     ASSERT_NO_THROW(root->Save(path, SaveOptions::DisableFormatting));
@@ -355,7 +357,6 @@ TEST(XLinqNamespaceTests, RoundTrip_ThroughSaveToFile) {
     ASSERT_NE(back, nullptr);
     EXPECT_EQ(back->getNameProperty(), XName("urn:file", "root"));
     ASSERT_NE(attributeNamed(back, XName("urn:file", "a")), nullptr);
-    std::remove(path.c_str());
 }
 
 // --- The two doors must agree ------------------------------------------------------------------

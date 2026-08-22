@@ -26,6 +26,7 @@ class FixtureRepository:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.module_directories: list[str] = []
+        self.allowlist = '{"dependencies": []}\n'
 
     def add_module(
         self,
@@ -35,6 +36,9 @@ class FixtureRepository:
         public_dependencies: tuple[str, ...] = (),
         private_dependencies: tuple[str, ...] = (),
         legacy_dependencies: tuple[str, ...] = (),
+        test_dependencies: tuple[str, ...] = (),
+        module_type: str = "STATIC",
+        target: str | None = None,
     ) -> None:
         self.module_directories.append(directory)
         module_root = self.root / "modules" / directory
@@ -43,8 +47,8 @@ class FixtureRepository:
         lines = [
             "sharp_runtime_register_module(",
             f"    NAME {name}",
-            f"    TARGET fixture_{directory.replace('-', '_')}",
-            "    TYPE STATIC",
+            f"    TARGET {target or 'fixture_' + directory.replace('-', '_')}",
+            f"    TYPE {module_type}",
         ]
         if legacy_dependencies:
             lines.append("    DEPENDENCIES " + " ".join(legacy_dependencies))
@@ -56,6 +60,8 @@ class FixtureRepository:
             lines.append(
                 "    PRIVATE_DEPENDENCIES " + " ".join(private_dependencies)
             )
+        if test_dependencies:
+            lines.append("    TEST_DEPENDENCIES " + " ".join(test_dependencies))
         lines.append(")")
         (module_root / "CMakeLists.txt").write_text(
             "\n".join(lines) + "\n",
@@ -90,7 +96,7 @@ class FixtureRepository:
             encoding="utf-8",
         )
         (cmake_dir / "SharpRuntimeModuleDependencyAllowlist.json").write_text(
-            '{"dependencies": []}\n',
+            self.allowlist,
             encoding="utf-8",
         )
 
@@ -260,6 +266,175 @@ class ModuleBoundaryValidatorTests(unittest.TestCase):
         self.assertTrue(
             any("declares 'Core' private" in problem
                 for problem in report.problems)
+        )
+
+    def test_private_include_requires_private_or_public_dependency(self) -> None:
+        self.fixture.add_module("core", "Core")
+        self.fixture.write_header("core", "System/Object.hpp")
+        self.fixture.add_module("feature", "Feature")
+        self.fixture.write_header("feature", "System/Feature.hpp")
+        self.fixture.write_source(
+            "feature",
+            "System/Feature.cpp",
+            '#include "System/Object.hpp"\n',
+        )
+        report = self.validate()
+        self.assertTrue(
+            any("privately includes 'Core' without a dependency" in problem
+                for problem in report.problems),
+            report.problems,
+        )
+
+    def test_implementation_only_include_cannot_silently_widen_visibility(self) -> None:
+        self.fixture.add_module("core", "Core")
+        self.fixture.write_header("core", "System/Object.hpp")
+        self.fixture.add_module(
+            "feature",
+            "Feature",
+            public_dependencies=("Core",),
+        )
+        self.fixture.write_header("feature", "System/Feature.hpp")
+        self.fixture.write_source(
+            "feature",
+            "System/Feature.cpp",
+            '#include "System/Object.hpp"\n',
+        )
+        report = self.validate()
+        self.assertTrue(
+            any("only in implementation sources but declares it public" in problem
+                for problem in report.problems),
+            report.problems,
+        )
+
+    def test_test_include_requires_test_dependency(self) -> None:
+        self.fixture.add_module("core", "Core")
+        self.fixture.write_header("core", "System/Object.hpp")
+        self.fixture.add_module("feature", "Feature")
+        self.fixture.write_header("feature", "System/Feature.hpp")
+        self.fixture.write_test(
+            "feature",
+            "System/FeatureTests.cpp",
+            '#include "System/Object.hpp"\n',
+        )
+        report = self.validate()
+        self.assertTrue(
+            any("without TEST_DEPENDENCIES" in problem for problem in report.problems),
+            report.problems,
+        )
+
+    def test_stale_test_dependency_fails(self) -> None:
+        self.fixture.add_module("core", "Core")
+        self.fixture.write_header("core", "System/Object.hpp")
+        self.fixture.add_module(
+            "feature",
+            "Feature",
+            test_dependencies=("Core",),
+        )
+        self.fixture.write_header("feature", "System/Feature.hpp")
+        report = self.validate()
+        self.assertTrue(
+            any("declares stale test dependency 'Core'" in problem
+                for problem in report.problems),
+            report.problems,
+        )
+
+    def test_unknown_production_and_test_dependencies_fail(self) -> None:
+        self.fixture.add_module(
+            "feature",
+            "Feature",
+            private_dependencies=("MissingProduction",),
+            test_dependencies=("MissingTest",),
+        )
+        self.fixture.write_header("feature", "System/Feature.hpp")
+        report = self.validate()
+        self.assertTrue(
+            any("unknown dependency 'MissingProduction'" in problem
+                for problem in report.problems),
+            report.problems,
+        )
+        self.assertTrue(
+            any("unknown test dependency 'MissingTest'" in problem
+                for problem in report.problems),
+            report.problems,
+        )
+
+    def test_mixed_dependency_syntax_and_interface_private_dependency_fail(self) -> None:
+        self.fixture.add_module("core", "Core")
+        self.fixture.write_header("core", "System/Object.hpp")
+        self.fixture.add_module(
+            "mixed",
+            "Mixed",
+            public_dependencies=("Core",),
+            legacy_dependencies=("Core",),
+        )
+        self.fixture.write_header("mixed", "System/Mixed.hpp")
+        self.fixture.add_module(
+            "interface",
+            "Interface",
+            private_dependencies=("Core",),
+            module_type="INTERFACE",
+        )
+        self.fixture.write_header("interface", "System/Interface.hpp")
+        report = self.validate()
+        self.assertTrue(
+            any("mixes legacy DEPENDENCIES" in problem for problem in report.problems),
+            report.problems,
+        )
+        self.assertTrue(
+            any("INTERFACE module 'interface' cannot have PRIVATE_DEPENDENCIES" in problem
+                for problem in report.problems),
+            report.problems,
+        )
+
+    def test_duplicate_component_name_and_target_fail(self) -> None:
+        self.fixture.add_module("first", "Duplicate", target="fixture_duplicate")
+        self.fixture.write_header("first", "System/First.hpp")
+        self.fixture.add_module("second", "Duplicate", target="fixture_duplicate")
+        self.fixture.write_header("second", "System/Second.hpp")
+        report = self.validate()
+        self.assertTrue(
+            any("component name 'Duplicate' is owned by both" in problem
+                for problem in report.problems),
+            report.problems,
+        )
+        self.assertTrue(
+            any("target 'fixture_duplicate' is owned by both" in problem
+                for problem in report.problems),
+            report.problems,
+        )
+
+    def test_allowlist_must_reference_a_declared_edge_with_matching_visibility(self) -> None:
+        self.fixture.add_module("core", "Core")
+        self.fixture.write_header("core", "System/Object.hpp")
+        self.fixture.add_module(
+            "feature",
+            "Feature",
+            private_dependencies=("Core",),
+        )
+        self.fixture.write_header("feature", "System/Feature.hpp")
+        self.fixture.write_source(
+            "feature",
+            "System/Feature.cpp",
+            '#include "System/Object.hpp"\n',
+        )
+        self.fixture.allowlist = textwrap.dedent(
+            """\
+            {"dependencies": [
+              {"module": "Feature", "dependency": "Core", "visibility": "PUBLIC", "reason": "fixture"},
+              {"module": "Feature", "dependency": "Missing", "visibility": "PRIVATE", "reason": "fixture"}
+            ]}
+            """
+        )
+        report = self.validate()
+        self.assertTrue(
+            any("claims PUBLIC visibility but declaration is private" in problem
+                for problem in report.problems),
+            report.problems,
+        )
+        self.assertTrue(
+            any("Feature -> Missing is not declared" in problem
+                for problem in report.problems),
+            report.problems,
         )
 
 

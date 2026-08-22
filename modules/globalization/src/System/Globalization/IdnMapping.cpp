@@ -2,14 +2,20 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Globalization/IdnMapping.hpp"
+#include "System/Globalization/detail/UnicodeCategoryLookup.hpp"
 #include "System/detail/Utf8Scalar.hpp"
-#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <vector>
 #include <limits>
 
 namespace System::Globalization {
+
+namespace {
+    constexpr char32_t asciiLower(char32_t c) noexcept {
+        return c >= U'A' && c <= U'Z' ? c + (U'a' - U'A') : c;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // UTF-8 helpers
@@ -112,7 +118,7 @@ std::string IdnMapping::encodeLabel(const std::u32string& label) {
     int numBasic = 0;
     for (char32_t c : label) {
         if (isBasic(c)) {
-            out += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            out += static_cast<char>(asciiLower(c));
             ++numBasic;
         }
     }
@@ -182,7 +188,7 @@ std::u32string IdnMapping::decodeLabel(const std::string& label) {
         for (int i = 0; i < delimPos; ++i) {
             if (static_cast<unsigned char>(label[i]) > 0x7F)
                 throw System::ArgumentException("IdnMapping: non-ASCII in basic portion.");
-            out += static_cast<char32_t>(std::tolower(static_cast<unsigned char>(label[i])));
+            out += asciiLower(static_cast<unsigned char>(label[i]));
         }
         asciiStart = delimPos + 1;
     }
@@ -222,7 +228,8 @@ namespace {
     bool equalsIgnoreCaseAscii(const std::string& a, const std::string& b) {
         if (a.size() != b.size()) return false;
         for (size_t i = 0; i < a.size(); ++i)
-            if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i])))
+            if (asciiLower(static_cast<unsigned char>(a[i])) !=
+                asciiLower(static_cast<unsigned char>(b[i])))
                 return false;
         return true;
     }
@@ -232,6 +239,16 @@ std::string IdnMapping::GetAscii(const std::string& unicode) const {
     if (unicode.empty()) throw System::ArgumentException("IdnMapping: empty input.");
 
     std::u32string input = utf8ToCodePoints(unicode);
+    if (!allowUnassigned_) {
+        for (char32_t codePoint : input) {
+            if (detail::LookupUnicodeCategory(static_cast<std::uint32_t>(codePoint)) ==
+                UnicodeCategory::OtherNotAssigned) {
+                throw System::ArgumentException(
+                    "IdnMapping: input contains a Unicode code point unassigned in UCD 16.0.",
+                    "unicode");
+            }
+        }
+    }
     std::string result;
     result.reserve(unicode.size());
 
@@ -265,9 +282,11 @@ std::string IdnMapping::GetAscii(const std::string& unicode) const {
         }
 
         if (allAscii) {
-            // Pass through lowercased
-            for (char32_t c : label)
-                result += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            // Pass through with deterministic ASCII casing; IDN behavior must not depend on the
+            // process-global C locale.
+            for (char32_t c : label) {
+                result += static_cast<char>(asciiLower(c));
+            }
         } else {
             // Encode as Punycode
             std::string encoded = "xn--";

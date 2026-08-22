@@ -29,18 +29,13 @@ namespace System {
      * C++ counterpart of .NET System.Half.
      *
      * @note Status: Partial. Deviations from .NET:
-     *   - The ~40 explicit/implicit conversion operators .NET defines to/from every other
-     *     numeric primitive (byte, sbyte, short, ushort, uint, ulong, nint, nuint, char,
-     *     decimal, Int128, UInt128, plus their `checked` variants — a C# 11 language
-     *     feature with no C++ equivalent) are not ported; every one of them is defined in
-     *     .NET as a trivial `(Half)(float)value` round-trip, so callers can do the same
-     *     via ToSingle()/FromSingle() in one line. float and double are ported directly.
-     *   - The ~40 static math functions mirroring `System.MathF` (Exp, Log, Sin, Cos, Sqrt,
-     *     Pow, Round, Ceiling, Floor, Truncate, Lerp, FusedMultiplyAdd, BitIncrement/
-     *     Decrement, ReciprocalEstimate, ...) are not ported for the same reason: widen via
-     *     ToSingle(), call the existing System::Single/std::/MathF equivalent, narrow back
-     *     via FromSingle(). Duplicating the entire float math surface as Half overloads
-     *     adds no capability, only near-identical forwarding boilerplate.
+     *   - Ordinary conversions to and from the supported integral, float and double types are
+     *     ported. `checked` conversion operators have no C++ language counterpart, and this
+     *     runtime does not define the .NET `nint`, `nuint`, `decimal`, `Int128` or `UInt128`
+     *     conversion surface here. The .NET-implicit byte/sbyte constructors are explicit in
+     *     C++ to avoid ambiguous integer conversions (ticket #2395).
+     *   - The `System.MathF`-mirroring static surface supported by this runtime is ported by
+     *     widening to `float` and narrowing back to Half (ticket #2384).
      *   - Generic math interface conformance (INumber&lt;Half&gt;, IFloatingPointIeee754&lt;Half&gt;,
      *     IMinMaxValue&lt;Half&gt;, etc.) is out of scope, consistent with this codebase's
      *     position on C# generic-math machinery elsewhere.
@@ -186,47 +181,6 @@ namespace System {
         [[nodiscard]] double ToDouble() const noexcept { return static_cast<double>(ToSingle()); }
 
         /** @brief Explicit conversion to a 32-bit float. */
-        // -----------------------------------------------------------------------------------
-        // #2384 unit 3: the conversion operators. THIS UNIT LANDS THE `from Half` DIRECTION ONLY,
-        // and the `to Half` direction is BLOCKED ON A DECISION -- measured, not guessed.
-        //
-        // .NET declares 43 conversions on Half. Four groups cannot be transcribed here:
-        //
-        //  1. THE 13 `operator checked` VARIANTS. C# selects them inside a `checked` context;
-        //     C++ has no such context and no way to declare a conversion distinguished only by
-        //     it. Not a cost question -- there is nothing to write.
-        //
-        //  2. `nint` / `nuint`. Measured on this platform: `std::intptr_t` IS `long`, and
-        //     `longcs` is `int64_t`, which is also `long`. A separate overload is a REDEFINITION,
-        //     not an addition -- so these conversions exist, through `longcs`/`ulongcs`, which
-        //     are the same type.
-        //
-        //  3. `ushort` -> Half. THE SIGNATURE IS ALREADY TAKEN, BY THE OPPOSITE MEANING:
-        //     `Half(uint16_t)` above is the RAW BIT PATTERN, while .NET's
-        //     `explicit operator Half(ushort)` is `(Half)(float)value`. `ushortcs` and `uint16_t`
-        //     are the same type, so the two cannot coexist.
-        //
-        //  4. EVERY OTHER `to Half` INTEGER CONVERSION, for a reason measured rather than
-        //     predicted. Adding `explicit Half(intcs)` makes C++ overload resolution prefer it
-        //     over `Half(uint16_t)` for an INT LITERAL -- an exact match beats a conversion -- so
-        //     `Half(0x7BFF)` silently stops meaning "these bits" and starts meaning "the number
-        //     31743". This type's OWN constants are written that way, and landing the
-        //     constructors turned 44 shipped tests red, including `Half::MaxValue` and
-        //     `Half::NegativeInfinity` themselves. Resolving it means renaming the raw-bits
-        //     constructor, which is a public source break with a SILENT meaning change across 66
-        //     first-party sites -- a decision, not a transcription. Ticket #2395.
-        //
-        // The `from Half` direction below has none of those problems: a conversion operator
-        // cannot be hijacked by a literal and collides with nothing.
-        //
-        // ONE DELIBERATE DIVERGENCE IS ALREADY DECIDABLE, and it belongs with #2395: .NET makes
-        // the `byte` and `sbyte` conversions IMPLICIT. Reproduced as implicit converting
-        // constructors they make EVERY int argument ambiguous -- measured: `int -> bytecs -> Half`
-        // and `int -> sbytecs -> Half` are equally viable, because C++ permits a standard
-        // conversion before a user-defined one and C# does not. So whatever #2395 decides, those
-        // two must be `explicit`: what is lost is the IMPLICITNESS, never the conversion.
-        // -----------------------------------------------------------------------------------
-
         // -----------------------------------------------------------------------------------
         // #2384 unit 3, the `to` direction -- unblocked by #2395.
         //

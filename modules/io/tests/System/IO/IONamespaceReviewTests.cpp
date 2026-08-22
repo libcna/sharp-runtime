@@ -7,6 +7,8 @@
 //
 //   #2101 / SR-AUD-347, cause I-C — a raw std::filesystem_error escaped FileInfo("") and
 //          DirectoryInfo(""), a std:: exception crossing a System-shaped public API.
+//   Final close-out sweep — the same exception leak remained in Directory/DirectoryInfo
+//          enumeration when opening or advancing a directory iterator failed.
 //   #2103 / SR-AUD-345, cause I-F — FileInfo::Delete DELETED a directory while its sibling
 //          File::Delete threw on the same input. The only finding in this namespace that
 //          destroys user data.
@@ -40,17 +42,20 @@
 #include <condition_variable>
 #include <filesystem>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 #include <sstream>
 
+#include "TestTemporaryDirectory.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/BinaryData.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/ObjectDisposedException.hpp"
+#include "System/UnauthorizedAccessException.hpp"
 #include "System/IO/Directory.hpp"
 #include "System/IO/DirectoryInfo.hpp"
 #include "System/IO/File.hpp"
@@ -72,17 +77,15 @@ using namespace System::IO;
 
 namespace {
 
-/// A unique directory under the repository-local build tree — never /tmp, per the build-resource
-/// policy, and never a fixed path that two runs could collide on.
+/// A directory inside an atomically-created per-run scratch root, so parallel invocations never
+/// pre-delete or mutate one another's fixture.
 class IoReviewFixture : public ::testing::Test {
 protected:
+    SharpRuntime::Tests::TestTemporaryDirectory temporary;
     std::filesystem::path root;
 
     void SetUp() override {
-        const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
-        root = std::filesystem::path("build-tmp") / "io_review" /
-               (std::string(info->test_suite_name()) + "_" + info->name());
-        std::filesystem::remove_all(root);
+        root = temporary.path("io-review");
         std::filesystem::create_directories(root);
     }
     void TearDown() override {
@@ -141,6 +144,50 @@ void ExpectThrowsNaming(F&& call, const char* expectedParam, const char* what) {
         ADD_FAILURE() << what << ": wrong exception type: " << e.what();
     }
 }
+
+#if !defined(_WIN32)
+
+/// Restricts one test-owned directory and restores its original mode even on an assertion exit.
+class ScopedDirectoryMode final {
+public:
+    ScopedDirectoryMode(const std::filesystem::path& path, mode_t mode) : path_(path) {
+        struct stat status {};
+        if (::stat(path_.c_str(), &status) != 0) {
+            throw std::runtime_error("could not inspect IO-test directory permissions");
+        }
+        originalMode_ = status.st_mode & 07777;
+        if (::chmod(path_.c_str(), mode) != 0) {
+            throw std::runtime_error("could not restrict IO-test directory permissions");
+        }
+    }
+
+    ~ScopedDirectoryMode() { (void)::chmod(path_.c_str(), originalMode_); }
+
+    ScopedDirectoryMode(const ScopedDirectoryMode&) = delete;
+    ScopedDirectoryMode& operator=(const ScopedDirectoryMode&) = delete;
+
+private:
+    std::filesystem::path path_;
+    mode_t originalMode_{};
+};
+
+/// Restores the process current directory after a removed-working-directory error probe.
+class ScopedCurrentDirectory final {
+public:
+    ScopedCurrentDirectory() : original_(std::filesystem::current_path()) {}
+    ~ScopedCurrentDirectory() {
+        std::error_code error;
+        std::filesystem::current_path(original_, error);
+    }
+
+    ScopedCurrentDirectory(const ScopedCurrentDirectory&) = delete;
+    ScopedCurrentDirectory& operator=(const ScopedCurrentDirectory&) = delete;
+
+private:
+    std::filesystem::path original_;
+};
+
+#endif
 
 } // namespace
 
@@ -210,20 +257,81 @@ TEST_F(IoReviewFixture, AWhitespaceOnlyPathIsStillAcceptedDeliberately) {
     EXPECT_NO_THROW({ FileInfo fi("   "); (void)fi.getExistsProperty(); });
 }
 
-TEST_F(IoReviewFixture, TheAlreadyGuardedNeighbouringDoorsStayGuarded) {
-    // Measured during the review (build-probe/2101_probe2_before.log): the sites a grep for
-    // throwing std::filesystem calls flagged — DirectoryInfo's enumeration and the Copy/Move
-    // destination handling — were ALREADY guarded and threw System exceptions. #2101's real
-    // scope was one door, not seven. These assertions keep that true.
-    DirectoryInfo missing(under("no_such_dir"));
-    EXPECT_THROW((void)missing.GetFiles(), System::Exception);
-    EXPECT_THROW((void)missing.GetDirectories(), System::Exception);
+TEST_F(IoReviewFixture, MissingDirectoryEnumerationUsesDirectoryNotFoundAtEveryDoor) {
+    // A pre-check used to make this row look guarded while the live iterator-error path below
+    // still leaked std::filesystem_error. The public taxonomy is now pinned at all six eager
+    // enumeration doors rather than merely asserting that some System exception occurred.
+    const std::string missingPath = under("no_such_dir");
+    EXPECT_THROW((void)Directory::GetFiles(missingPath), DirectoryNotFoundException);
+    EXPECT_THROW((void)Directory::GetFiles(missingPath, "*"), DirectoryNotFoundException);
+    EXPECT_THROW((void)Directory::GetDirectories(missingPath), DirectoryNotFoundException);
 
+    DirectoryInfo missing(missingPath);
+    EXPECT_THROW((void)missing.GetFiles(), DirectoryNotFoundException);
+    EXPECT_THROW((void)missing.GetFileNames(), DirectoryNotFoundException);
+    EXPECT_THROW((void)missing.GetDirectories(), DirectoryNotFoundException);
+}
+
+TEST_F(IoReviewFixture, CopyToEmptyDestinationStillUsesASystemException) {
     const std::string file = under("src.txt");
     File::WriteAllText(file, "x");
     FileInfo fi(file);
     EXPECT_THROW((void)fi.CopyTo(""), System::Exception);
 }
+
+#if !defined(_WIN32)
+
+TEST_F(IoReviewFixture, PermissionDeniedEnumerationUsesUnauthorizedAccessAtEveryDoor) {
+    const std::filesystem::path denied = root / "denied";
+    std::filesystem::create_directory(denied);
+    File::WriteAllText((denied / "inside.txt").string(), "contents");
+    DirectoryInfo info(denied.string());
+
+    ScopedDirectoryMode restricted(denied, 0000);
+    std::error_code probeError;
+    std::filesystem::directory_iterator probe(denied, probeError);
+    (void)probe;
+    if (!probeError) {
+        GTEST_SKIP() << "the test process can enumerate a mode-000 directory";
+    }
+    ASSERT_EQ(probeError, std::make_error_code(std::errc::permission_denied));
+
+    EXPECT_THROW((void)Directory::GetFiles(denied.string()),
+                 System::UnauthorizedAccessException);
+    EXPECT_THROW((void)Directory::GetFiles(denied.string(), "*"),
+                 System::UnauthorizedAccessException);
+    EXPECT_THROW((void)Directory::GetDirectories(denied.string()),
+                 System::UnauthorizedAccessException);
+    EXPECT_THROW((void)info.GetFiles(), System::UnauthorizedAccessException);
+    EXPECT_THROW((void)info.GetFileNames(), System::UnauthorizedAccessException);
+    EXPECT_THROW((void)info.GetDirectories(), System::UnauthorizedAccessException);
+}
+
+TEST_F(IoReviewFixture, RemovedCurrentDirectoryFailuresUseIOException) {
+    const std::filesystem::path vanished = root / "vanished-cwd";
+    const std::filesystem::path movable = root / "movable";
+    std::filesystem::create_directory(vanished);
+    std::filesystem::create_directory(movable);
+    DirectoryInfo movableInfo(movable.string());
+
+    ScopedCurrentDirectory restore;
+    std::error_code error;
+    std::filesystem::current_path(vanished, error);
+    ASSERT_FALSE(error) << error.message();
+    const bool removed = std::filesystem::remove(vanished, error);
+    if (error || !removed) {
+        GTEST_SKIP() << "this platform cannot remove the process current directory: "
+                     << error.message();
+    }
+
+    std::error_code nativeError;
+    (void)std::filesystem::current_path(nativeError);
+    ASSERT_TRUE(nativeError) << "the native error premise did not reproduce";
+    EXPECT_THROW((void)Directory::GetCurrentDirectory(), IOException);
+    EXPECT_THROW(movableInfo.MoveTo("relative-destination"), IOException);
+}
+
+#endif
 
 // ===========================================================================
 // #2103 / SR-AUD-345 — FileInfo::Delete must not delete a directory
@@ -494,8 +602,8 @@ TEST_F(RandomAccessFixture, AWriteToAReadOnlyDescriptorFailsWithItsNativeReason)
 //
 // Split out of #2098 by measurement: this type ALREADY has `bool isOpen_`, Close() already
 // clears it, and getCanRead/getCanWrite/getCanSeek already consult it, so the repair is pure
-// logic with ZERO object-layout change and needs no approval. The four text wrappers of #2098
-// are a different matter and stay blocked on Approval IO-1.
+// logic with ZERO object-layout change and needed no approval. The four text wrappers were a
+// different matter at the time; #2098 later landed them under Approval IO-1 / SA-3.
 // ===========================================================================
 
 namespace {
@@ -596,10 +704,10 @@ TEST(UnmanagedMemoryStreamClosedStateTests, EveryRejectionCarriesTheSameClosedSt
 // ===========================================================================
 // #2098's layout PIN — landed early, by #2108
 //
-// #2098's acceptance criteria require "a layout pin covering all five types plus the two base
-// classes". Landing it NOW, while #2098 is still blocked on Approval IO-1, is what makes that
-// approval's cost auditable: the approval sentence quotes StringWriter 384 -> 392 and says the
-// other three are unchanged, and this pin is what proves the "before" half of that claim.
+// #2098's acceptance criteria required "a layout pin covering all five types plus the two base
+// classes". This section landed early while approval was pending, then #2098 landed under
+// Approval IO-1 / SA-3. The pin remains the evidence for the measured StringWriter 384 -> 392
+// growth and for the other three wrapper layouts remaining unchanged.
 //
 // It deliberately pins RELATIONSHIPS and a probe-struct comparison rather than literal byte
 // counts wherever it can, per docs/SystemNetWebSocketsNamespaceReviewPlan.md §11.
@@ -2012,8 +2120,7 @@ TEST_F(WatcherReconfigurationFixture, AnInvalidNotifyFilterIsRejectedBeforeAnyth
 #endif // __linux__
 
 // ===========================================================================================
-// #2104 — the pins. This ticket changes NO production behaviour; it makes the doc-comments true
-// and pins what a future resolution of a DEFERRED or BLOCKED item would silently change.
+// #2104 — the original pins, retained after the two deferred questions were resolved.
 //
 // Three subjects, each pinned for a different reason:
 //
@@ -2022,17 +2129,13 @@ TEST_F(WatcherReconfigurationFixture, AnInvalidNotifyFilterIsRejectedBeforeAnyth
 //       cycles, above). The second was measured and left unpinned — so it is pinned here, and
 //       plan §14 requires the number to be REPORTED, not merely asserted.
 //
-//   (2) #2105 (deferred) — whether a handler can be invoked after EnableRaisingEvents = false
-//       RETURNS. What is pinned below is the OBSERVABLE behaviour only. #2105's own question is
-//       NOT answered here and must not be read into these tests: it asks about a handler already
-//       EXECUTING when the setter is called, which needs TSan plus a blocking-handler harness,
-//       and its acceptance criteria says so.
+//   (2) #2105 — these were the initial observable pins. #2105 later measured and repaired the
+//       self-stop batch-dispatch path, and the dedicated Fix2105_* cases above now cover the
+//       formerly deferred question directly.
 //
-//   (3) #2106 (deferred) — BinaryData decodes invalid UTF-8 as raw bytes (SR-AUD-185) and COPIES
-//       where .NET's ReadOnlyMemory overload wraps (SR-AUD-186). Plan §6.1 records that
-//       SR-AUD-186's premise is INVERTED: .NET's behaviour is the aliasing one and the port's is
-//       the defensive one, so "fixing" it means making BinaryData alias caller memory it does not
-//       own. Neither is decidable with the reference tree absent. Both are pinned as they stand.
+//   (3) #2106 — the UTF-8 decoding half was repaired; the owning-copy half was retained as an
+//       explicit C++ lifetime deviation because a managed alias is GC-rooted while a borrowed
+//       vector view is not. The final BinaryData section below pins both outcomes.
 // ===========================================================================================
 
 TEST_F(IoReviewFixture, AThrowingFileStreamConstructorLeaksNoDescriptor) {
@@ -2065,7 +2168,7 @@ TEST_F(IoReviewFixture, AThrowingFileStreamConstructorLeaksNoDescriptor) {
 #if defined(__linux__)
 
 TEST_F(WatcherReconfigurationFixture, NoHandlerRunsForActivityAfterEnableRaisingEventsGoesFalse) {
-    // #2105 PIN — the OBSERVABLE half only. Deterministic: after the setter returns, activity in
+    // #2105's original observable pin. Deterministic: after the setter returns, activity in
     // the watched directory is followed by a RE-ENABLED sentinel. Once the sentinel arrives the
     // watcher is demonstrably live again, so anything the disabled window was going to report
     // would already have been reported. No sleep is used as synchronisation.
@@ -2099,8 +2202,8 @@ TEST_F(WatcherReconfigurationFixture, NoHandlerRunsForActivityAfterEnableRaising
 
 TEST_F(WatcherReconfigurationFixture, DisablingIsIdempotentAndTheWatcherStaysUsableAfterwards) {
     // The second observable half: disabling twice is safe, and the watcher is not left in a state
-    // that cannot be re-armed. Pinned because #2105's eventual answer could plausibly change the
-    // disable path (a drain, a flag, a second thread), and any of those would show up here.
+    // that cannot be re-armed. Retained after #2105 landed because the repaired per-event gate
+    // must not leave the watcher disabled permanently.
     WatchRecorder r;
     FileSystemWatcher w(dirA.string());
     subscribeAll(w, r);

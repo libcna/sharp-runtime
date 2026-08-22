@@ -80,8 +80,9 @@ public:
      *
      * @note **Narrowing since ticket #2063** (SR-AUD-316's reason half, cause NH-B). A reason
      * phrase is a protocol field; `"OK\r\nX-Injected: yes"` used to be accepted verbatim.
-     * The status-code *domain* is a separate, unapproved question — this constructor still
-     * accepts `-1` and `1000` (blocked ticket #2069, pinned by this ticket's suite).
+     * The status-code domain was subsequently closed by #2069: both the constructor and setter
+     * reject values below zero or above 999. That validation is independent of this field-text
+     * check and has its own boundary regressions.
      * See `docs/Migration-HttpControlCharacterRejection.md`.
      */
     void setReasonPhraseProperty(const std::string& v) {

@@ -163,13 +163,13 @@ TEST(DecimalTests2, Parse_NegativeZero_PreservesSign) {
 }
 
 // ---------------------------------------------------------------------------
-// SR-AUD-035 (#1857): parser — compatible sub-defects landed.
+// SR-AUD-035 (#1857/#1858): parser repairs.
 //   * leading/trailing whitespace is now skipped (pure widening);
 //   * excess fractional precision beyond scale 28 is rounded half-to-even
 //     instead of being silently discarded.
-// The comma-as-group-separator value change and the FormatException ->
-// OverflowException exception-type change stay BLOCKED on approval (#1858);
-// the two documentation tests below pin the CURRENT (pre-#1858) behaviour.
+// Ticket #1858 subsequently landed the comma-as-group-separator value change and
+// FormatException -> OverflowException taxonomy change; their inverted regressions
+// appear later in this file.
 // ---------------------------------------------------------------------------
 
 TEST(DecimalTests2, Parse_SkipsLeadingAndTrailingWhitespace) {

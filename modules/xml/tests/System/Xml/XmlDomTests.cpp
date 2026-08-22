@@ -4,7 +4,7 @@
 //
 // Coverage for the classic XmlDocument DOM API (XmlNode/XmlDocument/XmlElement/XmlAttribute/etc.).
 #include <gtest/gtest.h>
-#include <cstdio>
+#include "TestTemporaryDirectory.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
@@ -635,16 +635,16 @@ TEST(XmlDocumentTests, GetElementById_FindsMatchingElement) {
 }
 
 TEST(XmlDocumentTests, Save_ThenLoad_RoundTrips) {
+    SharpRuntime::Tests::TestTemporaryDirectory temporary;
     XmlDocument doc;
     doc.LoadXml("<root><child>value</child></root>");
-    std::string path = "/tmp/sharp_rt_xmldoc_roundtrip_test.xml";
+    const std::string path = temporary.path("roundtrip.xml");
     doc.Save(path);
 
     XmlDocument doc2;
     doc2.Load(path);
     ASSERT_NE(doc2.getDocumentElementProperty(), nullptr);
     EXPECT_EQ(doc2.getDocumentElementProperty()->getNameProperty(), "root");
-    std::remove(path.c_str());
 }
 
 // ===========================================================================

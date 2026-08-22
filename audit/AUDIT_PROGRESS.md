@@ -1,5 +1,10 @@
 # Audit progress
 
+> **Historical remediation log.** “Current state” below means the dated checkpoint at which this
+> chronological log was written, not current HEAD. Current dispositions are authoritative in
+> [AUDIT_FINDINGS_INDEX.md](AUDIT_FINDINGS_INDEX.md) and
+> [the final reconciliation](../docs/AuditFindingsReconciliation.md).
+
 ## Current state
 
 - Audit started: 2026-07-25.

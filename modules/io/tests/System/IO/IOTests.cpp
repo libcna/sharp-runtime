@@ -10,6 +10,7 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#include "TestTemporaryDirectory.hpp"
 #include "System/IO/Directory.hpp"
 #include "System/IO/File.hpp"
 #include "System/IO/FileMode.hpp"
@@ -54,7 +55,8 @@
 
 namespace {
     std::string tf(const char* name) {
-        return std::string("/tmp/sharp_rt_io_") + name;
+        static const SharpRuntime::Tests::TestTemporaryDirectory temporary;
+        return temporary.path(std::string("sharp_rt_io_") + name);
     }
 }
 

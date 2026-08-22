@@ -2,8 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
-#include <cstdio>
 #include <fstream>
+#include "TestTemporaryDirectory.hpp"
 #include "System/Xml/NameTable.hpp"
 #include "System/Xml/XmlNamespaceManager.hpp"
 #include "System/Xml/XmlParserContext.hpp"
@@ -18,13 +18,13 @@ namespace {
     // url), which never accepts raw XML text), so tests write to a temp file first.
     class TempXmlFile {
     public:
-        explicit TempXmlFile(const std::string& xml) : path_("/tmp/sharp_rt_xmltextreader_test.xml") {
+        explicit TempXmlFile(const std::string& xml) : path_(temporary_.path("input.xml")) {
             std::ofstream out(path_);
             out << xml;
         }
-        ~TempXmlFile() { std::remove(path_.c_str()); }
         [[nodiscard]] const std::string& path() const { return path_; }
     private:
+        SharpRuntime::Tests::TestTemporaryDirectory temporary_;
         std::string path_;
     };
 }

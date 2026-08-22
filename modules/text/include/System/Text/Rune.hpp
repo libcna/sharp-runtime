@@ -91,14 +91,15 @@ namespace System::Text {
         static bool IsWhiteSpace(Rune r) {
             static const uint32_t ws[] = {0x9,0xA,0xB,0xC,0xD,0x20,0x85,0xA0,0x1680,
                 0x2000,0x2001,0x2002,0x2003,0x2004,0x2005,0x2006,0x2007,0x2008,0x2009,
-                0x200A,0x2028,0x2029,0x202F,0x205F,0x3000,0xFEFF};
+                0x200A,0x2028,0x2029,0x202F,0x205F,0x3000};
             for (uint32_t w : ws) if (r.value_ == w) return true;
             return false;
         }
         // -------------------------------------------------------------------------------
-        // #2018 (SR-AUD-294, cause T-L). These six were ASCII-only while IsWhiteSpace above
+        // #2018 (SR-AUD-294, cause T-L). These members were ASCII-only while IsWhiteSpace above
         // was Unicode-aware, so the type contradicted itself. They now answer from the
-        // generated UCD 16.0 tables, as .NET does.
+        // generated UCD 16.0 tables, as .NET does; the same close-out also removed U+FEFF from
+        // IsWhiteSpace because .NET's Rune/Char white-space set excludes it.
         //
         // Each keeps .NET's OWN ASCII fast path (Rune.cs:1341-1426) rather than going straight
         // to the table. HONEST NOTE ON THE EVIDENCE: this is a proven EQUIVALENCE and a

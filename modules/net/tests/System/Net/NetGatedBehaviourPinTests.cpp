@@ -5,26 +5,22 @@
 // Ticket #2047 -- the mandatory disclosure-and-pins ticket of
 // docs/SystemNetNamespaceReviewPlan.md §13 item 7 and §15 completion criterion 2.
 //
-// This file pins the CURRENT behaviour of the four approval-gated System::Net decisions so none
-// of them can land silently, and so a reviewer reading the approval package can see exactly what
-// changes. NOTHING here endorses the current behaviour -- three of the four are defects. The
-// lesson these pins come from is #2022/#2028: two gated findings in System::Text had no test at
-// all, so their repairs could have shipped without any suite noticing.
+// This file began as pins for four approval-gated System::Net decisions. The decisions have since
+// landed (or, for #2043, are pinned in the named companion file), so these cases now assert the
+// resulting contracts rather than describing open defects. Keeping that history here records why
+// each boundary has direct regression coverage.
 //
-//   #2040 (SR-AUD-305 + SR-AUD-306, cause N-E) -- a cookie supplied by one origin with an
-//         unrelated explicit Domain is stored and later emitted for that unrelated domain; and
-//         Cookie's path/domain-accepting constructors leave the implicit flags SET, so container
-//         insertion overwrites what the caller passed.
-//   #2042 (SR-AUD-308, cause N-F) -- storage is unbounded: no capacity, per-domain capacity,
-//         maximum size, expiry cleanup or eviction.
-//   #2043 (SR-AUD-304's wildcard half, cause N-C) -- pinned separately in
-//         DnsLiteralAndDuplicateTests.cpp by #2039.
-//   #2044 (SR-AUD-309, cause N-G) -- HtmlEncode escapes exactly five ASCII characters and passes
-//         every non-ASCII byte through, while HtmlDecode already understands numeric character
-//         references and named entities the encoder never produces.
+//   #2040 (SR-AUD-305 + SR-AUD-306, cause N-E) -- explicit cookie domains are validated against
+//         the origin and constructor-supplied path/domain values remain explicit.
+//   #2042 (SR-AUD-308, cause N-F) -- storage enforces .NET's total, per-domain, value-size,
+//         expiration and oldest-first eviction rules.
+//   #2043 (SR-AUD-304's wildcard half, cause N-C) -- lives in
+//         DnsLiteralAndDuplicateTests.cpp under #2039.
+//   #2044 (SR-AUD-309, cause N-G) -- HtmlEncode performs the selected HTML-safe Unicode escaping
+//         while HtmlDecode retains its broader accepted input grammar.
 //
-// Every pin below was mutation-checked: the proposed repair was applied temporarily and the pin
-// was observed to FAIL, then reverted. The evidence is recorded in the plan's §17.7.
+// The original pins were inverted as their repairs landed; the individual sections retain the
+// mutation evidence and reference rationale.
 #include <gtest/gtest.h>
 #include <string>
 #include "System/Net/Cookie.hpp"

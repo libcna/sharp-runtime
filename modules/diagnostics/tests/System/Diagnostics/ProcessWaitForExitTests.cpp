@@ -14,9 +14,9 @@
 //     SIGALRM interrupted the underlying waitpid, and getExitCodeProperty() then threw.
 //
 // The children below use `exec sleep N` deliberately: /bin/sh is dash, which FORKS for a plain
-// `sleep N`, and a surviving grandchild holding the redirected pipe makes WaitForExit block
-// past its own deadline -- a separate, filed defect (#2032, blocked on #2029) that these tests
-// must not accidentally depend on.
+// `sleep N`, and a surviving grandchild holding the redirected pipe used to make WaitForExit
+// block past its own deadline. Ticket #2032 closed that follow-up by making bounded waits skip
+// the unbounded reader-thread join; these deadline tests still avoid introducing a descendant.
 
 #include <gtest/gtest.h>
 

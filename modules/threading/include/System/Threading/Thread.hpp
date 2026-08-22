@@ -60,11 +60,11 @@ namespace System::Threading {
 
         // Tracks which running thread's RunState (if any) belongs to the calling OS thread, so
         // CurrentThread() can report the correct ManagedThreadId/IsBackground instead of an
-        // unrelated hash of the OS thread handle. Threads not started via this class (the
-        // main thread, or any other externally-created thread) see nullptr and report the
-        // .NET-convention main-thread ID of 1. Holding the shared_ptr here (rather than a raw
-        // Thread*) means CurrentThreadProxy never dereferences the (possibly already-destroyed)
-        // Thread object itself.
+        // unrelated hash of the OS thread handle. Threads not started via this class see
+        // nullptr: the main thread reports the .NET-convention ID 1, while every other external
+        // thread receives a distinct ID from the same counter as wrapped threads (#1958).
+        // Holding the shared_ptr here (rather than a raw Thread*) means CurrentThreadProxy never
+        // dereferences the (possibly already-destroyed) Thread object itself.
         inline static thread_local std::shared_ptr<RunState> currentThreadState_;
 
         // #1958 / SR-AUD-193. A thread NOT started through this class used to report managed id

@@ -64,11 +64,21 @@ TEST(SynchronizationContextTests, Post_InvokesCallbackAsynchronously) {
 }
 
 TEST(SynchronizationContextTests, Send_InvokesCallbackSynchronously) {
-    int value = 0;
+    int state = 41;
+    bool called = false;
+    std::thread::id callbackThread;
     SynchronizationContext ctx;
-    ctx.Send([&value](void* s) { value = *static_cast<int*>(s); }, &value);
-    // callback receives &value; value stays 0 but the lambda ran
-    (void)value;
+    const std::thread::id callingThread = std::this_thread::get_id();
+
+    ctx.Send([&](void* value) {
+        called = true;
+        callbackThread = std::this_thread::get_id();
+        ++*static_cast<int*>(value);
+    }, &state);
+
+    EXPECT_TRUE(called);
+    EXPECT_EQ(callbackThread, callingThread);
+    EXPECT_EQ(state, 42);
 }
 
 TEST(SynchronizationContextTests, Post_NullCallback_NoThrow) {

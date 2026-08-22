@@ -8,6 +8,12 @@ Tickets: **#2296** (review), **#2297** (SR-AUD-128, `needs_user`),
 numbering stays frozen at 364, **no new `SR-AUD-*` identifier was created** and
 **no CCF was minted**.
 
+> **Historical snapshot.** This document preserves the 2026-08-11 review state and its
+> then-current `confirmed (design-complete)` decisions. Tickets #2297, #2298 and #2299 later
+> implemented and migrated all three repairs; SR-AUD-126, SR-AUD-128 and SR-AUD-129 are
+> `remediated` in the authoritative audit index. Statements below about the “current tree” and
+> the final disposition apply only to that dated checkpoint.
+
 ---
 
 ## 1. Verdict — three causes, not a family

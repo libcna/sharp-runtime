@@ -22,34 +22,23 @@ namespace System::Diagnostics {
      * external updater/installer, invoking a build/asset-processing tool, opening a URL via a
      * platform "open" helper) rather than real .NET's full systems-programming surface.
      *
-     * @note Thread safety: a Process instance is **not** safe for concurrent use, and this is
-     * stronger than the usual "no synchronisation" caveat -- getHasExitedProperty() is declared
-     * const yet mutates the object's exit state, and the captured-output getters hand out a
-     * reference into a buffer an internal thread is still writing. Confine an instance to one
-     * thread. Ticket #2030 gates the repair.
+     * @note Thread safety: captured-output snapshots and lazy exit-state observation are
+     * synchronized (#2030). Lifecycle operations such as Start, Kill and WaitForExit are not a
+     * general concurrent-use API; callers should still serialize those operations themselves.
      *
-     * @note Blocking, when output is redirected: reaping the child also **joins** the internal
-     * pipe-reader threads, and a reader cannot finish until every holder of the pipe's write end
-     * closes it -- including a **grandchild** that inherited it and outlives the direct child.
-     * Five public members reach that join and can therefore block for as long as such a holder
-     * lives: getHasExitedProperty() (and getExitCodeProperty() through it), Kill() and
-     * Kill(bool), the restart Start(), WaitForExit(intcs), and ~Process. Measured 2026-08-04
-     * with an 8 s grandchild: 7,502 ms, 7,502 ms, 7,503 ms and 8,004 ms respectively
-     * (`build-probe/2033_probe1_reader_join_entry_points.log`). Only WaitForExit(intcs) declares
-     * a bound to exceed; the others simply take arbitrarily long. Removing this requires deciding
-     * what a reader that cannot finish should do -- join, detach, or abandon the descriptor --
-     * which is the policy ticket **#2029** gates (`docs/SystemDiagnosticsNamespaceReviewPlan.md`
-     * §14.1); the bound violation is tracked as **#2032** and the disclosure as **#2033**. The
-     * behaviour is pinned by permanent tests. A caller that must not block should not redirect
-     * output, or should ensure the child does not leave the write end open in a descendant
-     * (`exec`ing the real program from a shell wrapper is enough).
+     * @note Redirected-output waiting follows .NET's split contract (#2029/#2032): the finite
+     * timeout, HasExited, ExitCode and Kill doors never wait for reader EOF, while the
+     * parameterless WaitForExit waits for complete output. Destruction cancels readers and joins
+     * them within bounded poll slices. Restarting an instance still resolves its previous reader
+     * threads before reusing their `std::thread` objects and can therefore wait for an inherited
+     * pipe writer; see Start().
      *
      * @note Status: Partial, POSIX-only (uses fork()/execvpe()/waitpid() in the .cpp body, guarded
      * behind #ifdef so the public header stays portable; throws
      * System::PlatformNotSupportedException on Emscripten). Implemented: Start (instance and the
-     * three static overloads), WaitForExit (blocking and timeout forms), Kill (single process
-     * and process-GROUP via killpg -- see Kill(bool), which is not the full process tree its
-     * parameter name suggests), ExitCode, HasExited, Id, GetCurrentProcess, and optional
+     * three static overloads), WaitForExit (blocking and timeout forms), Kill (a single process
+     * or, on Linux, its transitive descendant tree -- see Kill(bool)), ExitCode, HasExited, Id,
+     * GetCurrentProcess, and optional
      * captured-text stdout/stderr redirection (a deliberate simplification of real .NET's
      * Stream-based StandardOutput/StandardError -- see getStandardOutputTextProperty). Child
      * setup and exec failures are reported synchronously by Start() rather than being exposed as
@@ -70,21 +59,13 @@ namespace System::Diagnostics {
 
     public:
         /**
-         * @brief Destroys the wrapper. Does **not** reap or terminate the associated process.
+         * @brief Destroys the wrapper without terminating or waiting for its associated child.
          *
-         * @warning This destructor has two known, opposite shortcomings, both deliberately
-         * left unrepaired because the repair is a policy decision awaiting approval
-         * (ticket #2029, `docs/SystemDiagnosticsNamespaceReviewPlan.md` §14.1). Both are
-         * pinned by permanent tests so neither can change unnoticed.
-         *
-         * - **Without redirection:** destruction returns immediately and the child is never
-         *   waited for, so once it exits it remains a **zombie** for the lifetime of this
-         *   process.
-         * - **With redirection:** destruction **blocks** until the child closes its standard
-         *   output, because the internal reader threads are joined. That is the child's whole
-         *   remaining lifetime, and is unbounded in general (2005 ms measured for a 2 s child).
-         *
-         * Call WaitForExit() before destroying a Process to avoid both.
+         * Redirected readers are cancelled and joined within bounded poll slices (#2029), so
+         * destruction no longer waits for the child's lifetime. A child not explicitly reaped
+         * through WaitForExit, HasExited or Kill can still become a zombie until this process
+         * exits; call WaitForExit() before destruction when the child must be reaped and its
+         * captured output completed.
          */
         ~Process();
         Process(const Process&) = delete;
@@ -106,10 +87,10 @@ namespace System::Diagnostics {
          * the properties describe the newly started process rather than accumulating across
          * restarts.
          *
-         * @warning A restart first resolves the previous child, which with redirected output
-         * joins its reader threads, so this call blocks for as long as any descendant of the
-         * previous child still holds that pipe's write end (7,503 ms measured against an 8 s
-         * grandchild). Tickets #2029 and #2033.
+         * @warning A restart first resolves the previous child's redirected reader threads, so
+         * this call can wait while a descendant still holds the old pipe's write end. That join
+         * is required before assigning new `std::thread` objects; it is the one restart-specific
+         * exception to the bounded-reader policy documented by #2032.
          *
          * @return true if a process resource was started.
          * @throws System::InvalidOperationException if getStartInfoProperty()'s FileName is
@@ -130,22 +111,13 @@ namespace System::Diagnostics {
         /**
          * @brief Gets a value indicating whether the associated process has terminated.
          *
-         * @warning This is **not** a cheap poll when output is redirected. Observing the exit
-         * also reaps the child, which joins the internal reader threads, so the call blocks
-         * until every holder of the pipe's write end has closed it -- a **grandchild** that
-         * inherited it will hold it after the direct child is gone (7,502 ms measured against an
-         * 8 s grandchild). It takes no timeout and so has no bound to exceed. See the class
-         * note; ticket #2029 gates the reader-thread policy, #2033 this disclosure.
-         *
-         * @warning Declared const, yet it mutates the object's exit state (ticket #2030).
+         * This is a prompt non-blocking poll: it may lazily reap the child and update cached exit
+         * state under a lock, but it does not wait for redirected reader EOF (#2030/#2032).
          */
         [[nodiscard]] bool getHasExitedProperty() const;
 
         /**
          * @brief Gets the exit code returned by the associated process.
-         *
-         * @warning Reached through getHasExitedProperty(), so it inherits that member's
-         * redirected-output blocking behaviour verbatim.
          *
          * @throws System::InvalidOperationException if the process has not exited yet.
          */
@@ -154,13 +126,9 @@ namespace System::Diagnostics {
         /**
          * @brief Gets the captured standard output text.
          *
-         * @warning The returned reference denotes a buffer an internal reader thread appends
-         * to while the child runs, so **reading it before WaitForExit() has returned is a data
-         * race** and the contents may change under the caller (the same reference was measured
-         * holding 4 bytes mid-run and 8 bytes after exit). Read it only after WaitForExit().
-         * Making this safe requires returning by value, which changes the public return type,
-         * so it awaits approval (ticket #2030, plan §14.2); the current shape is pinned by a
-         * permanent test.
+         * Returns a by-value snapshot taken under the same lock used by the pipe reader (#2030),
+         * so it is safe to call while the child is running. A mid-run snapshot may naturally be
+         * incomplete; call parameterless WaitForExit() first when complete output is required.
          *
          * The text is reset when the process is restarted, so it always describes the most
          * recently started process rather than accumulating across restarts.
@@ -172,8 +140,8 @@ namespace System::Diagnostics {
         /**
          * @brief Gets the captured standard error text.
          *
-         * @warning Carries the same live-reference caveat as getStandardOutputTextProperty():
-         * read it only after WaitForExit(). Ticket #2030.
+         * Returns a synchronized by-value snapshot, with the same completeness contract as
+         * getStandardOutputTextProperty().
          *
          * @throws System::InvalidOperationException unless RedirectStandardError was set before Start().
          */
@@ -186,32 +154,21 @@ namespace System::Diagnostics {
          * init. Does nothing if the process has already exited or was obtained from
          * GetCurrentProcess().
          *
-         * @warning "Immediately" describes the signal, not this call. With redirected output,
-         * Kill first checks whether the child has already exited, and observing that reaps it
-         * and joins the internal reader threads -- so the call blocks for as long as any
-         * descendant still holds the pipe's write end (7,502 ms measured against an 8 s
-         * grandchild), with no timeout parameter to bound it. See the class note; ticket #2029
-         * gates the reader-thread policy, #2033 this disclosure.
+         * Reaping after the signal does not wait for redirected reader EOF (#2032).
          */
         void Kill();
 
         /**
-         * @brief Immediately stops the associated process, and optionally its process group,
+         * @brief Immediately stops the associated process, and optionally its descendant tree,
          * via SIGKILL.
          *
-         * @param entireProcessTree When true, signals the child's **process group** with
-         * `killpg` rather than only the child.
+         * @param entireProcessTree When true, recursively stops and signals the child and its
+         * transitive descendants; when false, signals only the direct child.
          *
-         * @warning Despite the parameter's name this is **not** a full process-tree kill. A
-         * descendant that called `setsid()` -- or otherwise left the child's process group --
-         * has a different group and **survives** (measured). Widening this to the transitive
-         * descendant set changes how many processes get killed and needs a Linux-specific
-         * `/proc` walk, so it awaits approval (ticket #2031, plan §14.3); the current
-         * behaviour is pinned by a permanent test.
-         *
-         * @warning Carries Kill()'s redirected-output blocking caveat verbatim: this call can
-         * take arbitrarily long while a descendant holds the pipe's write end, and has no
-         * timeout parameter. Tickets #2029 and #2033.
+         * @note The tree walk is Linux-specific and reads `/proc`. On a POSIX host without a
+         * readable `/proc`, `entireProcessTree=true` degrades to killing the direct child. It
+         * guards against killing a tree containing the current process and reports collected
+         * failures (#2031).
          */
         void Kill(bool entireProcessTree);
 
@@ -223,11 +180,9 @@ namespace System::Diagnostics {
          * a Process obtained from GetCurrentProcess(), which is not a child of itself.
          *
          * @note With redirected output this waits for **more** than the process: after the child
-         * terminates it joins the internal reader threads, which cannot finish until every
-         * holder of the pipe's write end has closed it. That is deliberate here -- it is what
-         * makes the captured text complete when this call returns -- but it means the wait can
-         * outlast the child by the lifetime of any descendant that inherited the pipe. The
-         * timeout overload inherits the same behaviour and so can exceed its bound (#2032).
+         * terminates it joins the reader threads so captured text is complete. It can therefore
+         * outlast the direct child while a descendant retains an inherited pipe. The finite
+         * timeout overload deliberately does not join those readers (#2032).
          *
          * @throws System::InvalidOperationException if the process has not been started.
          */
@@ -241,12 +196,10 @@ namespace System::Diagnostics {
          * @return true if the process exited before the timeout; false if the timeout elapsed
          *         first, and false for a Process obtained from GetCurrentProcess().
          *
-         * @warning When output is redirected, this call can exceed @p milliseconds: reaping
-         * the child also joins the internal reader threads, and a reader cannot finish until
-         * every holder of the pipe's write end closes it -- including a **grandchild** that
-         * inherited it. Measured at 29,951 ms against a 5,000 ms bound. Repairing it requires
-         * deciding the reader-thread policy that ticket #2029 gates, so it is tracked
-         * separately as ticket #2032.
+         * @note For a finite timeout, observing the child exit does not join redirected reader
+         * threads, so the deadline remains authoritative. A `true` result can therefore precede
+         * the final output bytes; call parameterless WaitForExit() when complete output is
+         * required. Passing -1 delegates to that unbounded overload (#2032).
          * @throws System::ArgumentOutOfRangeException if @p milliseconds is less than -1.
          * @throws System::InvalidOperationException if the process has not been started.
          */

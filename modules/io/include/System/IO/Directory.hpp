@@ -37,15 +37,33 @@ namespace System::IO {
         /** Moves a directory and its contents from src to dst. */
         static void               Move(const std::string& src, const std::string& dst);
 
-        /** Returns the paths of all files in the given directory. */
+        /**
+         * Returns the paths of all files in the given directory.
+         * @throws System::UnauthorizedAccessException if enumeration is denied.
+         * @throws System::IO::DirectoryNotFoundException if the path cannot be found.
+         * @throws System::IO::IOException for another filesystem enumeration failure.
+         */
         [[nodiscard]] static std::vector<std::string> GetFiles(const std::string& path);
-        /** Returns the paths of files in the given directory that match searchPattern. */
+        /**
+         * Returns the paths of files in the given directory that match searchPattern.
+         * @throws System::UnauthorizedAccessException if enumeration is denied.
+         * @throws System::IO::DirectoryNotFoundException if the path cannot be found.
+         * @throws System::IO::IOException for another filesystem enumeration failure.
+         */
         [[nodiscard]] static std::vector<std::string> GetFiles(const std::string& path,
                                                                 const std::string& searchPattern);
-        /** Returns the paths of all subdirectories in the given directory. */
+        /**
+         * Returns the paths of all subdirectories in the given directory.
+         * @throws System::UnauthorizedAccessException if enumeration is denied.
+         * @throws System::IO::DirectoryNotFoundException if the path cannot be found.
+         * @throws System::IO::IOException for another filesystem enumeration failure.
+         */
         [[nodiscard]] static std::vector<std::string> GetDirectories(const std::string& path);
 
-        /** Returns the process working directory. */
+        /**
+         * Returns the process working directory.
+         * @throws System::IO::IOException if the current directory cannot be resolved.
+         */
         [[nodiscard]] static std::string GetCurrentDirectory();
         /** Sets the process working directory to path. */
         static void                      SetCurrentDirectory(const std::string& path);

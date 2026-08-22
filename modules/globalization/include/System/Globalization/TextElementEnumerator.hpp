@@ -2,23 +2,52 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <algorithm>
-#include <stdexcept>
+#include <cstddef>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/detail/Utf8Scalar.hpp"
 
 namespace System::Globalization {
 
 using SharpRuntime::intcs;
 
+namespace detail {
+
+/**
+ * @brief Byte length of one scalar-based text element in this module's documented subset.
+ *
+ * Valid UTF-8 is advanced one Unicode scalar at a time. A malformed byte is one element of
+ * length one, so no caller can swallow adjacent input or return a dangling continuation byte.
+ * Full extended-grapheme clustering remains outside this module's declared subset.
+ */
+[[nodiscard]] inline std::size_t Utf8TextElementLength(const std::string& text,
+                                                       std::size_t offset) noexcept {
+    std::uint32_t codePoint = 0;
+    std::size_t length = 0;
+    return System::detail::TryDecodeUtf8Scalar(text, offset, codePoint, length) ? length : 1;
+}
+
+/** True when @p offset is one of the scalar/malformed-byte boundaries produced above. */
+[[nodiscard]] inline bool IsUtf8TextElementBoundary(const std::string& text,
+                                                    std::size_t offset) noexcept {
+    if (offset > text.size()) return false;
+    std::size_t current = 0;
+    while (current < offset) current += Utf8TextElementLength(text, current);
+    return current == offset;
+}
+
+} // namespace detail
+
 /**
  * @brief Enumerates the text elements of a string.
  *
  * C++ counterpart of .NET System.Globalization.TextElementEnumerator.
- * Each text element may span one or more chars (grapheme cluster). This implementation
- * advances by UTF-8 code units: ASCII characters produce single-byte elements, and
- * multi-byte sequences are kept together. Combining-character grouping is not performed.
+ * This practical-subset implementation advances by Unicode scalar values encoded as UTF-8:
+ * ASCII scalars produce single-byte elements, valid multi-byte scalars are kept together, and a
+ * malformed byte is exposed as a one-byte element. Extended-grapheme clustering (combining
+ * sequences, emoji ZWJ sequences and regional-indicator pairs) is intentionally not performed.
  */
 class TextElementEnumerator {
 public:
@@ -28,7 +57,24 @@ public:
      * C++ counterpart of .NET StringInfo.GetTextElementEnumerator(string).
      * @param str The string to enumerate.
      */
-    explicit TextElementEnumerator(const std::string& str) : str_(str) { Reset(); }
+    explicit TextElementEnumerator(const std::string& str) : TextElementEnumerator(str, 0) {}
+
+    /**
+     * @brief Constructs an enumerator whose first MoveNext begins at a UTF-8 byte boundary.
+     * @param str The complete original string, retained so ElementIndex remains an original-string
+     *            byte index.
+     * @param startIndex The byte boundary of the first element, or str.size() for an empty range.
+     * @throws System::ArgumentOutOfRangeException if @p startIndex is negative, beyond the string,
+     *         or in the middle of a valid UTF-8 scalar.
+     */
+    TextElementEnumerator(const std::string& str, intcs startIndex) : str_(str) {
+        if (startIndex < 0 || static_cast<std::size_t>(startIndex) > str_.size() ||
+            !detail::IsUtf8TextElementBoundary(str_, static_cast<std::size_t>(startIndex))) {
+            throw System::ArgumentOutOfRangeException("startIndex");
+        }
+        initialOffset_ = static_cast<std::size_t>(startIndex);
+        Reset();
+    }
 
     /**
      * @brief Advances the enumerator to the next text element.
@@ -42,14 +88,8 @@ public:
         length_ = 0;
         if (newOffset < 0 || static_cast<size_t>(newOffset) >= str_.size()) return false;
 
-        size_t off = static_cast<size_t>(newOffset);
-        unsigned char c = static_cast<unsigned char>(str_[off]);
-        size_t len = 1;
-        if      ((c & 0x80) == 0x00) len = 1;
-        else if ((c & 0xE0) == 0xC0) len = 2;
-        else if ((c & 0xF0) == 0xE0) len = 3;
-        else if ((c & 0xF8) == 0xF0) len = 4;
-        length_ = static_cast<long long>(std::min(len, str_.size() - off));
+        const size_t off = static_cast<size_t>(newOffset);
+        length_ = static_cast<long long>(detail::Utf8TextElementLength(str_, off));
         return true;
     }
 
@@ -94,16 +134,17 @@ public:
      */
     void Reset() {
         // offset_ starts at str_.size() (out of range) and length_ is set so that
-        // offset_ + length_ == 0, meaning the first MoveNext() begins at index 0.
+        // offset_ + length_ == initialOffset_, meaning the first MoveNext() begins there.
         // This mirrors .NET's TextElementEnumerator.Reset(), which relies on signed-int
         // wraparound the same way. Also ensures GetTextElement()/ElementIndex throw until
         // MoveNext() runs.
         offset_ = static_cast<long long>(str_.size());
-        length_ = -offset_;
+        length_ = static_cast<long long>(initialOffset_) - offset_;
     }
 
 private:
     std::string str_;
+    std::size_t initialOffset_ = 0;
     long long offset_ = 0;
     long long length_ = 0;
 

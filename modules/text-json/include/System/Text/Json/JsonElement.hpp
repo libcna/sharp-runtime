@@ -23,10 +23,11 @@ namespace System::Text::Json {
      *
      * C++ counterpart of .NET System.Text.Json.JsonElement.
      *
-     * @note Backed directly by a node in the owning JsonDocument's parsed `nlohmann::ordered_json` tree
-     * (shared ownership via aliasing `shared_ptr`, so a JsonElement keeps the whole document tree
-     * alive) rather than reproducing .NET's compact binary token database over a raw UTF-8 buffer
-     * — same observable API, simpler implementation.
+     * @note Backed by a raw node pointer into the owning JsonDocument's parsed
+     * `nlohmann::ordered_json` tree plus shared document state.  The state keeps the tree alive
+     * and records disposal, so every element accessor can reject use after JsonDocument::Dispose().
+     * This is simpler than reproducing .NET's compact binary token database over a raw UTF-8
+     * buffer while preserving the supported observable lifetime contract.
      */
     class JsonElement {
         // #2117: the element points at the document's shared STATE and carries the node as a raw

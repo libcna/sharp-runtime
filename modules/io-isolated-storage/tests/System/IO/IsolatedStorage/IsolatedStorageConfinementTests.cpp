@@ -10,16 +10,22 @@
 // four effect classes -- read, create/write, delete and rename -- escaped the store.  `..`
 // traversal and symbolic links escaped too.
 //
-// Every test builds its own sandbox under the process working directory (the gate runs test
-// executables from `build/`), never /tmp, /var/tmp, /dev/shm or $HOME, and removes it again.
-// The "outside the store" target is always a sibling directory inside that same sandbox.
+// Every fixture atomically creates a process/run-unique temporary root and owns it with RAII.
+// Parallel or interrupted runs therefore cannot pre-delete or reuse one another's state.  The
+// "outside the store" target is always a sibling directory inside that same sandbox.
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <string>
 #include <limits>
+#include <random>
+#include <stdexcept>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "System/ArgumentException.hpp"
@@ -40,50 +46,66 @@ using System::IO::IsolatedStorage::IsolatedStorageScope;
 
 namespace {
 
-    // The one directory every fixture lives under, relative to the process working directory.
-    const char* const kSandboxRoot = "sharp_rt_iso_confinement";
-
-    // Removes the shared parent once the whole suite has finished, so a successful run leaves
-    // no artifact behind at all -- not even an empty directory.
-    class SandboxCleanup : public ::testing::Environment
+    class ScopedTemporaryDirectory final
     {
     public:
-        void TearDown() override
+        ScopedTemporaryDirectory()
         {
-            std::error_code ec;
-            fs::remove_all(fs::current_path() / kSandboxRoot, ec);
+            const auto parent = fs::temp_directory_path();
+            static std::atomic<std::uint64_t> sequence{0};
+            std::random_device entropy;
+            for (int attempt = 0; attempt < 128; ++attempt) {
+                const auto random =
+                    (static_cast<std::uint64_t>(entropy()) << 32U) ^ entropy();
+                const auto suffix =
+                    random ^ sequence.fetch_add(1, std::memory_order_relaxed);
+                auto candidate = parent /
+                    ("sharp-runtime-isolated-storage-" + std::to_string(suffix));
+                std::error_code error;
+                if (fs::create_directory(candidate, error)) {
+                    path_ = std::move(candidate);
+                    return;
+                }
+            }
+            throw std::runtime_error(
+                "could not create a unique IsolatedStorage-test directory");
         }
-    };
 
-    const auto* const kSandboxCleanupRegistration =
-        ::testing::AddGlobalTestEnvironment(new SandboxCleanup());
+        ~ScopedTemporaryDirectory()
+        {
+            // remove_all removes a symbolic link as a link; it does not descend through one,
+            // so a link planted by a symlink test can never delete outside this unique root.
+            std::error_code error;
+            fs::remove_all(path_, error);
+        }
+
+        ScopedTemporaryDirectory(const ScopedTemporaryDirectory&) = delete;
+        ScopedTemporaryDirectory& operator=(const ScopedTemporaryDirectory&) = delete;
+
+        [[nodiscard]] fs::path path(const fs::path& relative) const
+        {
+            return path_ / relative;
+        }
+
+    private:
+        fs::path path_;
+    };
 
     class IsolatedStorageConfinementTest : public ::testing::Test
     {
     protected:
+        ScopedTemporaryDirectory temporary_;
         fs::path sandbox_;
         fs::path root_;
         fs::path outside_;
 
         void SetUp() override
         {
-            const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
-            sandbox_ = fs::current_path() / kSandboxRoot
-                     / (std::string(info->test_suite_name()) + "." + info->name());
-            std::error_code ec;
-            fs::remove_all(sandbox_, ec);
+            sandbox_ = temporary_.path("sandbox");
             root_ = sandbox_ / "store";
             outside_ = sandbox_ / "outside";
             fs::create_directories(root_);
             fs::create_directories(outside_);
-        }
-
-        void TearDown() override
-        {
-            // remove_all removes a symbolic link as a link; it does not descend through one,
-            // so a link planted by a symlink test can never delete outside the sandbox.
-            std::error_code ec;
-            fs::remove_all(sandbox_, ec);
         }
 
         [[nodiscard]] IsolatedStorageFile store() const

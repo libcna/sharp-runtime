@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -26,6 +27,15 @@ namespace System::Net::Sockets {
     using SharpRuntime::intcs;
     using SharpRuntime::longcs;
 
+}
+
+namespace SharpRuntime::Testing {
+    template <typename TOwner>
+    struct SocketAsyncStartAccess;
+}
+
+namespace System::Net::Sockets {
+
     /**
      * @brief Implements the Berkeley sockets interface.
      *
@@ -48,6 +58,8 @@ namespace System::Net::Sockets {
      *   distinct typed overloads instead.
      */
     class Socket {
+        friend struct SharpRuntime::Testing::SocketAsyncStartAccess<Socket>;
+
         intcs fd_ = -1;
         System::Net::Sockets::AddressFamily addressFamily_;
         System::Net::Sockets::SocketType socketType_;
@@ -62,30 +74,31 @@ namespace System::Net::Sockets {
          * Each of them returns a `TaskT` whose body runs on a `std::async` thread and calls back
          * into this object. Without a boundary, destroying or move-assigning the `Socket` while
          * one of those bodies is running reads freed storage: `Socket` is move-assignable and
-         * destructible with no join, no `shared_from_this` and no retention of any kind.
+         * destructible with no `shared_from_this` and no retention of any kind.
          *
          * .NET does not need one because the GC keeps the object alive for as long as the
          * captured delegate can reach it. C++ has no such mechanism, and this port's answer is
-         * the RAII one: the object outlives the work because its **destructor waits for it** --
+         * the RAII one: destruction and **both sides of a move** wait before replacing storage --
          * the same shape `FileSystemWatcher` took in #2347. `Close()` cannot simply run first,
-         * because a worker blocked in `recv()`/`accept()` would then be operating on a
-         * descriptor number the process may already have reused.
+         * because a worker blocked in `recv()`/`accept()` would then be operating on a descriptor
+         * number the process may already have reused. Move-assignment reopens its drained guard
+         * so new work on the destination is accepted after the transfer (#2417).
          *
          * Defined in the `.cpp`; never null on a live `Socket`.
          */
         struct AsyncOperations;
         /**
-         * Decrements the in-flight count and wakes the boundary, on every exit path from an async
-         * BODY -- including one that leaves by exception. It has to be constructed inside the
-         * body rather than captured by it: `std::async` keeps the callable alive until the last
-         * future referring to its shared state is destroyed, so a guard captured BY the lambda is
-         * released when the caller drops the `TaskT`, not when the work finishes. A boundary
-         * built on that would wait for the caller instead of for the work, which deadlocks
-         * whenever the caller holds the task across the socket's destruction -- the exact case
-         * this ticket exists to make safe.
+         * Owns one in-flight count from before Task construction until the async body finishes.
+         * The caller first owns the shared registration, then the task callable moves its capture
+         * into a body-local owner on entry. That move matters: `std::async` may retain the callable
+         * until its future is destroyed, whereas the boundary must release when work finishes.
+         * If callable allocation or task launch throws first, ordinary shared ownership rolls the
+         * caller-side registration back instead of leaking a count forever (#2417).
          */
-        struct AsyncOperationScope;
+        struct AsyncOperationRegistration;
         std::shared_ptr<AsyncOperations> asyncOps_;
+        using BeforeAsyncTaskTestHook = void (*)();
+        static std::atomic<BeforeAsyncTaskTestHook> beforeAsyncTaskTestHook_;
 
         /**
          * Registers one in-flight async operation, and returns the guard the operation's body
@@ -93,13 +106,20 @@ namespace System::Net::Sockets {
          * doing it inside the task body would leave a window in which the socket is destroyed
          * before the body starts, the wait sees no operation, and the boundary does nothing.
          */
-        [[nodiscard]] std::shared_ptr<AsyncOperations> beginAsyncOperation();
+        [[nodiscard]] std::shared_ptr<AsyncOperationRegistration>
+        beginAsyncOperation(bool interruptWithShutdown);
+        [[nodiscard]] int asyncOperationCountForTesting() const;
 
         /**
-         * Wakes any worker blocked on this descriptor and waits until every in-flight async
-         * operation has finished. Idempotent, and a no-op when none is in flight.
+         * Stops AcceptAsync and waits until every in-flight async operation has finished.
+         * When @p discardDescriptor is true, also shuts down blocking Connect/Send/Receive work;
+         * callers using that mode must close the descriptor immediately afterwards. A source-side
+         * move passes false and may therefore wait for blocking I/O to complete naturally, because
+         * shutdown is irreversible and would transfer a damaged resource (#2417).
+         * Marks this particular guard terminal even when it is idle; move-assignment explicitly
+         * reopens the drained destination guard before returning.
          */
-        void waitForAsyncOperations() noexcept;
+        void waitForAsyncOperations(bool discardDescriptor) noexcept;
 
         Socket(intcs fd, System::Net::Sockets::AddressFamily family, System::Net::Sockets::SocketType type,
                System::Net::Sockets::ProtocolType protocol);
@@ -233,7 +253,10 @@ namespace System::Net::Sockets {
         /** @brief Disables send and/or receive on this socket. */
         void Shutdown(SocketShutdown how);
 
-        /** @brief Closes the socket. */
+        /**
+         * @brief Wakes and drains registered asynchronous work, then closes the socket.
+         * @note May block until an already-started async body has crossed its teardown boundary.
+         */
         void Close();
         /** @brief Equivalent to Close(). */
         void Dispose() { Close(); }
@@ -252,26 +275,22 @@ namespace System::Net::Sockets {
 
         /**
          * @brief Asynchronous counterpart of Connect(remoteEP).
-         * @warning The returned task's action runs on a real background thread
-         * (`std::async(std::launch::async, ...)`, dispatched immediately, not deferred) and
-         * captures `this` by raw pointer. The caller must keep this Socket alive until the task
-         * completes -- destroying or moving the Socket while the task is still running is a
-         * dangling-pointer use-after-free. There is no shared-ownership self-capture here (that
-         * would need Socket to be enable_shared_from_this, a larger API-surface change deferred
-         * to a future pass); this is the same lifetime-contract shape as
-         * System::Net::Http::Json::HttpClientJsonExtensions's HttpClient& capture.
+         * @note The operation registers with the socket's in-flight-work boundary before the
+         * task is created. Destruction, move construction, and both sides of move-assignment wake
+         * blocked I/O and wait for all registered work, so the raw `this` capture cannot outlive
+         * or race replacement of the object (tickets #2134/#2417).
          */
         [[nodiscard]] System::Threading::Tasks::TaskT<bool> ConnectAsync(const System::Net::EndPoint& remoteEP);
-        /** @brief Asynchronous counterpart of Accept(). @warning Same `this`-capture lifetime contract as ConnectAsync -- see its doc-comment. */
+        /** @brief Asynchronous counterpart of Accept(). Uses the same lifetime boundary as ConnectAsync. */
         [[nodiscard]] System::Threading::Tasks::TaskT<std::shared_ptr<Socket>> AcceptAsync();
-        /** @brief Asynchronous counterpart of Send(buffer, flags). @warning Same `this`-capture lifetime contract as ConnectAsync -- see its doc-comment. */
+        /** @brief Asynchronous counterpart of Send(buffer, flags). Uses the same lifetime boundary as ConnectAsync. */
         [[nodiscard]] System::Threading::Tasks::TaskT<intcs> SendAsync(std::vector<bytecs> buffer,
                                                                         SocketFlags flags = SocketFlags::None);
         /**
          * @brief Asynchronous counterpart of Receive(*buffer, flags). @p buffer is shared so the
          * caller can observe the bytes written once the task completes (there is no Memory<T>
          * idiom here to express an in-place async fill more directly).
-         * @warning Same `this`-capture lifetime contract as ConnectAsync -- see its doc-comment.
+         * Uses the same lifetime boundary as ConnectAsync.
          */
         [[nodiscard]] System::Threading::Tasks::TaskT<intcs>
         ReceiveAsync(std::shared_ptr<std::vector<bytecs>> buffer, SocketFlags flags = SocketFlags::None);

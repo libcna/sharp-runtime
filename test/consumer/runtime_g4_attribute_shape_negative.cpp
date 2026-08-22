@@ -19,15 +19,22 @@
 //     `public string? Url { get; set; }`. So the port was too RESTRICTIVE on the property and too
 //     inventive on the constructor.
 //
-// Migration: pass the URL after construction via setUrlProperty(), and pass IsOptional to the
-// constructor instead of assigning it.
+//   * Six nullable versioning strings used plain `std::string`, erasing the distinction between
+//     an omitted value and an explicitly empty value. Their getters now return
+//     `const std::optional<std::string>&`; nullable setters/constructors take `std::optional` while
+//     retaining implicit string-literal construction.
+//
+// Migration: pass the URL after construction via setUrlProperty(), pass IsOptional to the
+// constructor instead of assigning it, and inspect nullable getters through optional.
 //
 // Records: docs/Migration-RuntimeAttributeShapesG4.md,
 // docs/NegativeConsumerFixtureValidation.md.
 //
 // NEGATIVE-FIXTURE: component=Runtime
+#include <optional>
 #include <string>
 #include <type_traits>
+#include <utility>
 
 #include "System/Runtime/CompilerServices/CompilerFeatureRequiredAttribute.hpp"
 #include "System/Runtime/Versioning/VersioningAttributes.hpp"
@@ -39,6 +46,8 @@
 using System::Runtime::CompilerServices::CompilerFeatureRequiredAttribute;
 using System::Runtime::Versioning::ObsoletedOSPlatformAttribute;
 using System::Runtime::Versioning::RequiresPreviewFeaturesAttribute;
+using System::Runtime::Versioning::TargetFrameworkAttribute;
+using System::Runtime::Versioning::UnsupportedOSPlatformAttribute;
 
 int main() {
     CompilerFeatureRequiredAttribute feature("RefStructs");
@@ -86,13 +95,92 @@ int main() {
                   "#1980 G-4: IsOptional must still be settable at construction");
 #endif
 
-    // UNCHANGED, and asserted so the fixture proves what did NOT break: the URL is readable, the
-    // one-argument forms still work, and the getters are all still there.
+#if SHARP_RUNTIME_NEGATIVE_SITE == 5
+    // NEGATIVE(targetframework-displayname-was-string): static assertion failed
+    static_assert(std::is_same_v<
+                  decltype(std::declval<const TargetFrameworkAttribute&>()
+                               .getFrameworkDisplayNameProperty()),
+                  const std::string&>, "expected the old non-nullable getter");
+#else
+    static_assert(std::is_same_v<
+                  decltype(std::declval<const TargetFrameworkAttribute&>()
+                               .getFrameworkDisplayNameProperty()),
+                  const std::optional<std::string>&>);
+#endif
+
+#if SHARP_RUNTIME_NEGATIVE_SITE == 6
+    // NEGATIVE(unsupportedosplatform-message-was-string): static assertion failed
+    static_assert(std::is_same_v<
+                  decltype(std::declval<const UnsupportedOSPlatformAttribute&>()
+                               .getMessageProperty()),
+                  const std::string&>, "expected the old non-nullable getter");
+#else
+    static_assert(std::is_same_v<
+                  decltype(std::declval<const UnsupportedOSPlatformAttribute&>()
+                               .getMessageProperty()),
+                  const std::optional<std::string>&>);
+#endif
+
+#if SHARP_RUNTIME_NEGATIVE_SITE == 7
+    // NEGATIVE(obsoletedosplatform-message-was-string): static assertion failed
+    static_assert(std::is_same_v<
+                  decltype(std::declval<const ObsoletedOSPlatformAttribute&>()
+                               .getMessageProperty()),
+                  const std::string&>, "expected the old non-nullable getter");
+#else
+    static_assert(std::is_same_v<
+                  decltype(std::declval<const ObsoletedOSPlatformAttribute&>()
+                               .getMessageProperty()),
+                  const std::optional<std::string>&>);
+#endif
+
+#if SHARP_RUNTIME_NEGATIVE_SITE == 8
+    // NEGATIVE(obsoletedosplatform-url-was-string): static assertion failed
+    static_assert(std::is_same_v<
+                  decltype(std::declval<const ObsoletedOSPlatformAttribute&>()
+                               .getUrlProperty()),
+                  const std::string&>, "expected the old non-nullable getter");
+#else
+    static_assert(std::is_same_v<
+                  decltype(std::declval<const ObsoletedOSPlatformAttribute&>()
+                               .getUrlProperty()),
+                  const std::optional<std::string>&>);
+#endif
+
+#if SHARP_RUNTIME_NEGATIVE_SITE == 9
+    // NEGATIVE(requirespreviewfeatures-message-was-string): static assertion failed
+    static_assert(std::is_same_v<
+                  decltype(std::declval<const RequiresPreviewFeaturesAttribute&>()
+                               .getMessageProperty()),
+                  const std::string&>, "expected the old non-nullable getter");
+#else
+    static_assert(std::is_same_v<
+                  decltype(std::declval<const RequiresPreviewFeaturesAttribute&>()
+                               .getMessageProperty()),
+                  const std::optional<std::string>&>);
+#endif
+
+#if SHARP_RUNTIME_NEGATIVE_SITE == 10
+    // NEGATIVE(requirespreviewfeatures-url-was-string): static assertion failed
+    static_assert(std::is_same_v<
+                  decltype(std::declval<const RequiresPreviewFeaturesAttribute&>()
+                               .getUrlProperty()),
+                  const std::string&>, "expected the old non-nullable getter");
+#else
+    static_assert(std::is_same_v<
+                  decltype(std::declval<const RequiresPreviewFeaturesAttribute&>()
+                               .getUrlProperty()),
+                  const std::optional<std::string>&>);
+#endif
+
+    // String literals remain ergonomic even though nullable values now retain their null state.
     ObsoletedOSPlatformAttribute minimal("android");
     RequiresPreviewFeaturesAttribute empty;
-    return (obsoleted.getUrlProperty() == "https://example.com" &&
-            preview.getUrlProperty() == "https://aka.ms/preview" &&
-            minimal.getMessageProperty().empty() &&
-            empty.getUrlProperty().empty() &&
+    return (obsoleted.getUrlProperty() ==
+                std::optional<std::string>("https://example.com") &&
+            preview.getUrlProperty() ==
+                std::optional<std::string>("https://aka.ms/preview") &&
+            minimal.getMessageProperty() == std::nullopt &&
+            empty.getUrlProperty() == std::nullopt &&
             !feature.getIsOptionalProperty()) ? 0 : 1;
 }

@@ -36,16 +36,10 @@ namespace System::IO {
         /**
          * @brief Closes the reader.
          *
-         * <b>This base implementation does nothing, and no derived type in this port is made
-         * unusable by it.</b> A closed TextReader keeps reading: StringReader does not override
-         * this at all, so after Close() its Peek/Read/ReadToEnd continue from wherever the reader
-         * had got to. That is SR-AUD-343, and it is still open. Enforcing the closed state needs
-         * somewhere to record it, and every option is an object-layout change in a public type
-         * -- a flag in each leaf, or a flag here in the base, which relayouts every derived type
-         * at once. The decision is ticket #2098, BLOCKED on Approval IO-1
-         * (docs/SystemIONamespaceReviewPlan.md section 21). Until it is taken, do not rely on
-         * Close() to make a reader stop working; the layouts this base and its subclasses have
-         * today are pinned by test so the approved option's cost stays the costed one.
+         * This base implementation deliberately does nothing, matching .NET's `TextReader`
+         * base. Concrete resource-owning readers implement their own lifecycle: `StringReader`
+         * and `StreamReader` override this member, record a closed state, and reject subsequent
+         * reads (ticket #2098 / SR-AUD-343).
          */
         virtual void Close() {}
     };

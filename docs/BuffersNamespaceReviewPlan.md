@@ -195,7 +195,7 @@ Twelve open findings. Every one has exactly one disposition and none disappears.
 |---|---|---|---|---|
 | SR-AUD-072 | high | **yes** — UBSan null load + ASan SEGV | compatible implementation | **#2049** |
 | SR-AUD-073 | high | **yes** — data leak + ASan heap-buffer-overflow | compatible implementation | **#2050** |
-| SR-AUD-071 | high | **yes** — no throw, stale retained view | split: disclosure now, design blocked | **#2061** / **#2056** |
+| SR-AUD-071 | high | **yes** — no throw, stale retained view | historical split; superseded by §24 | **#2061** / **#2056** |
 | SR-AUD-070 | medium | yes (compile) | compatible implementation | **#2054** |
 | SR-AUD-074 | medium | **yes** — 1 segment for `default` | approval-sensitive design | **#2057** |
 | SR-AUD-076 | medium | **yes** — `Create(0,1)` returns a pool | compatible implementation | **#2053** |
@@ -263,7 +263,7 @@ memory — that is the already-pinned end-of-sequence contract
 return out-of-slice data or read out of bounds now throws. Nothing in this repository passes a
 position from one sequence to another's `TryGet`.
 
-### 4.3 SR-AUD-071 — no terminal disposed state (high) → **#2056 blocked + #2061 disclosure**
+### 4.3 SR-AUD-071 — historical review state; final disposition in §24
 
 Measured: `Rent(16)` → `Memory` length 16; `Dispose()`; `getMemoryProperty()` returns length
 **0** and does **not** throw; the `Memory` obtained *before* disposal still reports length **16**
@@ -700,9 +700,10 @@ private copy, and the overlapping-`CopyTo` family (SR-AUD-044) belongs to `Span`
 - **No sensitive-data retention change is made by this batch, and none is approved.** Making
   `Return` always clear, or making the shared pool zero on `Rent`, is a broad pool-clearing
   policy change the approval boundary forbids.
-- **The one genuine security-adjacent defect is SR-AUD-071b** — a retained `Memory<T>` reading
-  storage the owner has released. Blocked as #2056; pinned by #2061 so it cannot be quietly
-  reclassified as safe.
+- **At the time of this review, SR-AUD-071b was treated as a security-adjacent defect** — a
+  retained `Memory<T>` reading storage the owner has released. The final reconciliation in §24
+  supersedes the blocked label: the view is explicitly non-owning and may not be read after its
+  owner is disposed, matching the borrowing rule of the Core.Base `Memory<T>` representation.
 
 ---
 
@@ -861,8 +862,8 @@ The `System::Buffers` namespace is closed for *compatible* work when:
 2. SR-AUD-072, 073, 076, 083, 070 and 077 are `remediated` in
    `audit/AUDIT_FINDINGS_INDEX.md` and in their per-file reports, with the historical text
    retained and a dated remediation note appended;
-3. SR-AUD-071, 074, 087 and 088 are `confirmed (design-complete)` with a blocked ticket and a
-   behaviour pin each;
+3. SR-AUD-071, 074, 087 and 088 have a recorded disposition and a behaviour pin each (the
+   statuses written when this historical criterion was met are superseded by §24);
 4. SR-AUD-086 carries a deferred-verification ticket and a behaviour pin;
 5. SR-AUD-081 keeps its existing correction and no new ticket;
 6. the repository gate shows no new failure and the buffers suite has grown, add-only;
@@ -998,3 +999,24 @@ instantiation. `docs/NegativeConsumerFixtureValidation.md` §21 carries it.
 
 **§22's compatible-closure list is now satisfied in full**: #2049, #2050, #2051, #2052, #2053,
 #2054, #2055 and #2061 are `done`, and SR-AUD-072, 073, 076, 083, 070 and 077 are `remediated`.
+
+---
+
+## 24. Final-audit reconciliation (2026-08-22)
+
+This plan records the evidence and decisions made during the 2026-08-04 namespace review; its
+earlier open/design-complete counts are historical snapshots. Ticket #2417 rechecked every
+remaining audit finding against current `next` and supersedes only their current-status labels:
+
+- SR-AUD-071a is remediated: the owner getter has a terminal disposed state and throws
+  `ObjectDisposedException`.
+- SR-AUD-071b is an `accepted-deviation`, not an open defect. `Memory<T>` is the runtime's
+  explicitly non-owning C++ view, analogous to `std::span`; a retained view is invalid after its
+  owner is disposed or destroyed. Reproducing a GC-retained managed array would replace that
+  public ownership model across Core.Base.
+- SR-AUD-087 and SR-AUD-088 are likewise explicit accepted subset contracts, while the other
+  findings reviewed here are remediated or, for SR-AUD-081, a false-positive premise.
+
+The authoritative current statuses and reproducible evidence are in
+`audit/final_dispositions.json`, `audit/AUDIT_FINDINGS_INDEX.md`, and
+`docs/AuditFindingsReconciliation.md`.

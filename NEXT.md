@@ -3,10 +3,17 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-22 — 17,741 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,741 run: 17,741 passed, 0 failed, 0 skipped**, zero build warnings
-> at `--parallel 2` over a **full** rebuild. Graph **41 / 95**, seams **3 / 20**, negative fixtures
-> **53 / 269**.
+> **Test-count floor, 2026-08-22 — 17,778 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,778 run: 17,778 passed, 0 failed, 0 skipped**, zero build warnings
+> at `--parallel 2` over a cache-disabled **clean** rebuild. Graph **41 / 95**, seams **5 / 22**,
+> negative fixtures **55 / 284**.
+>
+> **+37** on the 17,741 below, all final-audit regressions: `Collections_Blocking` 8 → 10,
+> `Diagnostics` 232 → 233, `Globalization` 691 → 704, `IO` 697 → 700, `Net_Sockets` 132 → 137,
+> `Runtime` 204 → 207, `Security` 38 → 41, `Text_Json` 306 → 307 and `Timers` 38 → 44.
+> No executable lost a case. The audit is now **343 remediated, 19 accepted-deviation,
+> 2 false-positive, 0 open**; every one of the former 71 `confirmed*` entries was checked against
+> current source rather than bulk-relabeled.
 >
 > **+6** on the 17,732 below, in `SharpRuntimeTests_Core_Base` (6,148 → 6,154), from the
 > **release-identity** change that gives this repository a version for the first time —
@@ -26,11 +33,12 @@
 >
 > ---
 >
-> ## THE POST-AUDIT QUEUE IS EMPTY
+> ## THE FINAL RECONCILIATION IMPLEMENTATION IS COMPLETE; FINAL VERIFICATION IS ACTIVE
 >
-> Measured 2026-08-20: `ticket` is **2,406 done, 0 todo, 3 blocked, 5 wontfix**, and `task` is fully
-> classified (1,082 ported, 15,119 ignored). This was the queue state before the final audit
-> reconciliation below; it did not prove that an audit finding could not still be fixed.
+> Measured 2026-08-22: `ticket` is **2,406 done, 1 doing (#2417), 0 todo, 3 blocked, 5 wontfix**,
+> and `task` is fully classified (**1,087 ported, 140 ignore, 14,980 ignored**). The implementation,
+> clean build and full 17,778-test gate are complete; #2417 remains `doing` only until the
+> sanitizer and complete local-CI evidence is recorded in the final checkpoint.
 >
 > **The three blocked tickets are not unfinished work; they are work this container lacks the means
 > to do**, and each was measured rather than assumed:
@@ -44,11 +52,15 @@
 >
 > ## 2026-08-22 — final audit reconciliation
 >
-> The audit index now matches `next`: **293 remediated, 43 confirmed, 28 confirmed
-> (design-complete), 364 total**. Eleven stale statuses were corrected; this pass also closes
-> SR-AUD-012, SR-AUD-237 and SR-AUD-245 with ASan+UBSan regressions. The Doxygen 1.9.8 baseline
-> is 2,675 warnings and now runs from the local gate. `docs/AuditFindingsReconciliation.md`
-> records the full disposition.
+> The audit index now matches `next`: **343 remediated, 19 accepted-deviation, 2 false-positive,
+> 0 confirmed, 0 confirmed (design-complete), 364 total**. All 71 formerly open rows were reviewed
+> individually. Stale statuses now cite the implementation that closed them; genuine in-scope
+> defects were repaired and tested; permanent practical-subset limits are named instead of being
+> left as forgotten work. SR-AUD-071/071b now consistently records its repaired disposed getter
+> and accepted non-owning-view contract. The final diff review additionally closed residual
+> lifetime/order holes in `Socket`, `System::Timers::Timer` and parameterless
+> `Process::WaitForExit()`. The Doxygen 1.9.8 baseline remains 2,675 and runs in both local and
+> GitHub gates. `docs/AuditFindingsReconciliation.md` records every final disposition.
 >
 > ---
 >

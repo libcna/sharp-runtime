@@ -21,16 +21,12 @@ namespace System::Text::Json {
      *
      * C++ counterpart of .NET System.Text.Json.JsonDocument.
      *
-     * @note **`Dispose()` is not propagated to elements handed out earlier** — SR-AUD-324, cause
-     * TJ-H, ticket **#2117**, blocked on an object-layout change. It is **not** a use-after-free:
-     * `JsonElement` holds an **owning** aliasing `shared_ptr`, so an element captured before
-     * `Dispose()` keeps the tree alive and reads **live** storage, where .NET's
-     * `CheckUseAfterDispose` would throw. `getRootElementProperty()` after `Dispose()` already
-     * throws and double `Dispose()` is already safe; it is only the previously handed-out elements
-     * that keep working. Both halves are pinned by
-     * `JsonGatedBehaviourPins.PIN2117TheDisposalFlagIsNotPropagatedToElementsHandedOutEarlier`.
-     * The cost of the safety is *retention*: `Dispose()` does not free the tree while an element
-     * survives. That is not a leak, and LSan agrees.
+     * @note `Dispose()` is propagated through shared state to every element handed out earlier
+     * (#2117 / SR-AUD-324). Such elements retain the tree only long enough to diagnose use after
+     * disposal and throw `ObjectDisposedException`; they no longer remain usable. The document
+     * releases its own state reference, double disposal remains safe, and default elements are
+     * independent of any document. Retention while an element survives is intentional safety,
+     * not a leak.
      */
     class JsonDocument : public System::IDisposable {
         // #2117: one shared state, so every element handed out can see the disposal. The
