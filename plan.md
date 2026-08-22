@@ -1,27 +1,31 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-22 — branch **`next`**. Gate **17,781 across 38 executables: 17,781
+*Last verified gate: 2026-08-22 — branch **`next`**. Gate **17,781 across 38 executables: 17,781
 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs with every executable
 run separately and continuing past failures, zero build warnings over a cache-disabled full build
-at `--parallel 2`. Graph **41 / 95**, seams **5 / 22**, negative fixtures **55 / 284**. Final
-sanitizers and the complete local-CI gate passed under #2417; no current-scope implementation or
-gate item remains open.*
+at `--parallel 2`. Graph **41 / 95**, seams **5 / 22**, negative fixtures **55 / 284**. A later
+post-#1941 reproduction found a bounded `DateTimeKind` propagation gap; #2418 is active and the
+maintenance-ready claim is suspended until its implementation and full gate complete.*
 
-## Status: current scope complete; maintenance mode ready
+## Status: one current-scope correctness workstream active (#2418)
 
 Measured 2026-08-22, not estimated:
 
 | | |
 |---|---|
 | `ticket` done | **2,407** |
-| `ticket` doing | **0** |
+| `ticket` doing | **1** |
 | `ticket` **todo** | **0** |
 | `ticket` blocked | 3 |
 | `ticket` wontfix | 5 |
 | `task` | fully classified — 1,087 ported, 140 ignore, 14,980 ignored |
 
-**The three blocked tickets are the only remaining planned work, and all three depend on external
-prerequisites this container lacks.** Each was measured rather than assumed:
+Ticket **#2418** is the only active internal work: finish the post-#1941 `DateTimeKind` ripple audit
+and repair verified propagation/validation defects in `DateTime`, `DateTimeOffset`, and
+`TimeZoneInfo`. The 364-row audit index remains fully dispositioned, but that historical closure
+does not hide newly discovered correctness work.
+
+The other three incomplete tickets are externally blocked. Each was measured rather than assumed:
 
 * **#1773** and **#2381** wait on the `next` → `develop` merge. #2381 is the sharper: `cna` builds
   against the **sibling checkout on `develop`**, where `DateTimeKind` does not exist at all, so the

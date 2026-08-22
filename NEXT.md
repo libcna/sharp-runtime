@@ -38,15 +38,18 @@
 >
 > ---
 >
-> ## CURRENT-SCOPE CLOSE-OUT IS COMPLETE; MAINTENANCE MODE IS READY
+> ## POST-#1941 DATETIMEKIND RIPPLE REPAIR IS ACTIVE (#2418)
 >
-> Measured 2026-08-22: `ticket` is **2,407 done, 0 doing, 0 todo, 3 blocked, 5 wontfix**, and
-> `task` is fully classified (**1,087 ported, 140 ignore, 14,980 ignored**). Ticket #2417 is done:
-> implementation, reconciliation, sanitizer verification and the complete local-CI gate are all
-> recorded. No actionable current-scope correctness or gate work remains in this checkout.
+> Measured 2026-08-22: `ticket` is **2,407 done, 1 doing, 0 todo, 3 blocked, 5 wontfix**, and
+> `task` is fully classified (**1,087 ported, 140 ignore, 14,980 ignored**). Ticket #2417 remains a
+> truthful closure of the 364 historical audit findings, but an independent post-#1941 probe found
+> a bounded new correctness family: `DateTimeKind` is still lost or ignored by parts of
+> `DateTime`, `DateTimeOffset`, and `TimeZoneInfo`. #2418 owns the implementation, regression,
+> stale-premise cleanup, and full-gate re-verification. The maintenance-ready claim is suspended
+> until that ticket is done.
 >
-> **The three blocked tickets are the only remaining planned work, and all three depend on external
-> prerequisites this container lacks**, as measured rather than assumed:
+> The other three incomplete tickets depend on external prerequisites this container lacks, as
+> measured rather than assumed:
 >
 > * **#1773** and **#2381** wait on the `next` → `develop` merge. #2381 is the sharper of the two:
 >   `cna` builds against the **sibling checkout on `develop`**, where `DateTimeKind` does not exist
