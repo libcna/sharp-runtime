@@ -1,20 +1,21 @@
 # Sharp Runtime plan
 
-*Last verified gate: 2026-08-22 — branch **`next`**. Gate **17,840 across 38 executables: 17,840
+*Last verified GCC gate: 2026-08-22 — branch **`next`**. Gate **17,840 across 38 executables: 17,840
 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs with every executable
 run separately and continuing past failures, zero build warnings over a cache-disabled full build
 at `--parallel 2`. Graph **41 / 96**, seams **5 / 22**, negative fixtures **55 / 284**. Ticket
-#2418 closed the bounded post-#1941 `DateTimeKind` propagation gap, and no actionable internal
-correctness work remains inside the declared practical subset.*
+#2418 closed the bounded post-#1941 `DateTimeKind` propagation gap. Ticket **#2419 is now doing**:
+an independent Clang 17 production build found four small `-Werror` regressions, so the repository
+is not called maintenance-ready again until Clang is warning-clean and a regression gate exists.*
 
-## Status: maintenance-ready for the declared scope
+## Status: #2419 in progress — maintenance mode pending the Clang gate
 
 Measured 2026-08-22, not estimated:
 
 | | |
 |---|---|
 | `ticket` done | **2,408** |
-| `ticket` doing | **0** |
+| `ticket` doing | **1** |
 | `ticket` **todo** | **0** |
 | `ticket` blocked | 3 |
 | `ticket` wontfix | 5 |
@@ -24,6 +25,10 @@ Ticket **#2418** completed the post-#1941 `DateTimeKind` ripple audit and repair
 propagation/validation defects in `DateTime`, `DateTimeOffset`, `TimeZoneInfo`, `TimeZone`, and
 their bounded consumers. The 364-row audit index remains fully dispositioned as historical audit
 truth; #2418 is a later correctness ticket and does not alter its distribution.
+
+Ticket **#2419** restores ticket #37's explicit GCC/Clang warning-policy invariant. Its bounded
+scope is the four independently reproduced Clang diagnostics plus a production-only Clang CI gate;
+it does not reopen the correctness audit or broaden the supported API subset.
 
 The other three incomplete tickets are externally blocked. Each was measured rather than assumed:
 

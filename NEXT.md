@@ -3,6 +3,15 @@
 
 # NEXT.md
 
+> **ACTIVE — #2419, 2026-08-22: restore the warning-clean Clang production build.** An
+> independent Clang 17 build found four bounded `-Werror` regressions after the GCC-only final
+> gate: one potentially evaluated `typeid`, two unused compression constants and one unused
+> WebSocket private field. The local reproducer is Clang 19.1.7. #2419 repairs those sites and
+> adds a production-only Clang CI gate so ticket #37's GCC/Clang warning-policy invariant is
+> measured continuously. The 364-row correctness audit remains fully dispositioned; maintenance
+> mode is withheld only until this portability gate is green and the full supported gate is
+> reverified.
+>
 > **Test-count floor, 2026-08-22 — 17,840 / 38, AND THE GATE IS GREEN.** The complete
 > 38-executable gate reads **17,840 run: 17,840 passed, 0 failed, 0 skipped**, zero build warnings
 > at `--parallel 2` over a cache-disabled full repository build. Graph **41 / 96**, seams **5 / 22**,
