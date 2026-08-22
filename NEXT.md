@@ -3,19 +3,19 @@
 
 # NEXT.md
 
-> **ACTIVE — #2419, 2026-08-22: restore the warning-clean Clang production build.** An
-> independent Clang 17 build found four bounded `-Werror` regressions after the GCC-only final
-> gate: one potentially evaluated `typeid`, two unused compression constants and one unused
-> WebSocket private field. The local reproducer is Clang 19.1.7. #2419 repairs those sites and
-> adds a production-only Clang CI gate so ticket #37's GCC/Clang warning-policy invariant is
-> measured continuously. The 364-row correctness audit remains fully dispositioned; maintenance
-> mode is withheld only until this portability gate is green and the full supported gate is
-> reverified.
+> **#2419 CLOSED — CLANG GATE GREEN, 2026-08-22.** An independent Clang 17 build found four
+> bounded `-Werror` regressions after the GCC-only final gate: one potentially evaluated `typeid`,
+> two unused compression constants and one unused WebSocket private field. They are repaired
+> without behavior changes. The permanent production-only gate builds **219/219** first-party
+> translation units with Clang 19.1.7 and `-Werror`: **0 warnings, 0 errors**. Six contract tests
+> pin compiler selection, all-components/no-tests scope, `-Werror`, warning detection, the
+> two-job ceiling, missing-compiler failure and local/CI wiring.
 >
 > **Test-count floor, 2026-08-22 — 17,840 / 38, AND THE GATE IS GREEN.** The complete
 > 38-executable gate reads **17,840 run: 17,840 passed, 0 failed, 0 skipped**, zero build warnings
-> at `--parallel 2` over a cache-disabled full repository build. Graph **41 / 96**, seams **5 / 22**,
-> negative fixtures **55 / 284**.
+> at `--parallel 2` over the GCC repository build. The same end-to-end local/CI gate now also
+> includes the fresh Clang production build above. Graph **41 / 96**, seams **5 / 22**, negative
+> fixtures **55 / 284**.
 >
 > **+59** on the 17,781 final-audit closure, all from #2418's post-`DateTimeKind` consumer audit:
 > `Core_Base` 6,156 → 6,178, `Globalization` 704 → 705, `IO` 700 → 705, `Net` 340 → 346,
@@ -53,13 +53,14 @@
 >
 > ---
 >
-> ## MAINTENANCE-READY FOR THE DECLARED SCOPE — #2418 CLOSED
+> ## MAINTENANCE-READY FOR THE DECLARED SCOPE — #2419 CLOSED
 >
-> Measured 2026-08-22: `ticket` is **2,408 done, 0 doing, 0 todo, 3 blocked, 5 wontfix**, and
+> Measured 2026-08-22: `ticket` is **2,409 done, 0 doing, 0 todo, 3 blocked, 5 wontfix**, and
 > `task` is fully classified (**1,087 ported, 140 ignore, 14,980 ignored**). Ticket #2417 remains a
 > truthful closure of the 364 historical audit findings; #2418 separately closes the later
-> post-#1941 `DateTimeKind` ripple discovered outside that audit. A bounded final scan found no
-> remaining actionable correctness work inside the declared practical subset.
+> post-#1941 `DateTimeKind` ripple discovered outside that audit; #2419 restores ticket #37's
+> cross-compiler warning invariant and makes it a permanent gate. A bounded final scan found no
+> remaining actionable internal work inside the declared practical subset.
 >
 > The other three incomplete tickets depend on external prerequisites this container lacks, as
 > measured rather than assumed:
@@ -70,6 +71,22 @@
 > * **#1962** needs a raw ICMP socket, hence `CAP_NET_RAW`, which this container does not have.
 >
 > The five `wontfix` entries are recorded decisions with their reasons, not oversights.
+>
+> ## 2026-08-22 — #2419: warning-clean Clang production build
+>
+> Clang-specific warnings are repaired at their source: Delegate RTTI still observes the dynamic
+> invocation-list entry type without hiding a call in `typeid`'s polymorphic operand; two dead
+> compression constants are removed; and `CancellationScope` no longer stores a redundant raw
+> owner pointer that its callback never read. No public API, behavior, test count, layout exposed
+> to consumers, or module edge changed.
+>
+> `scripts/check_clang_production_build.sh` creates a fresh tree only under `build-tmp`, selects
+> Clang for C and C++, disables tests and benchmarks, builds `All` at most two jobs, and verifies
+> every first-party production command carries `-Werror`. It runs from `local_ci_check.sh` and
+> therefore the GitHub full job. Final evidence: Clang 19.1.7 **219/219 translation units, 0
+> warnings, 0 errors**; GCC **17,840/17,840**; selective matrix **10/10**; Doxygen **2,675/2,675**;
+> Python validator tests **124/124**; ASan+UBSan **6,399** targeted tests and TSan **108/108**
+> Net.WebSockets tests.
 >
 > ## 2026-08-22 — #2418: post-#1941 `DateTimeKind` consumer audit
 >
@@ -108,8 +125,8 @@
 > ## HOW THE LAST STRETCH WENT, AND WHAT IS WORTH CARRYING FORWARD
 >
 > The queue was emptied by the date/time chain rooted at **#1940**, the #2417 audit close-out and
-> #2418's post-feature ripple audit, plus three findings made **while working on something else**.
-> That last category is worth naming, because none of the three was on any list:
+> #2418's post-feature ripple audit, plus four findings made **while working on something else**.
+> That last category is worth naming, because none of the four was on any list:
 >
 > * **#2415 — a gate had been RED for a day behind a green test count.**
 >   `scripts/check_selective_components.sh` failed on a fixture #1889 had legitimately invalidated,
@@ -125,6 +142,9 @@
 > * **A limitation found by a test of mine FAILING** (#1945): `RoundtripKind` could not carry a kind
 >   across a string, because nothing wrote a marker and nothing read one. It was declared and
 >   pinned, and SA-16.3 later closed it — with the pin **inverted rather than deleted**.
+> * **#2419 — “warning-clean” meant GCC-only.** An independent Clang 17 build found four warnings
+>   promoted to errors even though ticket #37 explicitly named GCC and Clang. The fixes are small,
+>   but the durable repair is the fresh 219-translation-unit Clang gate now run locally and in CI.
 >
 > **Three recurring process lessons, each of which cost real time this stretch:**
 >

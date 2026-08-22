@@ -1,21 +1,21 @@
 # Sharp Runtime plan
 
-*Last verified GCC gate: 2026-08-22 — branch **`next`**. Gate **17,840 across 38 executables: 17,840
+*Last verified cross-compiler gate: 2026-08-22 — branch **`next`**. GCC gate **17,840 across 38 executables: 17,840
 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs with every executable
-run separately and continuing past failures, zero build warnings over a cache-disabled full build
-at `--parallel 2`. Graph **41 / 96**, seams **5 / 22**, negative fixtures **55 / 284**. Ticket
-#2418 closed the bounded post-#1941 `DateTimeKind` propagation gap. Ticket **#2419 is now doing**:
-an independent Clang 17 production build found four small `-Werror` regressions, so the repository
-is not called maintenance-ready again until Clang is warning-clean and a regression gate exists.*
+run separately and continuing past failures, with zero build warnings at `--parallel 2`. The fresh
+Clang 19.1.7 production-only gate built **219/219** first-party
+translation units with `-Werror`, 0 warnings and 0 errors. Graph **41 / 96**, seams **5 / 22**,
+negative fixtures **55 / 284**. Ticket #2418 closed the bounded post-#1941 `DateTimeKind`
+propagation gap; #2419 restored and permanently gates ticket #37's GCC/Clang warning invariant.*
 
-## Status: #2419 in progress — maintenance mode pending the Clang gate
+## Status: maintenance-ready for the declared scope
 
 Measured 2026-08-22, not estimated:
 
 | | |
 |---|---|
-| `ticket` done | **2,408** |
-| `ticket` doing | **1** |
+| `ticket` done | **2,409** |
+| `ticket` doing | **0** |
 | `ticket` **todo** | **0** |
 | `ticket` blocked | 3 |
 | `ticket` wontfix | 5 |
@@ -26,9 +26,11 @@ propagation/validation defects in `DateTime`, `DateTimeOffset`, `TimeZoneInfo`, 
 their bounded consumers. The 364-row audit index remains fully dispositioned as historical audit
 truth; #2418 is a later correctness ticket and does not alter its distribution.
 
-Ticket **#2419** restores ticket #37's explicit GCC/Clang warning-policy invariant. Its bounded
-scope is the four independently reproduced Clang diagnostics plus a production-only Clang CI gate;
-it does not reopen the correctness audit or broaden the supported API subset.
+Ticket **#2419** restored ticket #37's explicit GCC/Clang warning-policy invariant. Four
+independently reproduced Clang diagnostics were repaired without behavior changes. A fresh
+production-only `All` build now runs from the local gate and GitHub full job, and its six contract
+tests prevent loss of compiler selection, scope, `-Werror`, warning detection or the two-job limit.
+It does not reopen the correctness audit or broaden the supported API subset.
 
 The other three incomplete tickets are externally blocked. Each was measured rather than assumed:
 
@@ -38,6 +40,13 @@ The other three incomplete tickets are externally blocked. Each was measured rat
 * **#1962** needs a raw ICMP socket, hence `CAP_NET_RAW`, which this container does not have.
 
 The five `wontfix` entries are recorded decisions with their reasons.
+
+Ticket #2419's final evidence is Clang 19.1.7 over **219/219** first-party production translation
+units with **0 warnings and 0 errors**; the unchanged GCC gate at **17,840/17,840** across 38
+executables; all ten selective configurations; Doxygen **2,675/2,675**; graph **41/96**; seams
+**5/22**; negative fixtures **55/284** over 339 compiler invocations; and Python validator tests
+**124/124**. Targeted ASan+UBSan passed **6,399** tests (Core.Base, IO.Compression and
+Net.WebSockets), and TSan passed **108/108** Net.WebSockets tests.
 
 Ticket #2418's final evidence is a warning-free cache-disabled full build; **17,840/17,840** tests
 across 38 executables; graph **41/96**; all ten selective component configurations; Doxygen
@@ -69,11 +78,12 @@ closed residual `Socket`, `Timer` and `Process::WaitForExit()` lifetime/order de
 
 The date/time chain rooted at **#1940** — #1940, #1941, #1942, #1943, #1944, #1945, #2409, #2410,
 #2412, #2414 and the final #2418 consumer ripple — together with **#1997** (all four groups),
-#2417's audit close-out and three findings made *while working on something else*: **#2415** (a
+#2417's audit close-out and four findings made *while working on something else*: **#2415** (a
 gate red for a day behind a green test count, and building into
 `/tmp`), **#2416** (`DateTime::ToString` had no standard-format table, so the two halves of one type
-disagreed about what `o` means), and #1945's `RoundtripKind` limitation, found by one of my own
-tests failing.
+disagreed about what `o` means), #1945's `RoundtripKind` limitation, found by one of my own tests
+failing, and **#2419** (an independent Clang build disproved a GCC-only warning-clean claim and led
+to a permanent second-compiler gate).
 
 Standing approvals **SA-14**, **SA-15** and **SA-16** were granted over 2026-08-20 and are recorded
 in `docs/StandingApprovals.md`; SA-16 is the one that unblocked the last four tickets.

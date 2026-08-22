@@ -190,6 +190,9 @@ The component graph is enforced rather than documented only:
 - `scripts/generate_component_catalog.py --check` rejects catalogue drift.
 - `scripts/check_selective_components.sh` defines ten isolated positive
   consumers and negative leakage fixtures.
+- `scripts/check_clang_production_build.sh` builds all 219 first-party
+  production translation units with Clang, tests disabled, and verifies from
+  the compile database that every one still carries `-Werror`.
 - `scripts/check_negative_consumer_fixtures.py` compiles every negative consumer
   fixture in `test/consumer/` **once per marked site** and requires each site to
   be rejected for its own declared reason. A fixture marks each site with
@@ -200,7 +203,8 @@ The component graph is enforced rather than documented only:
   fixtures. Compilation jobs resolve as explicit `--jobs`, then
   `SHARP_RUNTIME_BUILD_JOBS`, then the safe default 2; only 1 or 2 is accepted.
 - `.github/workflows/components.yml` runs the selective matrix and the full
-  compatibility build on Ubuntu for pushes and pull requests.
+  compatibility build on Ubuntu for pushes and pull requests. The full job
+  includes both the GCC build/test gate and the Clang production warning gate.
 
 At the current baseline the graph has **41 physical modules and 96 direct
 production dependency edges**, with no allow-listed exception. The boundary
@@ -211,11 +215,13 @@ configure `Threading` or `TimeZone`.
 ## Platform status
 
 The complete build and test baseline is currently verified on Linux with GCC.
-Other platform evidence is narrower:
+The complete production graph is additionally warning-clean on Linux with
+Clang; other platform evidence is narrower:
 
 | Platform/toolchain | Verified scope |
 |---|---|
 | Linux/GCC | Current warning-free full component build and all 17,840 tests, with no failures or skips. |
+| Linux/Clang | Clang 19.1.7 builds all 219 first-party production translation units with `-Wall -Wextra -Werror`, 0 warnings and 0 errors. Tests remain covered by the Linux/GCC row. The production-only gate runs locally and in GitHub CI. |
 | Windows/MinGW | MinGW-w64 GCC 14-win32/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. GoogleTest was not cross-built and repository CI remains Ubuntu-only. |
 | Emscripten | Emscripten 5.0.7/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. Tests were not cross-built or run, and some runtime APIs deliberately throw `PlatformNotSupportedException`. |
 | macOS/Apple Clang | Real downstream Xcode 15.4 builds drove portability fixes on 2026-07-20; this repository has no macOS job or recorded full standalone test baseline. |

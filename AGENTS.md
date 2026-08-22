@@ -18,7 +18,9 @@
    Net +6, Net.Http.Headers +2, TimeZone +18, and Xml +5; all other executables are unchanged.
    Graph 41 / 96, test-only seams 5 / 22, negative fixtures 55 / 284. The Doxygen 1.9.8
    no-regression baseline is 2,675 and is enforced both locally and in
-   CI.
+   CI. Ticket #2419 additionally makes the complete production graph a permanent Clang gate:
+   Clang 19.1.7 builds all 219 first-party translation units with `-Werror`, 0 warnings and
+   0 errors, from both `local_ci_check.sh` and the GitHub full job.
 
 <details><summary>Historical test-count ledger retained verbatim</summary>
 
@@ -226,7 +228,8 @@ reconfigure/rebuild is the exception that must be justified, never the default.
 
 ### Compile support is not runtime support
 
-The current full build/test baseline is Linux/GCC. Post-modular MinGW-w64 GCC
+The current full build/test baseline is Linux/GCC; the complete production-only `All` graph is
+also warning-clean under Clang 19.1.7 and is enforced locally and in CI. Post-modular MinGW-w64 GCC
 14-win32/CMake 3.31.6 and Emscripten 5.0.7/CMake 3.31.6 library builds both
 compile the `All` graph and a selective `Text.Json` graph without
 GoogleTest/runtime execution. Real downstream Apple Clang/Xcode 15.4 builds
