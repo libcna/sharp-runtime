@@ -32,7 +32,7 @@ namespace System::Net::WebSockets {
      * (gated on `CollectHttpResponseDetails` in .NET) and the `HttpMessageInvoker`-based
      * `ConnectAsync` overload are not reproduced — there is no `HttpMessageInvoker` concept in
      * this runtime's simplified `HttpClient`.
-     */
+         */
     class ClientWebSocket : public WebSocket {
         ClientWebSocketOptions options_;
 
@@ -176,7 +176,6 @@ namespace System::Net::WebSockets {
          *       would deadlock.
          */
         class CancellationScope {
-            ClientWebSocket*                              owner_;
             System::Threading::CancellationToken          token_;
             System::Threading::CancellationTokenRegistration registration_;
 

@@ -15,7 +15,6 @@ namespace System::IO::Compression {
         constexpr intcs MaxQuality = 9;
         constexpr intcs MinWindowLog = 8;
         constexpr intcs MaxWindowLog = 15;
-        constexpr intcs DefaultWindowLog = MaxWindowLog;
         constexpr intcs Deflate_DefaultMemLevel = 8;
         constexpr intcs Deflate_NoCompressionMemLevel = 7;
 

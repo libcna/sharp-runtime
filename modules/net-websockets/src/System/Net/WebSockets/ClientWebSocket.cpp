@@ -403,7 +403,7 @@ WebSocketState ClientWebSocket::getStateProperty() const { return loadState(); }
 
 ClientWebSocket::CancellationScope::CancellationScope(ClientWebSocket* owner,
                                                       System::Threading::CancellationToken token)
-    : owner_(owner), token_(token) {
+    : token_(token) {
     // A token already cancelled means the operation never starts. .NET reaches the same place by
     // awaiting its receive/send mutex with the token, which throws before any I/O.
     token_.ThrowIfCancellationRequested();

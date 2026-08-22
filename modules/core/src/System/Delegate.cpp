@@ -141,7 +141,13 @@ namespace {
 // unchanged and this is not an SA-3 change.
 const std::type_info& effectiveDelegateType(const Delegate& d,
                                             const std::vector<std::shared_ptr<Delegate>>& list) {
-    return list.empty() ? typeid(d) : typeid(*list.front());
+    if (list.empty()) return typeid(d);
+
+    // Resolve the invocation-list access before entering typeid's potentially evaluated
+    // polymorphic operand.  This preserves the entry's dynamic type while keeping Clang's
+    // -Wpotentially-evaluated-expression warning from treating list.front() as a hidden call.
+    const Delegate& first = *list.front();
+    return typeid(first);
 }
 
 }  // namespace
