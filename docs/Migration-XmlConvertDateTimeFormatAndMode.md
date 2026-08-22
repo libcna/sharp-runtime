@@ -27,7 +27,7 @@ does not track DateTimeKind (see its own doc-comment), so Local/Utc/Unspecified/
 be distinguished here"*. **#1941 phase 1 gave `DateTime` a `Kind`** and **phase 2 made it convert by
 that kind** — the sentence described a runtime that no longer exists.
 
-## Why this could land while #1942 stays blocked
+## Why this could land before #1942
 
 #1941 phase 2 had to take an `ILocalTimeZone` **as a parameter**, because `Core.Base` cannot name a
 time zone and .NET reaches `TimeZoneInfo.Local` internally. **`modules/xml` is under no such

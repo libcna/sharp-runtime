@@ -62,6 +62,16 @@ in `Migration-TimeZoneInfoDateTimeKind.md`.
 | cookies / HTTP date consumers | Cookie expiry is a UTC-timeline comparison in .NET. `Expires` is converted by Kind before comparison with UtcNow; HTTP `Expires` and `Max-Age` values are stored as Utc. This requires one new private `Net -> TimeZone` edge, moving the graph to 41 / 96. |
 | exact parsing / formatting | The style-taking exact parsers own kind-aware `z`/`K` behavior through an explicit zone parameter. `XmlConvert` now routes both format-taking doors through them with its required outer-whitespace styles, so explicit DateTimeOffset offsets are captured instead of overwritten with the local offset. The general parser and local DateTime `K` limitation below remain explicit. |
 
+The canonical `TimeZoneInfo::Utc()` function-static and zero-offset platform fallbacks construct
+their `TimeSpan` in place. They do not copy the cross-translation-unit `TimeSpan::Zero` global:
+`Utc()` is legal from a consumer's pre-main initializer, where such a copy would otherwise have an
+undefined static-initialization order. A pre-main regression exercises that entry under UBSan.
+
+`XmlConvert` also keeps the XSD lexical boundary narrower than the general date parser. Only an
+upper-case `Z` or an exact `+/-hh:mm` suffix is a timezone marker; lower-case `z` and compact or
+variable-width spellings such as `+8`, `+2:5`, `+800`, and `+0800` now fail at both DateTime and
+DateTimeOffset doors instead of being accepted by the broader parser with their offset discarded.
+
 ## Remaining intentional subset boundaries
 
 These are declared limitations, not forgotten follow-ups:

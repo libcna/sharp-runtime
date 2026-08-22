@@ -87,11 +87,11 @@ and with the same result: it is a bare enum with two inline operators, its only 
 Globalization *tests*, and ownership by logical path uniqueness means **no include line changed**.
 Graph stays **41 / 94**.
 
-## 5. What this does not do
+## 5. Historical boundary at this checkpoint
 
-- **The `DateTime` half of #1942** — the kind-affecting styles — still needs the timezone contract
-  (#1941 phase 2). Unchanged and still blocked.
-- **#1943's multi-format and span shapes** are #1944's.
+- At this checkpoint the `DateTime` half of #1942 still needed #1941 phase 2's timezone contract.
+  Both later landed; #2418 then completed the Kind propagation audit across consumers.
+- #1943's remaining exact shapes subsequently landed, and #1944 supplied the multi-format forms.
 - Seven mutations after reformulation, five caught. **Two are proven equivalences**: the two
   empty-name guards are defence in depth, because `len <= bestLen` with `bestLen` starting at zero
   already excludes a zero-length name arithmetically. **Three mutations were invalid as first

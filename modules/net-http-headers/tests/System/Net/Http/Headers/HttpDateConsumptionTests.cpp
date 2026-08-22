@@ -129,8 +129,9 @@ TEST(HttpDateConsumptionTests, ContentDispositionsThreeDatePropertiesRejectTrail
 TEST(HttpDateConsumptionTests, AValidDateStillParsesToTheSameInstant) {
     RetryConditionHeaderValue parsed{System::TimeSpan::Zero};
     ASSERT_TRUE(RetryConditionHeaderValue::TryParse(kValid, parsed));
-    ASSERT_TRUE(parsed.getDateProperty().has_value());
-    const System::DateTimeOffset& d = *parsed.getDateProperty();
+    const auto date = parsed.getDateProperty();
+    ASSERT_TRUE(date.has_value());
+    const System::DateTimeOffset& d = *date;
     EXPECT_EQ(d.getYearProperty(), 1994);
     EXPECT_EQ(d.getMonthProperty(), 11);
     EXPECT_EQ(d.getDayProperty(), 6);

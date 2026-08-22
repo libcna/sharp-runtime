@@ -252,14 +252,12 @@ namespace System::detail {
      * CONCATENATED: .NET's `s` uses a `T` separator where `u` uses a space, and `R` ends in a
      * literal `GMT` that the date-only `R` does not have.
      *
-     * TWO OF .NET'S PATTERNS ARE TRANSCRIBED WITH A NAMED LOSS, AND THE LOSS IS THIS PORT'S
-     * NO-ZONE-TOKEN BOUNDARY RATHER THAN AN OVERSIGHT:
-     *   * `o`/`O` is `yyyy'-'MM'-'dd'T'HH':'mm':'ss'.'fffffffK` in .NET. `K` renders as the empty
-     *     string for a `DateTimeKind::Unspecified` value, so the pattern below is exactly .NET's
-     *     `o` for that kind and REFUSES the `Z` and `+hh:mm` forms .NET would accept.
+     * The two easily confused zone rows are transcribed in full:
+     *   * `o`/`O` is `yyyy'-'MM'-'dd'T'HH':'mm':'ss'.'fffffffK`; since #1942, `K` accepts the
+     *     empty Unspecified form, literal `Z`, and the supported numeric offset form.
      *   * `u` is `yyyy'-'MM'-'dd HH':'mm':'ss'Z'`, whose `Z` is a LITERAL rather than a zone
-     *     token -- so it is transcribed in full and merely does not set a kind.
-     * Both are pinned, so a later ticket adding a zone token has to revisit them by name.
+     *     token, so it does not set a kind.
+     * Tests distinguish these two rules and pin the complete `o` round trip.
      */
     [[nodiscard]] inline std::string ExpandStandardDateTimeFormat(const std::string& format) {
         if (format.size() != 1) return {};

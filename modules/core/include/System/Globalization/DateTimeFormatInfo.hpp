@@ -107,8 +107,9 @@ public:
      * #2409 `CultureInfo::CurrentCulture` is itself the invariant culture until something sets
      * it -- so the two agree in the default state and differ only once a culture is set. A caller
      * who wants the current culture's info passes that culture as the provider, which
-     * `CultureInfo`'s own `GetFormat` answers. The ticket that makes the parsers culture-aware
-     * (#1942) has to revisit this, and a pin says so.
+     * `CultureInfo`'s own `GetFormat` answers. Provider-aware exact parsing added by #1942 uses
+     * that path today; the explicit remaining deviation is only the null-provider fallback to
+     * invariant info at this component boundary.
      *
      * @note .NET additionally short-circuits on `provider.GetType() == typeof(CultureInfo)`
      * (`:313-316`) to reach a cached `_dateTimeInfo` field. That is a lookup optimisation for a

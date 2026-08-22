@@ -6,8 +6,10 @@
 #include "System/TimeZoneNotFoundException.hpp"
 #include "TimeZonePosixSupport.hpp"
 #include "System/InvalidTimeZoneException.hpp"
+#include <cstddef>
 #include <cstdlib>
 #include <ctime>
+#include <mutex>
 
 #if defined(_WIN32)
 #  include <windows.h>
@@ -60,7 +62,7 @@ const TimeZoneInfo& TimeZoneInfo::Local() {
         DYNAMIC_TIME_ZONE_INFORMATION tzi{};
         const DWORD result = GetDynamicTimeZoneInformation(&tzi);
         if (result == TIME_ZONE_ID_INVALID)
-            return TimeZoneInfo("Local", TimeSpan::Zero, "Local", "Local", "Local", false);
+            return TimeZoneInfo("Local", TimeSpan(0LL), "Local", "Local", "Local", false);
         // Bias values are minutes west of UTC. BaseUtcOffset is the STANDARD offset, not the
         // offset active today, and SupportsDaylightSavingTime describes the zone's rules rather
         // than whether today's date happens to fall in daylight time.
@@ -73,7 +75,7 @@ const TimeZoneInfo& TimeZoneInfo::Local() {
         TimeSpan offset = TimeSpan::FromSeconds(static_cast<double>(offset_secs));
         return TimeZoneInfo("Local", offset, standardName, standardName, daylightName, hasDst);
 #elif defined(__EMSCRIPTEN__)
-        return TimeZoneInfo("Local", TimeSpan::Zero, "Local", "Local", "Local", false);
+        return TimeZoneInfo("Local", TimeSpan(0LL), "Local", "Local", "Local", false);
 #else
         std::lock_guard<std::mutex> lock(detail::processTimeZoneMutex());
         detail::ZoneMetadata meta = detail::describeSelectedZone(detail::currentUtcYear());
@@ -304,13 +306,11 @@ std::shared_ptr<TimeZoneInfo> TimeZoneInfo::FindSystemTimeZoneById(const std::st
         const long offset_secs = -(tzi.Bias + tzi.StandardBias) * 60L;
         const bool hasDst = dtzi.DynamicDaylightTimeDisabled == FALSE &&
                             tzi.StandardDate.wMonth != 0 && tzi.DaylightDate.wMonth != 0;
-        char stdName[64] = {};
-        char dstName[64] = {};
-        WideCharToMultiByte(CP_UTF8, 0, tzi.StandardName, -1, stdName, sizeof(stdName), nullptr, nullptr);
-        WideCharToMultiByte(CP_UTF8, 0, tzi.DaylightName, -1, dstName, sizeof(dstName), nullptr, nullptr);
+        const std::string standardName = wideZoneNameOrFallback(tzi.StandardName, id);
+        const std::string daylightName = wideZoneNameOrFallback(tzi.DaylightName, standardName);
         TimeSpan offset = TimeSpan::FromSeconds(static_cast<double>(offset_secs));
         return std::shared_ptr<TimeZoneInfo>(
-            new TimeZoneInfo(id, offset, id, stdName, dstName, hasDst));
+            new TimeZoneInfo(id, offset, id, standardName, daylightName, hasDst));
     }
     throw System::TimeZoneNotFoundException(
         "The time zone ID '" + id + "' was not found on the local computer.");

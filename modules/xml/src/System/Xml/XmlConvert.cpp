@@ -487,8 +487,9 @@ namespace {
     // phase 2 made it convert by that kind, so the sentence describes a runtime that no longer
     // exists.
     //
-    // AND THIS MODULE CAN REACH A ZONE WHERE `Core.Base` CANNOT, which is the whole reason #1942
-    // stays blocked while this does not. #1941 phase 2 had to take an `ILocalTimeZone` as a
+    // AND THIS MODULE CAN REACH A ZONE WHERE `Core.Base` CANNOT. At the #1945 checkpoint that was
+    // why this work could land before #1942; #1942 has since completed. #1941 phase 2 had to take
+    // an `ILocalTimeZone` as a
     // PARAMETER, because `Core.Base` cannot name a time zone and .NET reaches `TimeZoneInfo.Local`
     // internally. `modules/xml` is under no such constraint: `TimeZone` depends on `Core.Base`
     // alone, so taking it as a PRIVATE dependency is not a cycle, and
@@ -641,31 +642,51 @@ namespace {
             kind = System::DateTimeKind::Utc;
             return;
         }
+        const auto invalidTimezone = [] {
+            throw System::FormatException(
+                "The string is not a valid XSD dateTime value: the timezone must be 'Z' or "
+                "+/-hh:mm.");
+        };
+        // DateTime's intentionally broader general grammar accepts lower-case `z`; XSD's lexical
+        // marker is case-sensitive, so it must not reach that parser and silently lose its Kind.
+        if (text.back() == 'z') invalidTimezone();
+
         // A numeric offset is exactly six characters, `+hh:mm` or `-hh:mm`. Matching a SHAPE
         // rather than scanning backwards for a sign is what stops a date's own `-` separator
         // from being read as one -- `2024-06-15` ends in `06-15`, which a looser rule accepts.
-        if (text.size() < 6) return;
-        const std::string tail = text.substr(text.size() - 6);
-        if ((tail[0] != '+' && tail[0] != '-') || tail[3] != ':') return;
         auto isDigit = [](char c) { return c >= '0' && c <= '9'; };
-        if (!isDigit(tail[1]) || !isDigit(tail[2]) || !isDigit(tail[4]) || !isDigit(tail[5]))
-            return;
-
-        const int hours = (tail[1] - '0') * 10 + (tail[2] - '0');
-        const int minutes = (tail[4] - '0') * 10 + (tail[5] - '0');
-        const int magnitudeMinutes = hours * 60 + minutes;
-        if (minutes > 59 || magnitudeMinutes > 14 * 60) {
-            // XSD's numeric timezone bound is exactly +/-14:00. Leaving the marker attached and
-            // falling through to DateTime::Parse would be unsafe here because that broader
-            // practical-subset grammar deliberately accepts and discards offsets such as
-            // +14:59. XmlConvert must reject the invalid XSD value explicitly.
-            throw System::FormatException(
-                "The string is not a valid XSD dateTime value: timezone offset is outside "
-                "+/-14:00.");
+        if (text.size() >= 6) {
+            const std::string tail = text.substr(text.size() - 6);
+            if ((tail[0] == '+' || tail[0] == '-') && tail[3] == ':' &&
+                isDigit(tail[1]) && isDigit(tail[2]) &&
+                isDigit(tail[4]) && isDigit(tail[5])) {
+                const int hours = (tail[1] - '0') * 10 + (tail[2] - '0');
+                const int minutes = (tail[4] - '0') * 10 + (tail[5] - '0');
+                const int magnitudeMinutes = hours * 60 + minutes;
+                if (minutes > 59 || magnitudeMinutes > 14 * 60) {
+                    // XSD's numeric timezone bound is exactly +/-14:00. Leaving the marker
+                    // attached and falling through to DateTime::Parse would be unsafe here
+                    // because that broader practical-subset grammar deliberately accepts and
+                    // discards offsets such as +14:59.
+                    throw System::FormatException(
+                        "The string is not a valid XSD dateTime value: timezone offset is outside "
+                        "+/-14:00.");
+                }
+                offsetMinutes = (tail[0] == '-' ? -1 : 1) * magnitudeMinutes;
+                kind = System::DateTimeKind::Local;
+                text.erase(text.size() - 6);
+                return;
+            }
         }
-        offsetMinutes = (tail[0] == '-' ? -1 : 1) * magnitudeMinutes;
-        kind = System::DateTimeKind::Local;
-        text.erase(text.size() - 6);
+
+        // No canonical marker was found. A plus is never part of the supported date/time body;
+        // a final minus beyond the date separators is likewise a timezone attempt. Reject these
+        // before the broader DateTime parser accepts `+8`, `+2:5`, `+800` or `+0800` and discards
+        // them. Ordinary dates such as 2024-06-15 and 06-15-2024 keep their two separators.
+        const std::size_t plus = text.rfind('+');
+        const std::size_t minus = text.rfind('-');
+        if (plus != std::string::npos || (minus != std::string::npos && minus > 7))
+            invalidTimezone();
     }
 
     /**

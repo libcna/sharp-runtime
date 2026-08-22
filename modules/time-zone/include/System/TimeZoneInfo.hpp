@@ -54,8 +54,10 @@ namespace System {
          * @brief Represents the date and time when a time zone changes from standard
          * time to daylight saving time, or vice versa.
          *
-         * C++ counterpart of .NET System.TimeZoneInfo.TransitionTime.
-         * In this implementation all instances are stubs; DST transitions are not modelled.
+         * C++ counterpart of .NET System.TimeZoneInfo.TransitionTime. The value contract,
+         * factories, validation, equality, and hashing are implemented; TimeZoneInfo's system
+         * zones deliberately do not consume the transition values because their adjustment-rule
+         * model remains outside the practical subset.
          */
         struct TransitionTime {
             DateTime   timeOfDay_;
@@ -747,7 +749,10 @@ namespace System {
          * C++ counterpart of .NET TimeZoneInfo.Utc.
          */
         static const TimeZoneInfo& Utc() {
-            static TimeZoneInfo tz("UTC", TimeSpan::Zero,
+            // Do not copy TimeSpan::Zero here. A consumer may call Utc() from a global
+            // constructor before TimeSpan.cpp's dynamic initialization has run; constructing
+            // the polymorphic value in place avoids that cross-TU initialization-order UB.
+            static TimeZoneInfo tz("UTC", TimeSpan(0LL),
                                    "Coordinated Universal Time",
                                    "Coordinated Universal Time",
                                    "Coordinated Universal Time", false);

@@ -28,8 +28,9 @@ natural place to look is `TimeZoneInfo`. **Measured, that type cannot supply one
 documented as limitations on the type itself, with `GetAdjustmentRules()` a **permanent** deviation
 since #2185.
 
-**`System::TimeZone::CurrentTimeZone()` is the one that is per-date.** On POSIX it resolves both
-local wall-clock questions and UTC-instant conversion questions from the process zone. Those are
+**`System::TimeZone::CurrentTimeZone()` is the one that is per-date.** On POSIX and Windows it
+resolves both local wall-clock questions and UTC-instant conversion questions from the process
+zone (through libc zone state and per-year Win32 rules respectively). Those are
 not interchangeable around a DST transition: a `Utc` DateTime passed to the public
 `TimeZone::GetUtcOffset` returns zero, while `DateTime::ToLocalTime` uses the zone's separate
 UTC-instant resolver to select the offset that applies at that instant. Ticket #2418 split the two

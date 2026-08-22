@@ -8,6 +8,8 @@
 #include "System/TimeSpan.hpp"
 #include "System/detail/ProcessTimeZoneState.hpp"
 
+#include <string>
+
 using System::TimeZone;
 using System::DateTime;
 using System::TimeSpan;
@@ -50,9 +52,8 @@ TEST(TimeZoneTest, IsDaylightSavingTime) {
     EXPECT_FALSE(tz.IsDaylightSavingTime(now));
 }
 
-TEST(TimeZoneTest, CurrentTimeZoneNotNull) {
-    const TimeZone& tz = TimeZone::CurrentTimeZone();
-    (void)tz;
+TEST(TimeZoneTest, CurrentTimeZoneDoesNotThrow) {
+    EXPECT_NO_THROW((void)TimeZone::CurrentTimeZone());
 }
 
 TEST(TimeZoneTest, CurrentTimeZoneHasStandardName) {

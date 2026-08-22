@@ -419,8 +419,8 @@ TEST(XmlConvertDateTimeMode1945Tests, TheModeMatrixStampsTwiceAndConvertsTwice) 
               XmlConvert::ToString(unspecified, XmlDateTimeSerializationMode::RoundtripKind));
 }
 
-// THE TWO CELLS THAT ACTUALLY MOVE THE TICKS, and the reason this ticket could land while #1942
-// stays blocked: `Core.Base` cannot name a time zone, so #1941 phase 2 had to take one as a
+// THE TWO CELLS THAT ACTUALLY MOVE THE TICKS, and the reason this ticket could land before #1942:
+// `Core.Base` cannot name a time zone, so #1941 phase 2 had to take one as a
 // parameter -- but `modules/xml` CAN, `TimeZone` depending on `Core.Base` alone. So XmlConvert's
 // signatures stay exactly .NET's, with no zone parameter, because none is needed here.
 TEST(XmlConvertDateTimeMode1945Tests, UtcAndLocalConvertAgainstThisProcessZone) {
@@ -632,6 +632,16 @@ TEST(XmlConvertDateTimeMode1945Tests, XsdNumericZoneIsBoundedAtExactlyFourteenHo
                  System::FormatException);
     EXPECT_THROW((void)XmlConvert::ToDateTimeOffset(" 2024-06-15T12:00:00+14:01 "),
                  System::FormatException);
+}
+
+TEST(XmlConvertDateTimeMode1945Tests, XsdRejectsNonCanonicalTimezoneSuffixesAtBothDoors) {
+    using System::Xml::XmlConvert;
+
+    for (const char* suffix : {"+8", "+2:5", "+800", "+0800", "z"}) {
+        const std::string value = std::string("2024-06-15T10:20:30") + suffix;
+        EXPECT_THROW((void)XmlConvert::ToDateTime(value), System::FormatException) << suffix;
+        EXPECT_THROW((void)XmlConvert::ToDateTimeOffset(value), System::FormatException) << suffix;
+    }
 }
 
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)

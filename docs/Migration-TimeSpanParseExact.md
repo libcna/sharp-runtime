@@ -87,7 +87,7 @@ Gate: **17,708 / 38, 0 failed, 0 skipped** (+8; `SharpRuntimeTests_Core_Base` 6,
 Module graph **41 / 95**, unchanged; catalogue regenerated. Downstream: **zero sites** in `cna` and
 `mobile-eggbert`.
 
-## What #1943 still has left
+## What #1943 still had left at this checkpoint
 
 `DateTimeOffset::ParseExact`. It needs a zone for the **no-offset** case: .NET's
 `DateTimeStyles.None` gives the result the **local** offset, and `Core.Base` cannot name a zone —
@@ -97,3 +97,7 @@ and it is recorded here rather than taken, because the no-offset default still n
 `XmlConvert::ToDateTimeOffset(s, format)` composes the two today (#1945) in the module that *can*
 name a zone, and a later `DateTimeOffset::ParseExact` should **absorb** that body rather than sit
 beside it.
+
+**Current state:** #1943 subsequently added the real `DateTimeOffset::ParseExact` grammar with an
+explicit `ILocalTimeZone` parameter for the no-offset case, and #1945 now delegates its XML exact
+door to that implementation. #2418 re-audited its Kind/offset propagation.

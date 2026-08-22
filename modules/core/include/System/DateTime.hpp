@@ -42,8 +42,9 @@ namespace System {
      *   honours the resolved `DateTimeFormatInfo`'s month and day names; `Parse`/`TryParse` still
      *   take no provider, deliberately, because this port's general date parser reads no
      *   culture-driven token, so a provider overload there could only accept and ignore one --
-     *   which #1940's own acceptance criterion forbids. Widening the parser is #1942.
-     *   `ToString(format)` and the parsers use invariant numeric tokens only.
+     *   which #1940's own acceptance criterion forbids. Provider-aware `ParseExact` overloads
+     *   added by #1942 cover the exact grammar; `ToString(format)` and the general parsers use
+     *   invariant numeric tokens only.
      */
     class ILocalTimeZone;
 
@@ -525,8 +526,9 @@ namespace System {
          * a null provider, which resolves to the invariant info, whose names are byte-for-byte
          * the tables this method used to hard-code -- so `ToString(format)` is unchanged, which is
          * the other half of the criterion ("keep all parsers semantically unchanged").
-         * @note Numeric tokens, separators and quoting are untouched: they are not culture-driven
-         * in this port, and widening them is #1942's subject rather than this ticket's.
+         * @note Numeric tokens, separators and quoting remain invariant in this practical subset.
+         * Provider-aware exact parsing landed later under #1942, but it did not widen this
+         * formatter beyond the named month/day tables above.
          */
         [[nodiscard]] std::string ToString(const std::string& format,
                                             const System::IFormatProvider* provider) const;

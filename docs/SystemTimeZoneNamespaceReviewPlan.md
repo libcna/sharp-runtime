@@ -46,15 +46,15 @@ code was changed (§6). It is the only remaining candidate that is simultaneousl
 open count among genuinely unreviewed namespaces, zero-high, zero-blocked, zero-approval-gated, and
 fully decidable from data that is physically present.
 
-### 1.2 The reference tree is absent and that is *not* a blocker here
+### 1.2 Reference availability at the review checkpoint
 
-`/rv` does not exist in this container, and `doxygen` and `ccache` are absent too. That blocks
-*message-text* parity questions and nothing else in this namespace: five of the seven findings are
+At the #2176 review checkpoint the .NET reference tree was unavailable. That blocked
+*message-text* parity questions and nothing else in this namespace: five of the seven findings were
 **self-consistency or validation** questions (an out parameter that is not written, a factory with
 no validation, an equality/hash pair that disagree with each other, a property that contradicts its
 own doc-comment), and the audit reports for the other two carry **direct current-.NET probe
-results** recorded at audit time. Where a question genuinely needs .NET and cannot be settled here,
-it is deferred explicitly in §17 rather than guessed.
+results** recorded at audit time. The remaining reference questions were recorded instead of
+guessed and were subsequently answered and closed by #2186; §17 now preserves those outcomes.
 
 ---
 
@@ -68,7 +68,7 @@ Physical component `SharpRuntime::TimeZone` → target `sharp_runtime_time_zone`
 | `modules/time-zone/include/System/TimeZoneInfo.hpp` | 719 | the whole public surface: `TimeZoneInfo` + nested `TransitionTime` + nested `AdjustmentRule` |
 | `modules/time-zone/include/System/TimeZone.hpp` | 62 | legacy abstract `TimeZone` + `CurrentTimeZone()` |
 | `modules/time-zone/include/System/TimeZoneNotFoundException.hpp` | 22 | lookup failure |
-| `modules/time-zone/include/System/InvalidTimeZoneException.hpp` | 60 | corrupt zone data (declared; **never thrown** by this module today) |
+| `modules/time-zone/include/System/InvalidTimeZoneException.hpp` | 60 | corrupt zone data; non-TZif files now throw it (#2186) |
 | `modules/time-zone/src/System/TimeZoneInfo.cpp` | 309 | POSIX/Windows lookup, `Local()`, the CLDR IANA↔Windows table |
 | `modules/time-zone/src/System/TimeZone.cpp` | 39 | the `CurrentTimeZone()` adapter |
 | `modules/time-zone/tests/System/TimeZoneInfoTests.cpp` | 608 | 75 tests |
@@ -137,7 +137,7 @@ constructor. Recorded in §18.
 | **SR-AUD-226** `AdjustmentRule` accepts `dateEnd < dateStart` | medium | **compatible implementation** | **#2179** | yes — new rejection, audit-probe-evidenced |
 | **SR-AUD-227** equality is case-sensitive while the hash is case-insensitive | medium | **compatible implementation** | **#2180** | yes — also repairs an internal contract breach |
 | **SR-AUD-229** IANA lookup records the *current* offset as `BaseUtcOffset` | medium | **compatible implementation** | **#2181** | yes — the implementation contradicts its own doc-comment |
-| **SR-AUD-228** `HasSameRules` reduces every rule set to offset + a bool | medium | **design-first, then gated** | **#2185** (design done, implementation `needs_user`) | **no** — the complete repair stores adjustment rules, an object-layout change |
+| **SR-AUD-228** `HasSameRules` reduces every rule set to offset + a bool | medium | **accepted permanent deviation** | **#2185** (closed after the proposed sampled-rule design proved insufficient) | **no** — faithful repair requires out-of-scope TZif rule parsing |
 
 **No finding disappears and no finding is reclassified as a false premise.** All seven are real and
 all seven reproduce (§6).
@@ -149,7 +149,7 @@ identifier:
 |---|---|
 | **#2183** | `FindSystemTimeZoneById` accepts the **7 non-TZif regular files** shipped inside `/usr/share/zoneinfo`, and accepts malformed identifiers (`America//New_York`, `./America/New_York`, an embedded NUL) |
 | **#2184** | the `TZ` save/restore window is not exception-safe, and an **empty-but-set** `TZ` is deleted rather than restored |
-| **#2186** | deferred verification — five parity questions with no measurable answer in this container |
+| **#2186** | subsequently closed five reference-parity questions: three repairs and two already-correct outcomes |
 
 ---
 
@@ -203,8 +203,9 @@ does not mention it and because it is the reason CCF-004 is *not* implicated her
 
 Both `CreateAdjustmentRule` overloads accept the reversed range. Measurement also shows
 `dateStart` with a time-of-day component, a `daylightDelta` of +15 hours, and a `daylightDelta` of
-30 seconds are all accepted. Only the reversed range carries audit evidence; the other three go to
-#2186 rather than being repaired on a recollection.
+30 seconds are all accepted. Only the reversed range carried audit evidence at this checkpoint;
+the other three went to #2186 rather than being repaired on a recollection. #2186 later answered
+them from the reference and landed the required validation.
 
 ### 5.6 SR-AUD-227's hash is locale-dependent, which the audit does not say
 
@@ -222,7 +223,11 @@ tail padding. A second `bool` fits that padding and is layout-neutral, confirmed
 `std::vector<std::shared_ptr<AdjustmentRule>>` (24 bytes) takes it to **184**, and reordering the
 members does not help — the best packing available is also 184. `HasSameRules` cannot return
 `false` where .NET does without rule data to compare, so the complete repair needs that vector.
-This is why #2185's implementation half is gated and #2185's design half is not.
+This was the measured layout cost of #2185's initial proposal. Later probes showed that the
+proposal itself could not work: monthly sampling cannot distinguish New York from Havana, and a
+single sampled year cannot represent rule eras. Faithful repair requires TZif rule structures,
+which the 2026-08-19 user decision placed outside this practical subset. The 160 → 184 cost is
+therefore recorded but not paid; SR-AUD-228 is an accepted permanent deviation, not a live gate.
 
 > **Correction.** Sections 5.7 and 11 of this document first carried an *estimate* of 144 → 168,
 > written before the shape was compiled, and that estimate reached
@@ -310,8 +315,8 @@ one that needs storage the type does not have.
 #2181 (standard offset + names)      ── needs #2184 ───┘   of FindSystemTimeZoneById
 #2182 (legacy adapter per date)      ── needs #2181 (correct standard/daylight names) and the
                                         shared POSIX support header #2184 introduces
-#2185 (SR-AUD-228 design)            record only
-#2186 (deferred verification)        record only
+#2185 (SR-AUD-228)                   closed as a permanent deviation after design probes
+#2186 (reference verification)       completed after the reference became available
 ```
 
 Implementation order: **#2177 → #2178 → #2179 → #2180 → #2184 → #2183 → #2181 → #2182**, then the
@@ -328,7 +333,7 @@ wrong-answer classes with no diagnostic; neither is a memory-safety class.
 
 ---
 
-## 11. Compatibility / gated / deferred matrix
+## 11. Compatibility and final-disposition matrix
 
 | Ticket | Class | Source break | ABI / layout / vtable | Behaviour change | Gate |
 |---|---|---|---|---|---|
@@ -340,8 +345,8 @@ wrong-answer classes with no diagnostic; neither is a memory-safety class.
 | #2182 | compatible | none | none (file-local class) | legacy adapter becomes date-sensitive | none |
 | #2183 | **documented break** | none | none | 7 data files and 4 malformed id shapes now throw | none needed — they were never zones |
 | #2184 | compatible | none | none | an empty-but-set `TZ` is restored as empty | none |
-| #2185 | **gated** | would change `sizeof` 160 → 184 (measured) | **object layout** | `HasSameRules` would distinguish rule sets | **needs_user** |
-| #2186 | record | — | — | — | needs `/rv` or a managed runtime |
+| #2185 | **accepted deviation** | none | none; the measured 160 → 184 proposal was not taken | `HasSameRules` remains one-directionally permissive | closed: TZif rule parsing is out of scope |
+| #2186 | **documented compatibility repairs** | none | none | conversions clamp; adjustment-rule validation and non-zone exception classification now match .NET | closed from reference evidence |
 
 **No public signature, virtual function, vtable slot, object layout, mangled symbol or
 `noexcept` specification changes in #2177–#2184.** Verified by `static_assert` in the tests and by
@@ -380,7 +385,7 @@ wrong-answer classes with no diagnostic; neither is a memory-safety class.
 | Platform | Effect |
 |---|---|
 | Linux/POSIX | all of it; this is the tested baseline |
-| Windows | #2418 repairs the `Bias + StandardBias` standard-offset formula, keeps standard and daylight names distinct, and makes the legacy `TimeZone` adapter select the per-year system rule for local-wall-clock and UTC-instant questions. Windows-only compile/contract pins guard the branches; runtime CI remains Ubuntu-only. |
+| Windows | #2418 repairs the `Bias + StandardBias` standard-offset formula, keeps standard and daylight names distinct, and makes the legacy `TimeZone` adapter select the per-year system rule for local-wall-clock and UTC-instant questions. The branch was reviewed for MSVC portability, but the tracked CI is Ubuntu-only and does not compile or execute it. |
 | Emscripten | The zero-offset model remains, but `Local()` is now a distinct Local-identity object rather than the canonical Utc singleton, so Kind propagation remains truthful. Non-Local/non-UTC database lookup is still unsupported. |
 | macOS | uses the POSIX branch. `/usr/share/zoneinfo` is present on macOS, so the TZif check and the month scan behave as on Linux. Not executed here — the repository's tracked CI is Ubuntu-only |
 
@@ -461,23 +466,23 @@ TSan run is reported as "no report on this workload", never as "the module is th
 | #2182 | P2 | M | SR-AUD-223 — the legacy `CurrentTimeZone` adapter must answer per date |
 | #2183 | P2 | M | a non-TZif file and a malformed identifier are accepted as time zones |
 | #2184 | P3 | S | the `TZ` save/restore window is not exception-safe and drops an empty-but-set `TZ` |
-| #2185 | P2 | — | DESIGN — `HasSameRules` cannot distinguish rule sets (SR-AUD-228); implementation gated |
-| #2186 | P3 | — | DEFERRED VERIFICATION — five `time-zone` parity questions with no answer in this container |
+| #2185 | P2 | — | CLOSED — SR-AUD-228 accepted as a permanent one-directional deviation; faithful TZif rule parsing is out of scope |
+| #2186 | P3 | — | CLOSED — five reference-parity questions answered; three repairs and two already-correct outcomes |
 
 ---
 
-## 17. Missing evidence — what is deferred and exactly why
+## 17. Reference questions closed by #2186
 
-| Question | Why it cannot be answered here | Ticket |
-|---|---|---|
-| Do `ConvertTimeFromUtc`/`ConvertTimeToUtc` **clamp** at `DateTime::MinValue`/`MaxValue` (as `ConvertUtcToTimeZone` appears to) or throw, as this port does? | needs the .NET source or a managed runtime | #2186 |
-| Does `AdjustmentRule.CreateAdjustmentRule` also reject a `dateStart`/`dateEnd` carrying a time-of-day, a `daylightDelta` outside ±14 h, and a sub-minute `daylightDelta`? | recollection only; the audit's probe covered the reversed range alone | #2186 |
-| What are .NET's **exact resource strings** for the argument diagnostics #2178/#2179 add? | needs `/rv`; the exception *types* are what the audit's probe establishes, and the text used here is pinned by test | #2186 |
-| Does `TryFindSystemTimeZoneById` return `false` for **every** failure, or only for not-found (letting `InvalidTimeZoneException` propagate)? | needs the .NET source | #2186 |
-| Should `ClearCachedData()` actually invalidate `Local()`, and should `GetSystemTimeZones()` enumerate the whole database rather than two zones? | both are feature gaps documented in the header, not defects; sizing them needs .NET's caching contract | #2186 |
+| Question | Reference answer and disposition |
+|---|---|
+| Do `ConvertTimeFromUtc`/`ConvertTimeToUtc` clamp at `DateTime::MinValue`/`MaxValue`? | Yes. The shared safe constructor clamps once at the final result; repaired and tested. |
+| Which adjacent `AdjustmentRule.CreateAdjustmentRule` shapes are invalid? | Non-date-only boundaries, deltas outside **-23..+14 hours**, and deltas not expressed in whole minutes are rejected. The original ±14/sub-minute recollection was corrected from source. |
+| What are the exact resource strings for those argument diagnostics? | Transcribed from the reference and pinned. |
+| Does `TryFindSystemTimeZoneById` return false for every failure, and what does the throwing door do with non-zone data? | The Try door returns false for every failure; the throwing door uses `InvalidTimeZoneException` for existing non-TZif data and `TimeZoneNotFoundException` for an absent id. Repaired and tested. |
+| Which offset wins for an ambiguous local wall clock? | The standard-time interpretation wins. The legacy adapter already chose that result; the reference confirmed it. |
 
-**Nothing is deferred merely because `/rv` is absent.** Each row above is a question whose answer is
-a statement *about .NET*, not about this code.
+`docs/Migration-TimeZoneClampAndValidation.md` records the source locations, mutations, and exact
+regressions. Nothing in this section remains deferred.
 
 ---
 
@@ -488,22 +493,23 @@ a statement *about .NET*, not about this code.
   this repository does not carry. Out of scope; unchanged.
 - **Serialization** (`ToSerializedString` / `FromSerializedString`) — absent, and stays absent per
   `CLAUDE.md`'s permanent-deviation list.
-- **`GetSystemTimeZones()` enumerating the database** — a feature gap, recorded in #2186, not
-  repaired here.
+- **`ClearCachedData()` invalidation and `GetSystemTimeZones()` enumerating the database** remain
+  documented practical-subset feature gaps. They are pinned beside #2186's regressions but were
+  not among its five reference questions and are not represented as deferred verification.
 - **Modelling DST inside `TimeZoneInfo`** (`GetUtcOffset`, `IsDaylightSavingTime`,
   `IsAmbiguousTime`, `IsInvalidTime`, `GetAmbiguousTimeOffsets`, `GetAdjustmentRules`) — the
-  header's documented limitation. Changing it is the SR-AUD-228 design in #2185 and is gated.
-- **`InvalidTimeZoneException` is never thrown** by this module. #2183 deliberately keeps throwing
-  `TimeZoneNotFoundException` for a non-TZif file rather than switching to
-  `InvalidTimeZoneException`, because which one .NET uses for "the id resolves to a file that is
-  not zone data" is exactly the kind of claim this review will not make without evidence. Recorded.
-- **Windows and Emscripten runtime behaviour** — platform-specific branches are compiled and
-  contract-pinned but not executed by the repository's Ubuntu-only runtime CI. #2418 changed the
-  Windows per-date adapter and Emscripten Local identity as recorded in §13.
+  header's documented limitation. #2185 established that faithful parity requires TZif rule
+  parsing, which is an accepted permanent deviation for this practical subset.
+- **`InvalidTimeZoneException`** is now thrown for an existing non-TZif data file; #2186 settled
+  the earlier #2183 uncertainty from the reference. Missing identifiers still throw
+  `TimeZoneNotFoundException`, and the Try door returns false for both.
+- **Windows and Emscripten runtime behaviour** — #2418 reviewed and repaired these conditional
+  branches and made their tests compile-condition-aware, but the repository's tracked CI is
+  Ubuntu-only: there is no Windows/Emscripten cross-build or runtime result to claim here.
 
 ---
 
-## 18a. SR-AUD-228 design record (ticket #2185) — the one gated finding
+## 18a. SR-AUD-228 design and final disposition (ticket #2185)
 
 ### 18a.1 The defect, restated from measurement
 
@@ -517,13 +523,20 @@ Note the direction of the failure. This port can never return `false` where .NET
 it can only be **too permissive**. That bounds the risk of leaving it as it is, and it is why the
 finding is medium rather than high.
 
-### 18a.2 The selected repair
+### 18a.2 The initially proposed repair, later rejected by measurement
 
 Give `TimeZoneInfo` a `std::vector<std::shared_ptr<AdjustmentRule>> rules_`, populate it in
 `FindSystemTimeZoneById` from the year scan #2181 already performs (each scan already observes the
 standard offset, the daylight offset, whether a transition occurs and in which months), return it
 from `GetAdjustmentRules()`, and make `HasSameRules` compare `baseUtcOffset_`, `supportsDst_` **and**
 the rule vector element-wise via the `AdjustmentRule::Equals` that already exists.
+
+Two later probes invalidated that proposal. The existing monthly scan produces byte-identical
+2025 samples for New York and Havana even though their transition hours differ. A finer one-year
+transition scan still cannot model the several historical rule eras that .NET returns as separate
+`AdjustmentRule` values. Faithful content requires the TZif POSIX footer or its full transition
+table; libc exposes resolved instants, not the recurrence rules. Sampling at any granularity would
+therefore invent .NET-named adjustment rules rather than implement them.
 
 Three alternatives were considered and rejected:
 
@@ -533,7 +546,7 @@ Three alternatives were considered and rejected:
 | Compare the observed UTC-offset function over a sampled window | Invents an algorithm .NET does not use, and its answer depends on the sampling window. The review declines to invent. |
 | Derive rules on demand inside `HasSameRules` without storing them | Avoids the layout change but makes an equality-shaped method perform twelve `setenv`/`tzset` cycles per zone per call, under the process-global timezone lock. |
 
-### 18a.3 The measured gate
+### 18a.3 The measured layout cost of the rejected proposal
 
 `build-probe/2185_layout.log`, three shapes compiled side by side against the real
 `AdjustmentRule`:
@@ -557,35 +570,39 @@ unlikely to embed one by value — but the type is copyable and nothing prevents
 the situation `README.md`'s 2026-07-29 `BitArray::Enumerator` entry records as linking with zero
 diagnostics and then giving silently wrong answers.
 
-### 18a.4 The approval sentence, stated exactly
+### 18a.4 Final disposition
 
-> **#2185:** *"`System::TimeZoneInfo` may grow from 160 to 184 bytes (one
+The original approval question was:
+
+> *"`System::TimeZoneInfo` may grow from 160 to 184 bytes (one
 > `std::vector<std::shared_ptr<AdjustmentRule>>`) so that `HasSameRules` and `GetAdjustmentRules`
 > can distinguish two zones that share a base offset and a daylight flag but not their transition
 > rules, requiring every consumer to be rebuilt."*
 
-Until that is answered, the current behaviour is held by four `PIN_` tests
+The 2026-08-19 decision is that TZif rule parsing is out of scope. The finding is therefore an
+`accepted-deviation`: this implementation can be too permissive but never too strict. The layout
+change was not made. The current contract is held by four declaration tests
 (`PIN_HasSameRules_CannotDistinguishNewYorkFromHavana`,
 `PIN_HasSameRules_OnlyDistinguishesOffsetAndTheDaylightFlag`,
-`PIN_GetAdjustmentRules_IsEmptyForEverySystemZone`, and a `static_assert` on `sizeof`), so the
-question cannot be answered silently: implementing the repair fails all four.
+`PIN_GetAdjustmentRules_IsEmptyForEverySystemZone`, and a `static_assert` on `sizeof`), so a future
+scope change cannot silently erase the decision.
 
 ---
 
 ## 19. Completion criteria
 
-`modules/time-zone` may be called **closed except for its gated remainder** when:
+`modules/time-zone` is closed for its declared scope because:
 
 1. all seven findings carry exactly one disposition and none has disappeared;
 2. #2177–#2184 are implemented, each with permanent tests, and each committed and pushed
    separately;
 3. SR-AUD-223/224/225/226/227/229 read `remediated` in `audit/AUDIT_FINDINGS_INDEX.md`;
-4. SR-AUD-228 reads `confirmed (design-complete)` with #2185 recording the selected repair and its
-   `needs_user` gate;
+4. SR-AUD-228 reads `accepted-deviation`, with #2185 recording why sampled rules are not faithful
+   and why TZif rule parsing is outside scope;
 5. every behaviour change is pinned by a test that fails if it is reverted, proven by mutation;
 6. the deliberate breaks are documented in `docs/Migration-TimeZoneStandardOffset.md` and
    `README.md`;
-7. the full 37-executable gate shows no new failure beyond the six known ones;
+7. the current full 38-executable gate passes without failures or skips;
 8. UBSan, ASan+LSan and TSan run over the production bodies with zero reports.
 
-It may **not** be called fully closed while SR-AUD-228 needs an approval.
+SR-AUD-228 remains a deliberate compatibility limit, not actionable unfinished work.

@@ -21,6 +21,23 @@ using System::DateTime;
 using System::DateTimeKind;
 using System::TimeZoneNotFoundException;
 
+namespace {
+
+// A zone may be unavailable on Emscripten or on hosts with trimmed tzdata. Platform-sensitive
+// tests use the non-throwing door and skip when their external database row does not exist.
+std::shared_ptr<TimeZoneInfo> zoneOrNull(const std::string& id) {
+    std::shared_ptr<TimeZoneInfo> tz;
+    return TimeZoneInfo::TryFindSystemTimeZoneById(id, tz) ? tz : nullptr;
+}
+
+// This initializer deliberately runs before main. TimeZoneInfo::Utc must not depend on the
+// dynamic initialization order of TimeSpan::Zero in another translation unit.
+const TimeZoneInfo* const utcObservedBeforeMain = &TimeZoneInfo::Utc();
+const SharpRuntime::longcs utcTicksObservedBeforeMain =
+    utcObservedBeforeMain->getBaseUtcOffsetProperty().getTicksProperty();
+
+} // namespace
+
 // ---------------------------------------------------------------------------
 // Utc() static zone
 // ---------------------------------------------------------------------------
@@ -47,6 +64,11 @@ TEST(TimeZoneInfoTests, Utc_BaseUtcOffset_IsZero) {
 
 TEST(TimeZoneInfoTests, Utc_SupportsDst_IsFalse) {
     EXPECT_FALSE(TimeZoneInfo::Utc().getSupportsDaylightSavingTimeProperty());
+}
+
+TEST(TimeZoneInfoTests, Utc_IsSafeWhenFirstObservedBeforeMain) {
+    EXPECT_EQ(utcObservedBeforeMain, &TimeZoneInfo::Utc());
+    EXPECT_EQ(utcTicksObservedBeforeMain, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -114,17 +136,26 @@ TEST(TimeZoneInfoTests, FindSystemTimeZoneById_UTC_HasCorrectId) {
 }
 
 TEST(TimeZoneInfoTests, FindSystemTimeZoneById_Unknown_ThrowsInvalidArgument) {
+#if defined(__EMSCRIPTEN__)
+    GTEST_SKIP() << "Emscripten has no named-zone database";
+#else
     EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById("America/Unknown"),
                  TimeZoneNotFoundException);
+#endif
 }
 
 TEST(TimeZoneInfoTests, FindSystemTimeZoneById_PathTraversal_Throws) {
+#if defined(__EMSCRIPTEN__)
+    GTEST_SKIP() << "Emscripten has no named-zone database";
+#else
     EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById("../../etc/passwd"),
                  TimeZoneNotFoundException);
+#endif
 }
 
 TEST(TimeZoneInfoTests, FindSystemTimeZoneById_EuropePrague_OffsetInRange) {
-    auto tz = TimeZoneInfo::FindSystemTimeZoneById("Europe/Prague");
+    auto tz = zoneOrNull("Europe/Prague");
+    if (!tz) GTEST_SKIP() << "Europe/Prague is not installed";
     double hours = tz->getBaseUtcOffsetProperty().getTotalHoursProperty();
     // CET=+1, CEST=+2
     EXPECT_GE(hours, 1.0);
@@ -132,7 +163,8 @@ TEST(TimeZoneInfoTests, FindSystemTimeZoneById_EuropePrague_OffsetInRange) {
 }
 
 TEST(TimeZoneInfoTests, FindSystemTimeZoneById_AmericaNewYork_NegativeOffset) {
-    auto tz = TimeZoneInfo::FindSystemTimeZoneById("America/New_York");
+    auto tz = zoneOrNull("America/New_York");
+    if (!tz) GTEST_SKIP() << "America/New_York is not installed";
     double hours = tz->getBaseUtcOffsetProperty().getTotalHoursProperty();
     EXPECT_LT(hours, 0.0);
 }
@@ -179,10 +211,12 @@ TEST(TimeZoneInfoTests, CreateCustomTimeZone_NoSupportsDst) {
 TEST(TimeZoneInfoTests, SupportsDaylightSavingTime_ReflectsWholeYearNotJustNow) {
     // America/New_York observes DST every year; this must be true regardless of
     // which calendar month the test happens to run in.
-    auto ny = TimeZoneInfo::FindSystemTimeZoneById("America/New_York");
+    auto ny = zoneOrNull("America/New_York");
+    if (!ny) GTEST_SKIP() << "America/New_York is not installed";
     EXPECT_TRUE(ny->getSupportsDaylightSavingTimeProperty());
     // America/Phoenix (Arizona) never observes DST, in any month.
-    auto phoenix = TimeZoneInfo::FindSystemTimeZoneById("America/Phoenix");
+    auto phoenix = zoneOrNull("America/Phoenix");
+    if (!phoenix) GTEST_SKIP() << "America/Phoenix is not installed";
     EXPECT_FALSE(phoenix->getSupportsDaylightSavingTimeProperty());
 }
 
@@ -208,9 +242,13 @@ TEST(TimeZoneInfoTests, ConvertTimeBySystemTimeZoneId_UTC_DoesNotThrow) {
 }
 
 TEST(TimeZoneInfoTests, ConvertTimeBySystemTimeZoneId_Unknown_Throws) {
+#if defined(__EMSCRIPTEN__)
+    GTEST_SKIP() << "Emscripten has no named-zone database";
+#else
     DateTime dt;
     EXPECT_THROW(TimeZoneInfo::ConvertTimeBySystemTimeZoneId(dt, "Mars/Olympus"),
                  TimeZoneNotFoundException);
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -293,8 +331,9 @@ TEST(TimeZoneInfoTests, Decl2185_HasSameRulesIsOneDirectionallyPermissiveAndPerm
     //
     // This test asserts the deviation itself so it is a DECLARATION, and it is written to fail the
     // day a TZif reader lands -- which is exactly when the declaration must be withdrawn.
-    auto ny = TimeZoneInfo::FindSystemTimeZoneById("America/New_York");
-    auto havana = TimeZoneInfo::FindSystemTimeZoneById("America/Havana");
+    auto ny = zoneOrNull("America/New_York");
+    auto havana = zoneOrNull("America/Havana");
+    if (!ny || !havana) GTEST_SKIP() << "required IANA zones are not installed";
     ASSERT_NE(ny, nullptr);
     ASSERT_NE(havana, nullptr);
 
@@ -318,8 +357,8 @@ TEST(TimeZoneInfoTests, Decl2185_TheFailureIsOneDirectional) {
     // comparison also distinguishes. A caller using it as a NECESSARY condition is correct; one
     // using it as a SUFFICIENT condition is not.
     const TimeZoneInfo& utc = TimeZoneInfo::Utc();
-    auto ny = TimeZoneInfo::FindSystemTimeZoneById("America/New_York");
-    ASSERT_NE(ny, nullptr);
+    auto ny = zoneOrNull("America/New_York");
+    if (!ny) GTEST_SKIP() << "America/New_York is not installed";
 
     // Different base offsets => false here, and false in .NET too. No false negative exists.
     EXPECT_NE(utc.getBaseUtcOffsetProperty(), ny->getBaseUtcOffsetProperty());
@@ -348,7 +387,8 @@ TEST(TimeZoneInfoTests, OperatorEqual_SameId) {
 // ---------------------------------------------------------------------------
 
 TEST(TimeZoneInfoTests, HasIanaId_WithSlash_True) {
-    auto tz = TimeZoneInfo::FindSystemTimeZoneById("Europe/Prague");
+    auto tz = zoneOrNull("Europe/Prague");
+    if (!tz) GTEST_SKIP() << "Europe/Prague is not installed";
     EXPECT_TRUE(tz->getHasIanaIdProperty());
 }
 
@@ -714,17 +754,16 @@ TEST(TimeZoneInfoTests, TryFind_Failure_AfterFailureLeavesNullNotStale) {
 
 TEST(TimeZoneInfoTests, TryFind_Success_OverwritesAPreviousZone) {
     // The success path must still replace whatever was there.
-    std::shared_ptr<TimeZoneInfo> tz = TimeZoneInfo::FindSystemTimeZoneById("Europe/Prague");
-    ASSERT_NE(tz, nullptr);
+    std::shared_ptr<TimeZoneInfo> tz = zoneOrNull("Europe/Prague");
+    if (!tz) GTEST_SKIP() << "Europe/Prague is not installed";
     ASSERT_TRUE(TimeZoneInfo::TryFindSystemTimeZoneById("UTC", tz));
     ASSERT_NE(tz, nullptr);
     EXPECT_EQ(tz->getIdProperty(), "UTC");
 }
 
 TEST(TimeZoneInfoTests, TryFind_SuccessThenFailure_DoesNotKeepTheSuccess) {
-    std::shared_ptr<TimeZoneInfo> tz;
-    ASSERT_TRUE(TimeZoneInfo::TryFindSystemTimeZoneById("Europe/Prague", tz));
-    ASSERT_NE(tz, nullptr);
+    std::shared_ptr<TimeZoneInfo> tz = zoneOrNull("Europe/Prague");
+    if (!tz) GTEST_SKIP() << "Europe/Prague is not installed";
     EXPECT_FALSE(TimeZoneInfo::TryFindSystemTimeZoneById("Europe/Nowhere", tz));
     EXPECT_EQ(tz, nullptr);
 }
@@ -924,7 +963,8 @@ TEST(TimeZoneInfoTests, Equals_BytesBetweenTheCaseRanges_AreNotFolded) {
 }
 
 TEST(TimeZoneInfoTests, Equals_SystemZoneComparesCaseInsensitivelyToACustomOne) {
-    auto sys = TimeZoneInfo::FindSystemTimeZoneById("Europe/Prague");
+    auto sys = zoneOrNull("Europe/Prague");
+    if (!sys) GTEST_SKIP() << "Europe/Prague is not installed";
     auto custom = TimeZoneInfo::CreateCustomTimeZone("EUROPE/prague", TimeSpan::FromHours(1),
                                                      "d", "s");
     EXPECT_TRUE(sys->Equals(*custom));
@@ -950,13 +990,6 @@ TEST(TimeZoneInfoTests, Equals_SystemZoneComparesCaseInsensitivelyToACustomOne) 
 
 namespace {
 
-// A zone the suite needs may be missing on a host with a trimmed tzdata; skip rather
-// than fail, the way the pre-existing Prague and Phoenix assertions already assume.
-std::shared_ptr<TimeZoneInfo> zoneOrNull(const std::string& id) {
-    std::shared_ptr<TimeZoneInfo> tz;
-    return TimeZoneInfo::TryFindSystemTimeZoneById(id, tz) ? tz : nullptr;
-}
-
 SharpRuntime::longcs offsetMinutes(const TimeZoneInfo& tz) {
     return tz.getBaseUtcOffsetProperty().getTicksProperty() / TimeSpan::TicksPerMinute;
 }
@@ -975,6 +1008,8 @@ SharpRuntime::longcs offsetMinutes(const TimeZoneInfo& tz) {
 /// GMT (+0) as daylight, and Africa/Casablanca marks +01 as standard and its Ramadan
 /// reversion to +00 as daylight. A literal "Dublin's standard offset is 0" was correct when
 /// it was written and became a tzdata-version assertion afterwards.
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+
 struct ZoneOracle {
     bool     available = false;
     long     standardOffsetMinutes = 0;
@@ -1025,6 +1060,8 @@ ZoneOracle oracleFor(const std::string& id) {
     return out;
 }
 
+#endif
+
 } // namespace
 
 TEST(TimeZoneInfoTests, BaseUtcOffset_NewYork_IsStandardMinusFive_NotTheCurrentOffset) {
@@ -1053,6 +1090,9 @@ TEST(TimeZoneInfoTests, BaseUtcOffset_Prague_IsStandardPlusOne) {
 // The invariant being tested is unchanged and is the one #2181 introduced: BaseUtcOffset is
 // the STANDARD offset, whichever of the two that is, and it does not move with the season.
 TEST(TimeZoneInfoTests, BaseUtcOffset_Dublin_IsTheStandardOffsetEvenWhenDaylightIsNegative) {
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    GTEST_SKIP() << "the independent oracle uses POSIX tzdata";
+#else
     auto tz = zoneOrNull("Europe/Dublin");
     if (!tz) GTEST_SKIP() << "Europe/Dublin is not installed";
     const ZoneOracle oracle = oracleFor("Europe/Dublin");
@@ -1073,6 +1113,7 @@ TEST(TimeZoneInfoTests, BaseUtcOffset_Dublin_IsTheStandardOffsetEvenWhenDaylight
         // current today, BaseUtcOffset must not be the DAYLIGHT one.
         EXPECT_NE(offsetMinutes(*tz), oracle.daylightOffsetMinutes);
     }
+#endif
 }
 
 TEST(TimeZoneInfoTests, BaseUtcOffset_SouthernHemisphere_IsTheSameRuleAsNorthern) {
@@ -1120,6 +1161,9 @@ TEST(TimeZoneInfoTests, BaseUtcOffset_NonWholeHourZonesWithoutDaylight) {
 // -- current data marks +01 standard and the reversion daylight -- so the expectation is
 // derived, not written. Ticket #2351.
 TEST(TimeZoneInfoTests, BaseUtcOffset_AllYearDaylightZoneUsesItsStandardReversion) {
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    GTEST_SKIP() << "the independent oracle uses POSIX tzdata";
+#else
     auto tz = zoneOrNull("Africa/Casablanca");
     if (!tz) GTEST_SKIP() << "Africa/Casablanca is not installed";
     const ZoneOracle oracle = oracleFor("Africa/Casablanca");
@@ -1131,6 +1175,7 @@ TEST(TimeZoneInfoTests, BaseUtcOffset_AllYearDaylightZoneUsesItsStandardReversio
     if (oracle.observesDaylight) {
         EXPECT_NE(offsetMinutes(*tz), oracle.daylightOffsetMinutes);
     }
+#endif
 }
 
 TEST(TimeZoneInfoTests, BaseUtcOffset_FixedOffsetZonesAreUnchanged) {
@@ -1203,6 +1248,9 @@ TEST(TimeZoneInfoTests, StandardAndDaylightNames_DifferExactlyWhenTheZoneObserve
 // different questions -- "there is no such zone" versus "that is not a zone" -- and a caller
 // catching only the first used to swallow the second.
 TEST(TimeZoneInfoTests, Fix2186_NotZoneDataIsInvalidNotNotFound) {
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    GTEST_SKIP() << "non-TZif classification is a POSIX zoneinfo contract";
+#else
     // The six data files shipped inside /usr/share/zoneinfo exist and are not TZif.
     int checked = 0;
     for (const char* id : {"zone.tab", "zone1970.tab", "iso3166.tab", "tzdata.zi",
@@ -1231,9 +1279,13 @@ TEST(TimeZoneInfoTests, Fix2186_NotZoneDataIsInvalidNotNotFound) {
     EXPECT_EQ(tz, nullptr);
     EXPECT_TRUE(TimeZoneInfo::TryFindSystemTimeZoneById("UTC", tz));
     EXPECT_NE(tz, nullptr);
+#endif
 }
 
 TEST(TimeZoneInfoTests, FindSystemTimeZoneById_NonTzifDataFiles_AreRejected) {
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    GTEST_SKIP() << "non-TZif classification is a POSIX zoneinfo contract";
+#else
     int checked = 0;
     for (const char* id : {"zone.tab", "zone1970.tab", "iso3166.tab", "tzdata.zi",
                            "leapseconds", "leap-seconds.list"}) {
@@ -1244,18 +1296,26 @@ TEST(TimeZoneInfoTests, FindSystemTimeZoneById_NonTzifDataFiles_AreRejected) {
         ++checked;
     }
     EXPECT_EQ(checked, 6);
+#endif
 }
 
 TEST(TimeZoneInfoTests, FindSystemTimeZoneById_MalformedPathShapes_AreRejected) {
+#if defined(__EMSCRIPTEN__)
+    GTEST_SKIP() << "Emscripten has no named-zone database";
+#else
     for (const char* id : {"America//New_York", "America///New_York", "./America/New_York",
                            "America/./New_York", "America/New_York/", "/America/New_York",
                            "/etc/passwd", "..", "../../etc/passwd", "", "America/../America/New_York"}) {
         EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById(id), TimeZoneNotFoundException)
             << "identifier '" << id << "' should not resolve";
     }
+#endif
 }
 
 TEST(TimeZoneInfoTests, FindSystemTimeZoneById_EmbeddedNul_IsRejectedNotTruncated) {
+#if defined(__EMSCRIPTEN__)
+    GTEST_SKIP() << "Emscripten has no named-zone database";
+#else
     // The C string stops at the NUL, so the old code stat()ed "America/New_York", succeeded,
     // and stored all 21 bytes as the zone's Id -- an Id that can never round-trip.
     std::string truncating("America/New_York\0junk", 21);
@@ -1263,6 +1323,7 @@ TEST(TimeZoneInfoTests, FindSystemTimeZoneById_EmbeddedNul_IsRejectedNotTruncate
     EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById(truncating), TimeZoneNotFoundException);
     std::string afterUtc("UTC\0x", 5);
     EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById(afterUtc), TimeZoneNotFoundException);
+#endif
 }
 
 TEST(TimeZoneInfoTests, FindSystemTimeZoneById_RealZonesStillResolve) {
@@ -1281,8 +1342,12 @@ TEST(TimeZoneInfoTests, FindSystemTimeZoneById_RealZonesStillResolve) {
 }
 
 TEST(TimeZoneInfoTests, FindSystemTimeZoneById_ADirectoryIsNotAZone) {
+#if defined(__EMSCRIPTEN__)
+    GTEST_SKIP() << "Emscripten has no named-zone database";
+#else
     EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById("America"), TimeZoneNotFoundException);
     EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById("Etc"), TimeZoneNotFoundException);
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -1348,12 +1413,19 @@ TEST(TimeZoneInfoTests, PIN_TimeZoneInfoObjectLayoutIsUnchanged) {
     // #2177-#2184 add no member. The gate in #2185 is precisely a change to this number, so it
     // is asserted rather than described. Measured on LP64: 4 x std::string (32) + TimeSpan (24)
     // + bool (1) + 7 bytes tail padding.
+#if defined(__LP64__) && defined(__GLIBCXX__)
     static_assert(sizeof(TimeZoneInfo) == 160,
                   "sizeof(TimeZoneInfo) changed; if this is the SR-AUD-228 rule storage, ticket "
                   "#2185's approval gate must be cleared first");
     static_assert(alignof(TimeZoneInfo) == 8, "alignof(TimeZoneInfo) changed");
     static_assert(sizeof(TimeZoneInfo::TransitionTime) == 40,
                   "sizeof(TimeZoneInfo::TransitionTime) changed");
+#else
+    // std::string size is implementation-defined; exact ABI pins belong only to the measured
+    // LP64/libstdc++ configuration. Portability builds still compile every public value mechanic.
+    static_assert(sizeof(TimeZoneInfo) >= sizeof(TimeSpan));
+    static_assert(alignof(TimeZoneInfo) >= alignof(TimeSpan));
+#endif
     SUCCEED();
 }
 
