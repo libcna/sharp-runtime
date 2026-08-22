@@ -17,6 +17,7 @@
 // run rather than describing an arm no gate compiles.
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <limits>
 #include <string>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -255,4 +256,17 @@ TEST(Rng2398MessageTests, GetInt32StaysInRangeAndShortCircuitsASinglePossibility
     }
     EXPECT_EQ(RandomNumberGenerator::GetInt32(7, 8), 7);
     EXPECT_EQ(RandomNumberGenerator::GetInt32(-3, -2), -3);
+}
+
+// The full valid int32 domain previously converted a random uint32_t to signed before adding
+// the lower bound, making the operation implementation-defined and UBSan-visible. Every draw
+// must remain in the half-open range without relying on signed overflow.
+TEST(RngFullDomainTests, GetInt32CoversTheFullInt32DomainWithoutOverflow) {
+    constexpr auto minimum = std::numeric_limits<SharpRuntime::intcs>::min();
+    constexpr auto maximum = std::numeric_limits<SharpRuntime::intcs>::max();
+    for (int i = 0; i < 200; ++i) {
+        const auto value = RandomNumberGenerator::GetInt32(minimum, maximum);
+        EXPECT_GE(value, minimum);
+        EXPECT_LT(value, maximum);
+    }
 }

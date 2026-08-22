@@ -123,17 +123,21 @@ namespace System::Text::RegularExpressions {
         //     right before `first` is a real, readable character (since first genuinely points
         //     into input, not a separate string), so '^' correctly stops matching once
         //     offset > 0.
-        RegularExpressions::Match matchFrom(const std::string& input, size_t offset) const {
+        static RegularExpressions::Match matchFrom(
+            const std::string& input, size_t offset, const std::regex& regex,
+            const std::vector<std::pair<std::string, intcs>>& groupNames) {
             if (offset > input.size()) return RegularExpressions::Match();
             std::smatch m;
             auto flags = offset > 0 ? std::regex_constants::match_prev_avail
                                     : std::regex_constants::match_default;
-            if (!std::regex_search(input.cbegin() + static_cast<std::ptrdiff_t>(offset), input.cend(), m, re_, flags))
+            if (!std::regex_search(input.cbegin() + static_cast<std::ptrdiff_t>(offset), input.cend(), m, regex, flags))
                 return RegularExpressions::Match();
 
             size_t matchStart = offset + static_cast<size_t>(m.position(0));
             size_t nextOffset = matchStart + std::max<size_t>(m[0].length(), 1);
-            return RegularExpressions::Match(m, groupNames_, [this, input, nextOffset]() { return matchFrom(input, nextOffset); },
+            return RegularExpressions::Match(m, groupNames, [input, nextOffset, regex, groupNames]() {
+                                                return matchFrom(input, nextOffset, regex, groupNames);
+                                            },
                                              static_cast<intcs>(offset));
         }
 
@@ -159,10 +163,12 @@ namespace System::Text::RegularExpressions {
         [[nodiscard]] bool IsMatch(const std::string& input) const { return std::regex_search(input, re_); }
 
         /** @return The first Match in the input, or an unsuccessful Match if none found. */
-        [[nodiscard]] class Match Match(const std::string& input) const { return matchFrom(input, 0); }
+        [[nodiscard]] class Match Match(const std::string& input) const { return matchFrom(input, 0, re_, groupNames_); }
 
         /** @brief Deprecated alias for Match() — kept for source compatibility with earlier ported code. */
-        [[nodiscard]] RegularExpressions::Match Match_(const std::string& input) const { return matchFrom(input, 0); }
+        [[nodiscard]] RegularExpressions::Match Match_(const std::string& input) const {
+            return matchFrom(input, 0, re_, groupNames_);
+        }
 
         /** @return All non-overlapping matches in the input. */
         [[nodiscard]] MatchCollection Matches(const std::string& input) const {
@@ -184,7 +190,7 @@ namespace System::Text::RegularExpressions {
         [[nodiscard]] std::string Replace(const std::string& input, const MatchEvaluator& evaluator) const {
             std::string result;
             size_t lastEnd = 0;
-            RegularExpressions::Match m = matchFrom(input, 0);
+            RegularExpressions::Match m = matchFrom(input, 0, re_, groupNames_);
             while (m.getSuccessProperty()) {
                 result += input.substr(lastEnd, static_cast<size_t>(m.getIndexProperty()) - lastEnd);
                 result += evaluator(m);

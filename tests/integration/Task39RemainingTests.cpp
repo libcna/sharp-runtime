@@ -393,6 +393,18 @@ TEST(ReadOnlyObservableCollectionTests, RangeFor_IteratesAll) {
     EXPECT_EQ(sum, 6);
 }
 
+// The source deliberately outlives its wrapper. This is an ASan regression: before the weak
+// forwarding state, mutating it invoked a callback through the destroyed wrapper's raw `this`.
+TEST(ReadOnlyObservableCollectionTests, SourceCanMutateAfterWrapperIsDestroyed) {
+    auto source = std::make_shared<ObservableCollection<int>>();
+    {
+        ReadOnlyObservableCollection<int> wrapper(source);
+        EXPECT_EQ(wrapper.getCountProperty(), 0);
+    }
+    EXPECT_NO_THROW(source->Add(1));
+    EXPECT_EQ(source->getCountProperty(), 1);
+}
+
 // ===========================================================================
 // ReadOnlySet
 // ===========================================================================

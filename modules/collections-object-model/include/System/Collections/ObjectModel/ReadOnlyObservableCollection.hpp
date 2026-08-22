@@ -33,7 +33,12 @@ using SharpRuntime::intcs;
  */
 template<typename T>
 class ReadOnlyObservableCollection {
+    struct ForwardingState {
+        ReadOnlyObservableCollection* owner = nullptr;
+    };
+
     std::shared_ptr<ObservableCollection<T>> source_;
+    std::shared_ptr<ForwardingState> forwardingState_;
 
 public:
     /** @brief Handler type for CollectionChanged subscribers. */
@@ -50,24 +55,28 @@ public:
      * @throws System::ArgumentNullException if @p source is null.
      */
     explicit ReadOnlyObservableCollection(std::shared_ptr<ObservableCollection<T>> source)
-        : source_(std::move(source)) {
+        : source_(std::move(source)), forwardingState_(std::make_shared<ForwardingState>()) {
         if (!source_)
             throw System::ArgumentNullException("list");
+        forwardingState_->owner = this;
+        std::weak_ptr<ForwardingState> forwardingState = forwardingState_;
         source_->CollectionChanged.push_back(
-            [this](void* s, const NotifyCollectionChangedEventArgs<T>& args) {
+            [forwardingState](void* s, const NotifyCollectionChangedEventArgs<T>& args) {
                 (void)s;
-                OnCollectionChanged(args);
+                if (const auto state = forwardingState.lock(); state && state->owner)
+                    state->owner->OnCollectionChanged(args);
             });
     }
 
-    // The constructor above registers a forwarding callback with the shared source that
-    // captures `this`. A copy or move would leave that callback pointing at the wrong (or, once
-    // the original is destroyed, dangling) object while the shared source keeps calling it --
-    // confirmed via ASan (stack-use-after-scope) with a repro that destroys the original after
-    // construction and then mutates the still-alive shared source. Real .NET's
-    // ReadOnlyObservableCollection<T> is a reference type, so this class's copy/move surface was
-    // never actually meaningful; deleting it here just makes that reference-type intent explicit
-    // and safe rather than silently unsafe.
+    ~ReadOnlyObservableCollection() {
+        forwardingState_->owner = nullptr;
+    }
+
+    // The source's public vector cannot identify a std::function for erasure, so the forwarding
+    // callback holds only a weak state object. Destruction invalidates that state before the
+    // wrapper's storage goes away; later source notifications therefore become no-ops rather than
+    // dereferencing a dead wrapper. Copy/move would still leave an existing forwarding state
+    // associated with the original object, so this reference-type wrapper remains non-copyable.
     ReadOnlyObservableCollection(const ReadOnlyObservableCollection&) = delete;
     ReadOnlyObservableCollection& operator=(const ReadOnlyObservableCollection&) = delete;
     ReadOnlyObservableCollection(ReadOnlyObservableCollection&&) = delete;

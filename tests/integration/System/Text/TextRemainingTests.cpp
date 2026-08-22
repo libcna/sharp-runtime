@@ -498,6 +498,24 @@ TEST(RegexTests, NextMatch_AnchorDoesNotFalsePositiveOnResumedSearch) {
     EXPECT_EQ(count, 1);
 }
 
+// Match owns a continuation for NextMatch(). It must retain the compiled regex state rather than
+// the Regex object's address, because a Match is valid after the regex that created it is gone.
+// This is also an ASan regression for SR-AUD-245.
+TEST(RegexTests, NextMatchSurvivesTheRegexThatCreatedTheFirstMatch) {
+    Match first;
+    {
+        Regex regex("\\d+");
+        first = regex.Match("a12b34");
+        ASSERT_TRUE(first.getSuccessProperty());
+        EXPECT_EQ(first.getValueProperty(), "12");
+    }
+
+    Match second = first.NextMatch();
+    ASSERT_TRUE(second.getSuccessProperty());
+    EXPECT_EQ(second.getValueProperty(), "34");
+    EXPECT_EQ(second.getIndexProperty(), 4);
+}
+
 // RegexParseException previously had no Offset property, unlike real .NET's
 // RegexParseException.Offset (the zero-based character offset in the pattern where parsing
 // failed). std::regex_error doesn't expose a comparable position, so it defaults to 0.

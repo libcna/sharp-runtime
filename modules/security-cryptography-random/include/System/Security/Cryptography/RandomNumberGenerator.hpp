@@ -105,7 +105,11 @@ namespace System::Security::Cryptography {
                 result &= mask;
             } while (result > range);
 
-            return static_cast<intcs>(result) + fromInclusive;
+            // `result <= toExclusive - fromInclusive - 1`, so this signed 64-bit sum is
+            // mathematically inside intcs's range even for [INT32_MIN, INT32_MAX). Converting
+            // after the sum avoids both uint32_t-to-intcs implementation-defined conversion and
+            // signed overflow in the full-domain case.
+            return static_cast<intcs>(static_cast<int64_t>(fromInclusive) + static_cast<int64_t>(result));
         }
 
         /** @return A random intcs in [0, toExclusive). */

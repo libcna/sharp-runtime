@@ -3,8 +3,8 @@
 
 # NEXT.md
 
-> **Test-count floor, 2026-08-20 — 17,738 / 38, AND THE GATE IS GREEN.** The complete
-> 38-executable gate reads **17,738 run: 17,738 passed, 0 failed, 0 skipped**, zero build warnings
+> **Test-count floor, 2026-08-22 — 17,741 / 38, AND THE GATE IS GREEN.** The complete
+> 38-executable gate reads **17,741 run: 17,741 passed, 0 failed, 0 skipped**, zero build warnings
 > at `--parallel 2` over a **full** rebuild. Graph **41 / 95**, seams **3 / 20**, negative fixtures
 > **53 / 269**.
 >
@@ -14,21 +14,23 @@
 > `SHARP_RUNTIME_VERSION_PRERELEASE`) and rendered into `SharpRuntime/Version.hpp`. **No production
 > statement changed**, and no other executable's count moved. See `docs/releasing.md`.
 >
-> **One pre-existing red gate was found on the way and is NOT fixed here**:
-> `scripts/check_doxygen_warnings.sh` emits **2,675** warnings against a baseline maximum of
-> **1,942** measured 2026-07-25. Measured twice, with and without this change's `Doxyfile` edit, the
-> count is **identical**, so it is not caused by it — and `*/tests/*` is excluded, so the new test
-> file is not scanned either. It runs in `.github/workflows/components.yml` but **not** in
-> `scripts/local_ci_check.sh`: **#2415's shape exactly**, a check nothing local runs. Re-baselining
-> it is a deliberate decision for the owner, not a side effect of a release ticket.
+> **+3** on that floor in `SharpRuntimeIntegrationTests` (952 → 955): final audit cleanup
+> regressions for `RandomNumberGenerator::GetInt32`, `ReadOnlyObservableCollection` lifetime and
+> `Regex::NextMatch` lifetime.
+>
+> **Doxygen is a bounded gate, not a green-by-omission claim.** The checked Doxygen 1.9.8 baseline
+> is **2,675** warnings; it runs in CI and, since the 2026-08-22 final reconciliation, from
+> `scripts/local_ci_check.sh` too. The older 1,942 figure was stale documentation, not the current
+> script's limit. The warning backlog remains maintenance work, but can no longer fail only after a
+> push.
 >
 > ---
 >
 > ## THE POST-AUDIT QUEUE IS EMPTY
 >
 > Measured 2026-08-20: `ticket` is **2,406 done, 0 todo, 3 blocked, 5 wontfix**, and `task` is fully
-> classified (1,082 ported, 15,119 ignored). **There is no remaining implementation work that this
-> container can do.**
+> classified (1,082 ported, 15,119 ignored). This was the queue state before the final audit
+> reconciliation below; it did not prove that an audit finding could not still be fixed.
 >
 > **The three blocked tickets are not unfinished work; they are work this container lacks the means
 > to do**, and each was measured rather than assumed:
@@ -39,6 +41,14 @@
 > * **#1962** needs a raw ICMP socket, hence `CAP_NET_RAW`, which this container does not have.
 >
 > The five `wontfix` entries are recorded decisions with their reasons, not oversights.
+>
+> ## 2026-08-22 — final audit reconciliation
+>
+> The audit index now matches `next`: **293 remediated, 43 confirmed, 28 confirmed
+> (design-complete), 364 total**. Eleven stale statuses were corrected; this pass also closes
+> SR-AUD-012, SR-AUD-237 and SR-AUD-245 with ASan+UBSan regressions. The Doxygen 1.9.8 baseline
+> is 2,675 warnings and now runs from the local gate. `docs/AuditFindingsReconciliation.md`
+> records the full disposition.
 >
 > ---
 >

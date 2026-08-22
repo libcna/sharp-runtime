@@ -60,6 +60,9 @@ echo "    build clean: 0 warnings, 0 errors"
 echo "==> Running tests"
 scripts/run_component_tests.sh "$BUILD_DIR"
 
+echo "==> Checking Doxygen warnings"
+scripts/check_doxygen_warnings.sh
+
 # ADDED BY #2415, AND THE REASON IS THAT ITS ABSENCE WAS THE DEFECT. The selective-component
 # check verifies an invariant nothing else does -- that a component built on its own drags in no
 # more than it declares -- and because NOTHING RAN IT, it sat red for a day behind a green test

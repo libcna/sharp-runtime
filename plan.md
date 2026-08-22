@@ -1,7 +1,7 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-20 — branch **`next`**, working tree clean. Gate **17,732 across 38
-executables: 17,732 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs
+*Last verified: 2026-08-22 — branch **`next`**, working tree clean. Gate **17,741 across 38
+executables: 17,741 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs
 with every executable run separately and continuing past failures, zero build warnings at
 `--parallel 2`. Graph **41 / 95**, seams **3 / 20**, negative fixtures **53 / 269**.*
 
@@ -26,6 +26,15 @@ do.** Each was measured rather than assumed:
 * **#1962** needs a raw ICMP socket, hence `CAP_NET_RAW`, which this container does not have.
 
 The five `wontfix` entries are recorded decisions with their reasons.
+
+## 2026-08-22 — final audit reconciliation
+
+The audit index was reconciled against `next`: **293 remediated, 43 confirmed,
+28 confirmed (design-complete), 364 total**. Eleven stale statuses were closed,
+including SR-AUD-012, 146, 150, 151, 204, 210, 237, 240, 245, 280 and 326.
+The three new repairs are lifetime-safe `ReadOnlyObservableCollection` and
+`Regex::NextMatch`, plus full-domain `RandomNumberGenerator::GetInt32`
+arithmetic. See `docs/AuditFindingsReconciliation.md`.
 
 ## What closed the queue
 
