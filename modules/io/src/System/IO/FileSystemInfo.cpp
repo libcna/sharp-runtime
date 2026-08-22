@@ -3,7 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/FileSystemInfo.hpp"
 #include "System/IO/IOException.hpp"
-#include "System/TimeZoneInfo.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/TimeZone.hpp"
 
 #include <chrono>
 
@@ -24,8 +25,21 @@ namespace System::IO {
     namespace {
 
         System::DateTime fromUnixTime(longcs seconds) {
-            longcs ticks = System::DateTime::UnixEpochTicks + seconds * System::DateTime::TicksPerSecond;
-            return System::DateTime(ticks);
+            constexpr longcs minSeconds =
+                -System::DateTime::UnixEpochTicks / System::DateTime::TicksPerSecond;
+            constexpr longcs maxSeconds =
+                (System::DateTime::MaxTicks - System::DateTime::UnixEpochTicks) /
+                System::DateTime::TicksPerSecond;
+            if (seconds < minSeconds || seconds > maxSeconds) {
+                throw System::ArgumentOutOfRangeException(
+                    "seconds", "The filesystem timestamp is outside DateTime's range.");
+            }
+            // The bounds above make this multiplication and addition representable; without
+            // them a malformed/FUSE-backed 64-bit stat timestamp could trigger signed-overflow
+            // UB before DateTime's constructor had a chance to reject it.
+            longcs ticks = System::DateTime::UnixEpochTicks +
+                           seconds * System::DateTime::TicksPerSecond;
+            return System::DateTime(ticks, System::DateTimeKind::Utc);
         }
 
         // C++20 [time.clock.file] lets an implementation give file_clock *either* to_sys/from_sys
@@ -100,14 +114,10 @@ namespace System::IO {
 
     // Verified against FileSystemInfo.cs: CreationTime/LastAccessTime/LastWriteTime are all
     // `Xxx => XxxUtc.ToLocalTime()` (and the LastWriteTime setter is `XxxUtc = value.
-    // ToUniversalTime()`). This port's System::DateTime deliberately doesn't track
-    // DateTimeKind and has no ToLocalTime()/ToUniversalTime() (a documented, separate
-    // limitation -- see DateTime.hpp's doc comment), so these previously returned/consumed the
-    // UTC value verbatim with no conversion at all -- silently wrong by the local UTC offset
-    // whenever it's non-zero. Routed through the already-existing
-    // TimeZoneInfo::ConvertTimeFromUtc/ConvertTimeToUtc using TimeZoneInfo::Local() instead.
+    // ToUniversalTime()`). IO can reach the date-sensitive legacy TimeZone adapter, so using
+    // TimeZoneInfo.Local's fixed standard offset here would be one hour wrong during DST.
     System::DateTime FileSystemInfo::getCreationTimeProperty() const {
-        return System::TimeZoneInfo::ConvertTimeFromUtc(getCreationTimeUtcProperty(), System::TimeZoneInfo::Local());
+        return getCreationTimeUtcProperty().ToLocalTime(System::TimeZone::CurrentTimeZone());
     }
 
     System::DateTime FileSystemInfo::getLastAccessTimeUtcProperty() const {
@@ -115,7 +125,7 @@ namespace System::IO {
     }
 
     System::DateTime FileSystemInfo::getLastAccessTimeProperty() const {
-        return System::TimeZoneInfo::ConvertTimeFromUtc(getLastAccessTimeUtcProperty(), System::TimeZoneInfo::Local());
+        return getLastAccessTimeUtcProperty().ToLocalTime(System::TimeZone::CurrentTimeZone());
     }
 
     System::DateTime FileSystemInfo::getLastWriteTimeUtcProperty() const {
@@ -126,11 +136,22 @@ namespace System::IO {
     }
 
     System::DateTime FileSystemInfo::getLastWriteTimeProperty() const {
-        return System::TimeZoneInfo::ConvertTimeFromUtc(getLastWriteTimeUtcProperty(), System::TimeZoneInfo::Local());
+        return getLastWriteTimeUtcProperty().ToLocalTime(System::TimeZone::CurrentTimeZone());
     }
 
     void FileSystemInfo::setLastWriteTimeUtcProperty(const System::DateTime& value) {
-        longcs unixSeconds = (value.getTicksProperty() - System::DateTime::UnixEpochTicks) / System::DateTime::TicksPerSecond;
+        // File.GetUtcDateTimeOffset has an intentionally asymmetric contract: a Local value is
+        // converted to UTC, while Utc and Unspecified values already describe the UTC clock
+        // value to write.  Keeping that distinction here matters now that DateTime carries Kind;
+        // feeding all three through the Local source zone would reject Utc and move Unspecified
+        // twice at the public XxxUtc boundary.
+        const System::DateTime utcValue =
+            value.getKindProperty() == System::DateTimeKind::Local
+                ? value.ToUniversalTime(System::TimeZone::CurrentTimeZone())
+                : System::DateTime::SpecifyKind(value, System::DateTimeKind::Utc);
+        const longcs unixTicks = utcValue.getTicksProperty() - System::DateTime::UnixEpochTicks;
+        longcs unixSeconds = unixTicks / System::DateTime::TicksPerSecond;
+        if (unixTicks % System::DateTime::TicksPerSecond < 0) --unixSeconds;
         auto sysTime = std::chrono::system_clock::from_time_t(static_cast<std::time_t>(unixSeconds));
         auto fileTime = systemTimeToFileTime(sysTime);
         std::error_code ec;
@@ -139,7 +160,14 @@ namespace System::IO {
     }
 
     void FileSystemInfo::setLastWriteTimeProperty(const System::DateTime& value) {
-        setLastWriteTimeUtcProperty(System::TimeZoneInfo::ConvertTimeToUtc(value, System::TimeZoneInfo::Local()));
+        // DateTime.ToUniversalTime leaves a Utc value unchanged and treats Local/Unspecified as
+        // local clock values. Spell that matrix out and use the date-sensitive legacy adapter,
+        // which IO can reach without adding an implicit Core.Base timezone dependency.
+        const System::DateTime utcValue =
+            value.getKindProperty() == System::DateTimeKind::Utc
+                ? value
+                : value.ToUniversalTime(System::TimeZone::CurrentTimeZone());
+        setLastWriteTimeUtcProperty(utcValue);
     }
 
 } // namespace System::IO

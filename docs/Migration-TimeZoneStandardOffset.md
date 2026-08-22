@@ -8,6 +8,11 @@ post-audit defects. **No public signature, virtual function, vtable slot, object
 symbol or `noexcept` specification changed** — every change below is behavioural. Source compiles
 unchanged; a rebuild is enough.
 
+> **Post-#1941 addendum, 2026-08-22 (#2418).** The statement above describes tickets #2177–#2184,
+> not the later Kind ripple. #2418 adds a default UTC-instant query to `ILocalTimeZone`, so the
+> public interface vtable changes and consumers must rebuild. Existing fixed-offset derived
+> classes remain source-compatible through the default implementation.
+
 `sizeof(TimeZoneInfo)` is **160** bytes before and after, pinned by a `static_assert` in the test
 suite; `sizeof(TimeZoneInfo::TransitionTime)` (40) is likewise unchanged.
 
@@ -34,9 +39,10 @@ Measured across the whole installed database: **499 TZif zones, 158 of which obs
 time**; on 2026-08-10 **141 of them reported the wrong base offset**, and the other 17 — the
 southern-hemisphere zones — would have been wrong in January instead.
 
-The header always documented this property as *"always the standard offset"*, and the Windows
-branch already computed it that way from `TIME_ZONE_INFORMATION::Bias`. Only the POSIX branch
-disagreed with both.
+The header always documented this property as *"always the standard offset"*. The original
+repair made the POSIX branch honour that contract. A later #2418 review found a separate Windows
+edge: the standard offset is `Bias + StandardBias`, not `Bias` alone. Both the local-zone and
+named-zone Windows paths now use that complete value; `DaylightBias` remains excluded.
 
 ### What moves
 
@@ -99,6 +105,16 @@ Two boundary behaviours are worth knowing:
 
 `TimeZoneInfo` is deliberately **not** changed to match: its fixed-offset model is documented, and
 making it date-sensitive is a different, larger change.
+
+After `DateTimeKind` became observable, two further distinctions became load-bearing:
+
+- public `GetUtcOffset` returns zero, and public `IsDaylightSavingTime` returns false, for a Utc
+  DateTime; Local and Unspecified inputs remain local wall-clock questions;
+- `DateTime::ToLocalTime` resolves a separate UTC-instant query. For example, New York
+  `2025-03-09T06:30Z` maps with -05:00 to 01:30, while `07:30Z` maps with -04:00 to 03:30.
+
+The second route cannot be implemented by feeding UTC calendar fields to `mktime`: that function
+interprets them as a local wall clock and selects the wrong transition side.
 
 ---
 
@@ -167,6 +183,10 @@ The restore also used to branch on whether the saved value was **empty** rather 
 **set**, so a process running with `TZ=""` — which POSIX defines as UTC — came back with `TZ`
 *deleted*, silently switching to whatever `/etc/localtime` says. An empty-but-set `TZ` is now
 restored as empty.
+
+#2418 moved the guard into Core.Base and made every production `localtime_r` reader share it,
+including `DateTime::Now` and `DateTimeOffset`'s current-offset path. This closes the remaining
+window in which a concurrent Core call could observe the temporary zone selected by a lookup.
 
 ---
 

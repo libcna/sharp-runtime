@@ -350,6 +350,25 @@ TEST(CalendarTests, AddSeconds_Via_Calendar) {
     EXPECT_EQ(r.getSecondProperty(), 3);
 }
 
+TEST(CalendarTests, ArithmeticRemainsUnspecifiedWhenDateTimeArithmeticPreservesKind) {
+    TestCalendar cal;
+    const DateTime utc = DateTime::SpecifyKind(DateTime(2024, 6, 15, 12, 0, 0),
+                                               System::DateTimeKind::Utc);
+
+    // Calendar has the opposite contract from DateTime itself: every Calendar Add* result is
+    // Unspecified. These delegate paths must therefore strip the Kind explicitly now that
+    // DateTime::Add* correctly preserves it.
+    EXPECT_EQ(cal.AddYears(utc, 1).getKindProperty(), System::DateTimeKind::Unspecified);
+    EXPECT_EQ(cal.AddMonths(utc, 1).getKindProperty(), System::DateTimeKind::Unspecified);
+    EXPECT_EQ(cal.AddWeeks(utc, 1).getKindProperty(), System::DateTimeKind::Unspecified);
+    EXPECT_EQ(cal.AddDays(utc, 1).getKindProperty(), System::DateTimeKind::Unspecified);
+    EXPECT_EQ(cal.AddHours(utc, 1).getKindProperty(), System::DateTimeKind::Unspecified);
+    EXPECT_EQ(cal.AddMinutes(utc, 1).getKindProperty(), System::DateTimeKind::Unspecified);
+    EXPECT_EQ(cal.AddSeconds(utc, 1).getKindProperty(), System::DateTimeKind::Unspecified);
+    EXPECT_EQ(cal.AddMilliseconds(utc, 1).getKindProperty(),
+              System::DateTimeKind::Unspecified);
+}
+
 TEST(CalendarTests, GetWeekOfYear_Approximate) {
     // Just checks it returns a value in the valid range [1, 53]
     TestCalendar cal;

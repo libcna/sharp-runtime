@@ -732,11 +732,11 @@ instrumentation answered. **TSan has no subject** and **`/proc/self/fd` is not a
 
 §4.3 counted **six** copies of the `sscanf` HTTP-date parser. There are **seven**: it did not name
 `WarningHeaderValue`'s date field, which extracts the date from inside a quoted string and hands it
-to its own byte-identical copy. All seven are now one body,
-`modules/net-http-headers/src/System/Net/Http/Headers/HttpDateParser.hpp` — an
-**implementation-only** header beside the sources, not under `include/`, so it does not become
-public surface (the placement and the plain relative include follow `modules/xml/src`'s
-`XPathAstInternal.hpp` / `XmlNodeChangeEvents.hpp`).
+to its own byte-identical copy. All seven header-value consumers and the Net-layer Cookie parser
+now use one body, `modules/net/include/System/Net/detail/HttpDateParser.hpp`. The shared internal
+header moved to Net's `detail` include path during the post-#1941 ripple audit because
+Net.Http.Headers already depends on Net; that direction avoids a reverse component edge or an
+eighth protocol parser. The `detail` path is not a supported public API.
 
 **The restraint is the substance of this ticket.** The obvious repair is a hand-written fixed-width
 scanner, and it would be wrong here: it would *also* reject text `sscanf` accepts — a signed day
@@ -886,7 +886,7 @@ written so that a failure means *someone took the decision*, not *something regr
 
 ---
 
-## 19. Namespace reconciliation — every finding and defect, one disposition each (2026-08-08)
+## 19. Namespace reconciliation — every finding and defect, one disposition each (updated 2026-08-22)
 
 ### 19.1 The five audit findings
 
@@ -905,8 +905,8 @@ written so that a failure means *someone took the decision*, not *something regr
 | Defect | Ticket | Disposition |
 |---|---|---|
 | an RFC 5987 value decodes to a raw CR/LF for the caller (NH-K) | **#2129** | **done** |
-| singleton headers comma-joined; TE + CL coexist (NH-L) | **#2128** | **`needs_user`** — design; behaviour **pinned** by #2132 |
-| RFC 850 / asctime HTTP-dates | **#2130** | **`todo`, deferred verification** — the port side is measured and pinned (§18.3); the .NET side needs `/rv` |
+| singleton headers comma-joined; TE + CL coexist (NH-L) | **#2128** | **done** — reference behavior measured: singleton enforcement is at the collection; TE/CL suppression is at the wire |
+| RFC 850 / asctime HTTP-dates | **#2130** | **done** — all three RFC 9110 recipient forms accepted; later #2360 adopted the measured .NET lenient cross |
 | documentation and gated-behaviour pins | **#2132** | **done** |
 
 ### 19.3 Defects found during implementation that no document had
@@ -928,18 +928,14 @@ implementation measured, and because three of them changed what shipped:
 
 ### 19.4 Is the namespace complete?
 
-**Yes, except for gated and deferred work.** §17's criterion was: #2123–#2127, #2129 and #2132
-`done`, SR-AUD-319/320/321/322/323 `remediated`, and #2128 carrying a design ticket and a behaviour
-pin. **Every clause is satisfied.** What remains is exactly two items, both correctly classified:
-
-- **#2128** — `needs_user`. A genuine architecture decision about what a long-standing public API
-  accepts, now with the §18.6 fact it was missing.
-- **#2130** — `todo`, deferred verification. Undecidable here: it asks what **.NET** does, and
-  `/rv/tmp/runtime/` is absent. The port-side half is measured and pinned.
+**Yes.** §17's original criterion was already satisfied at the 2026-08-08 checkpoint. The two
+then-gated follow-ups were subsequently resolved: #2128 measured and implemented .NET's distinct
+collection/wire rules, while #2130 admitted all three RFC 9110 forms and #2360 completed the
+measured .NET lenient grammar. The earlier `needs_user` / `todo` passages in §§12 and 18 are
+historical checkpoint records, not current planning status.
 
 **No ticket in this namespace is blocked**, and none needed an object-layout, vtable or
 exception-specification change — §7 predicted that and it held. The only architectural change was
 the one component edge §7 predicted, `Net.Http.Headers` → `Net`, **41 modules / 91 → 92 edges**.
 
 **Test count: 373 → 423** across the two batches (`SharpRuntimeTests_Net_Http_Headers`).
-

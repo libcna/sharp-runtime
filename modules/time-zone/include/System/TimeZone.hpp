@@ -17,10 +17,10 @@ namespace System {
      * Prefer TimeZoneInfo for new code; TimeZone is provided for compatibility.
      */
     /**
-     * @note #1941 phase 2 made this an `ILocalTimeZone` (`Core.Base`). The two members that
-     * interface requires were **already declared here, with the same signatures**, so deriving
-     * added nothing and changed nothing -- it only lets a `DateTime` in `Core.Base` be handed one
-     * of these without `Core.Base` naming a `TimeZone` type, which would be a cycle.
+     * @note #1941 phase 2 made this an `ILocalTimeZone` (`Core.Base`). The two public pure-virtual
+     * members were already declared here; the interface additionally supplies a UTC-instant
+     * conversion query with a fixed-zone default. The system adapter overrides that query so DST
+     * boundaries are resolved as instants without exposing a `TimeZone` type to `Core.Base`.
      */
     class TimeZone : public System::ILocalTimeZone {
     public:
@@ -42,10 +42,12 @@ namespace System {
         virtual const std::string& getDaylightNameProperty()  const = 0;
 
         /**
-         * @brief Returns the UTC offset for the given local time.
+         * @brief Returns the UTC offset for the given DateTime.
          *
          * C++ counterpart of .NET TimeZone.GetUtcOffset(DateTime).
-         * @param time Local date/time whose offset is requested.
+         * A Utc value returns zero. Local and Unspecified values are interpreted as local
+         * wall-clock times, including daylight time where the implementation models it.
+         * @param time Date/time whose offset is requested.
          */
         TimeSpan GetUtcOffset(const DateTime& time)   const override = 0;
 

@@ -8,7 +8,7 @@ This file is generated from the CMake component registrations. Run
 `python3 scripts/generate_component_catalog.py` after changing module
 metadata, or use `--check` to verify that the committed catalogue is current.
 
-The graph contains **41 physical modules** and **95 direct production dependency edges**.
+The graph contains **41 physical modules** and **96 direct production dependency edges**.
 
 For each row, the component name and representative public header form a
 minimal consumer example using the template below:
@@ -55,7 +55,7 @@ for maintainers and are not part of the consumer include surface.
 | `IO.Hashing` | `modules/io-hashing` | static | `Core.Base`, `IO` | — | — | — | `System/IO/Hashing/Adler32.hpp` |
 | `Storage` | `modules/storage` | static | — | — | — | parent-provided SDL3 on Android (private) | `SharpRuntime/Storage/StoragePaths.hpp` |
 | `IO.IsolatedStorage` | `modules/io-isolated-storage` | static | `Core.Base`, `IO` | `Storage` | — | — | `System/IO/IsolatedStorage/IsolatedStorage.hpp` |
-| `Net` | `modules/net` | static | `Collections.Core`, `ComponentModel`, `Core.Base`, `Uri` | — | — | `ws2_32` on Windows (private) | `System/Net/Cookie.hpp` |
+| `Net` | `modules/net` | static | `Collections.Core`, `ComponentModel`, `Core.Base`, `Uri` | `TimeZone` | — | `ws2_32` on Windows (private) | `System/Net/Cookie.hpp` |
 | `Net.Sockets` | `modules/net-sockets` | static | `Core.Base`, `IO`, `Net`, `Threading.Tasks` | — | — | — | `System/Net/Sockets/IPPacketInformation.hpp` |
 | `Net.Http` | `modules/net-http` | static | `Core.Base`, `IO`, `Net`, `Text`, `Threading`, `Threading.Tasks` | `Uri` | `Net.Sockets` | — | `System/Net/Http/ByteArrayContent.hpp` |
 | `Net.Http.Headers` | `modules/net-http-headers` | static | `Collections.Core`, `Core.Base`, `Uri` | `Net` | — | — | `System/Net/Http/Headers/AuthenticationHeaderValue.hpp` |

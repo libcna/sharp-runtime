@@ -21,7 +21,7 @@ namespace System {
      * C++ counterpart of .NET System.TimeZoneInfo.
      *
      * Implements the subset of the .NET API needed for game-engine porting.
-     * @c Local() reads the real system timezone via POSIX @c localtime_r().
+     * @c Local() reads the system timezone through the platform API. On POSIX,
      * @c FindSystemTimeZoneById() resolves IANA names from @c /usr/share/zoneinfo/.
      *
      * **Limitations (documented, not bugs):**
@@ -40,7 +40,9 @@ namespace System {
      * - DisplayName is the raw identifier for a system zone; producing .NET's
      *   "(UTC+01:00) ..." text needs CLDR display data this repository does not carry.
      * - GetSystemTimeZones() returns UTC and Local rather than enumerating the database.
-     * - POSIX-only: Local() and FindSystemTimeZoneById() use localtime_r and /usr/share/zoneinfo.
+     * - Named-zone discovery is platform-specific: POSIX uses IANA zoneinfo, Windows maps the
+     *   supported IANA IDs to registry-backed dynamic zone data, and Emscripten does not expose
+     *   a zone database.
      */
     class TimeZoneInfo {
     public:
@@ -81,13 +83,18 @@ namespace System {
              * component beyond DateTime.MinValue's implicit date) at millisecond granularity.
              *
              * C++ counterpart of the timeOfDay portion of .NET
-             * TimeZoneInfo.TransitionTime.ValidateTransitionTime -- real .NET also rejects a
-             * timeOfDay.Kind other than Unspecified, which does not apply here since this
-             * port's DateTime does not track DateTimeKind (see DateTime.hpp's documented
-             * Kind limitation).
-             * @throws ArgumentException if @p timeOfDay has a date component or sub-millisecond ticks.
+             * TimeZoneInfo.TransitionTime.ValidateTransitionTime. The value must also carry
+             * `DateTimeKind::Unspecified`: a transition describes a wall-clock time in the
+             * owning zone, not a UTC or process-local instant.
+             * @throws ArgumentException if @p timeOfDay is not Unspecified, has a date
+             *         component, or contains sub-millisecond ticks.
              */
             static void validateTimeOfDay(const DateTime& timeOfDay) {
+                if (timeOfDay.getKindProperty() != DateTimeKind::Unspecified)
+                    throw System::ArgumentException(
+                        "The supplied DateTime must have the Kind property set to "
+                        "DateTimeKind.Unspecified.",
+                        "timeOfDay");
                 longcs ticks = timeOfDay.getTicksProperty();
                 if (ticks >= TimeSpan::TicksPerDay || ticks % TimeSpan::TicksPerMillisecond != 0)
                     throw System::ArgumentException(
@@ -103,7 +110,8 @@ namespace System {
              * @param month     Month of the transition (1-12).
              * @param day       Day of the month (1-31).
              * @throws ArgumentOutOfRangeException if month or day is out of range.
-             * @throws ArgumentException if timeOfDay has a date component or sub-millisecond ticks.
+             * @throws ArgumentException if timeOfDay is not Unspecified, has a date component,
+             *         or contains sub-millisecond ticks.
              */
             static TransitionTime CreateFixedDateRule(DateTime timeOfDay, intcs month, intcs day) {
                 validateTimeOfDay(timeOfDay);
@@ -129,7 +137,8 @@ namespace System {
              * @param week       Week of the month (1-5).
              * @param dayOfWeek  Day of the week (Sunday=0 … Saturday=6).
              * @throws ArgumentOutOfRangeException if month, week, or dayOfWeek is out of range.
-             * @throws ArgumentException if timeOfDay has a date component or sub-millisecond ticks.
+             * @throws ArgumentException if timeOfDay is not Unspecified, has a date component,
+             *         or contains sub-millisecond ticks.
              */
             static TransitionTime CreateFloatingDateRule(DateTime timeOfDay, intcs month,
                                                          intcs week, DayOfWeek dayOfWeek) {
@@ -296,14 +305,16 @@ namespace System {
             }
 
             /**
-             * @brief The three further validations .NET's ValidateAdjustmentRule performs.
+             * @brief Validates a public adjustment rule in .NET's exception order.
              *
              * Ticket #2186 (2026-08-18). #2179 measured all three as accepted here and
              * deliberately did not repair them, because "the audit's managed probe covers only
              * the reversed date range, and inventing three more rejections on a recollection of
              * the .NET source is exactly what this review declines to do". The reference is
              * available now (`TimeZoneInfo.AdjustmentRule.cs:174-223`), and it **corrects the
-             * ticket's own statement of two of the three**:
+             * ticket's own statement of two of the three checks it deferred**. The later
+             * DateTimeKind ripple review also restored the two leading Kind checks and the
+             * identical-transition rejection that the older audit had missed:
              *
              *   - the `daylightDelta` range is NOT +/-14 hours. It is `-23.0 .. 14.0`, and .NET
              *     explains why in a comment of its own: Samoa moved across the International Date
@@ -315,8 +326,36 @@ namespace System {
              *   - the time-of-day check EXEMPTS `DateTime::MinValue` for `dateStart` and
              *     `MaxValue` for `dateEnd`, which is how a rule that spans all time is spelled.
              */
-            static void validateAdjustmentRule(const DateTime& dateStart, const DateTime& dateEnd,
-                                               const TimeSpan& daylightDelta) {
+            static void validateAdjustmentRule(
+                const DateTime& dateStart, const DateTime& dateEnd,
+                const TimeSpan& daylightDelta,
+                const TransitionTime& daylightTransitionStart,
+                const TransitionTime& daylightTransitionEnd) {
+                // The two public factories require Unspecified date boundaries and validate
+                // both Kinds before every other rule. Internal runtime factories can represent
+                // UTC transition instants, but that broader shape is not this public API.
+                const auto validateDateKind = [](const DateTime& value, const char* paramName) {
+                    const DateTimeKind kind = value.getKindProperty();
+                    if (kind != DateTimeKind::Unspecified) {
+                        throw System::ArgumentException(
+                            "The supplied DateTime must have the Kind property set to "
+                            "DateTimeKind.Unspecified.",
+                            paramName);
+                    }
+                };
+                validateDateKind(dateStart, "dateStart");
+                validateDateKind(dateEnd, "dateEnd");
+
+                // AdjustmentRule.cs validates this before the effective-date ordering. Public
+                // factories always use noDaylightTransitions=false, so equal transition values
+                // cannot describe a public rule even when daylightDelta is zero.
+                if (daylightTransitionStart == daylightTransitionEnd) {
+                    throw System::ArgumentException(
+                        "The DaylightTransitionStart property must not equal the "
+                        "DaylightTransitionEnd property.",
+                        "daylightTransitionEnd");
+                }
+
                 validateDateRange(dateStart, dateEnd);
 
                 // TimeZoneInfo.AdjustmentRule.cs:206-209.
@@ -337,10 +376,8 @@ namespace System {
                         "daylightDelta");
                 }
 
-                // :216-223. This port has no DateTimeKind (a permanent deviation), so the
-                // `Kind == Unspecified` conjunct is not reproducible and is simply absent -- which
-                // makes this port's check STRICTER than .NET's for a UTC-kinded argument, and
-                // identical for every argument this port can express.
+                // :216-223. Public boundaries are wall-clock dates, so a time-of-day is forbidden
+                // except at MinValue/MaxValue's open-ended limits.
                 if (dateStart != DateTime::MinValue &&
                     dateStart.getTimeOfDayProperty() != TimeSpan::Zero) {
                     throw System::ArgumentException(
@@ -368,7 +405,8 @@ namespace System {
                 DateTime dateStart, DateTime dateEnd, TimeSpan daylightDelta,
                 TransitionTime daylightTransitionStart, TransitionTime daylightTransitionEnd)
             {
-                validateAdjustmentRule(dateStart, dateEnd, daylightDelta);
+                validateAdjustmentRule(dateStart, dateEnd, daylightDelta,
+                                       daylightTransitionStart, daylightTransitionEnd);
                 auto r = std::shared_ptr<AdjustmentRule>(new AdjustmentRule());
                 r->dateStart_               = dateStart;
                 r->dateEnd_                 = dateEnd;
@@ -394,7 +432,8 @@ namespace System {
                 TransitionTime daylightTransitionStart, TransitionTime daylightTransitionEnd,
                 TimeSpan baseUtcOffsetDelta)
             {
-                validateAdjustmentRule(dateStart, dateEnd, daylightDelta);
+                validateAdjustmentRule(dateStart, dateEnd, daylightDelta,
+                                       daylightTransitionStart, daylightTransitionEnd);
                 auto r = std::shared_ptr<AdjustmentRule>(new AdjustmentRule());
                 r->dateStart_               = dateStart;
                 r->dateEnd_                 = dateEnd;
@@ -415,6 +454,19 @@ namespace System {
         TimeSpan    baseUtcOffset_;
         bool        supportsDst_ = false;
 
+        /**
+         * @brief Maps only the two canonical singleton objects to a DateTimeKind.
+         *
+         * .NET deliberately uses reference identity here: a custom zone that happens to have
+         * the same id and offset as Local or UTC is still an arbitrary zone, so conversion to it
+         * produces an Unspecified DateTime. Value equality would silently mislabel such clocks.
+         */
+        [[nodiscard]] static DateTimeKind correspondingKind(const TimeZoneInfo& timeZone) {
+            if (&timeZone == &Utc()) return DateTimeKind::Utc;
+            if (&timeZone == &Local()) return DateTimeKind::Local;
+            return DateTimeKind::Unspecified;
+        }
+
         TimeZoneInfo(std::string id, TimeSpan baseUtcOffset,
                      std::string displayName, std::string standardName,
                      std::string daylightName, bool supportsDst)
@@ -423,6 +475,23 @@ namespace System {
               baseUtcOffset_(baseUtcOffset), supportsDst_(supportsDst) {}
 
     public:
+        /**
+         * @brief Time-zone values may be copied, but are immutable after construction.
+         *
+         * The lookup API returns shared pointers and the canonical UTC result aliases the
+         * process-lifetime `Utc()` object so conversion can preserve .NET's reference-identity
+         * Kind rule. Deleting assignment prevents a caller from overwriting that singleton
+         * through the otherwise mutable `shared_ptr<TimeZoneInfo>` surface. All public state was
+         * already getter-only. Construction from an rvalue is deliberately disabled too: the
+         * lookup API exposes a mutable pointer type, so moving from `*Find(..., "UTC")` would
+         * otherwise empty the canonical singleton even though assignment itself is disabled.
+         * This makes the C++ value mechanics enforce the same contract.
+         */
+        TimeZoneInfo(const TimeZoneInfo&) = default;
+        TimeZoneInfo(TimeZoneInfo&&) = delete;
+        TimeZoneInfo& operator=(const TimeZoneInfo&) = delete;
+        TimeZoneInfo& operator=(TimeZoneInfo&&) = delete;
+
         // =====================================================================
         // Properties
         // =====================================================================
@@ -572,10 +641,12 @@ namespace System {
         /**
          * @brief Converts a DateTime to UTC by subtracting the zone's base UTC offset.
          *
-         * C++ counterpart of the instance form of .NET TimeZoneInfo.ConvertTimeToUtc(DateTime).
+         * Convenience instance spelling of .NET's static
+         * `TimeZoneInfo.ConvertTimeToUtc(DateTime, TimeZoneInfo)`. The returned Kind is UTC,
+         * including when the tick result is clamped at DateTime's range boundary.
          */
         [[nodiscard]] DateTime ConvertTimeToUtc(const DateTime& dt) const {
-            return dt.Add(-baseUtcOffset_);
+            return TimeZoneInfo::ConvertTimeToUtc(dt, *this);
         }
 
         /**
@@ -684,11 +755,12 @@ namespace System {
         }
 
         /**
-         * @brief Returns the local system time zone by reading the OS timezone via POSIX localtime_r().
+         * @brief Returns the local system time zone using the platform timezone API.
          *
          * C++ counterpart of .NET TimeZoneInfo.Local.
-         * The offset reflects the current wall-clock offset (including any active DST).
-         * On Emscripten, returns UTC.
+         * BaseUtcOffset is the zone's standard offset; the DST-support flag records whether the
+         * zone has enabled transition rules, independently of the current season.
+         * On Emscripten, returns a distinct zero-offset Local zone.
          */
         static const TimeZoneInfo& Local();
 
@@ -817,28 +889,43 @@ namespace System {
         }
 
         /**
-         * @brief Converts @p dt (assumed UTC) to the zone identified by @p destinationTimeZoneId.
+         * @brief Converts @p dt to the zone identified by @p destinationTimeZoneId.
          *
          * C++ counterpart of .NET TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime, string).
+         * A UTC input is read as UTC; Local and Unspecified inputs are read in TimeZoneInfo.Local.
          */
         static DateTime ConvertTimeBySystemTimeZoneId(const DateTime& dt,
                                                       const std::string& destinationTimeZoneId) {
             auto tz = FindSystemTimeZoneById(destinationTimeZoneId);
-            return dt.Add(tz->baseUtcOffset_);
+            return ConvertTime(dt, *tz);
         }
 
         /**
-         * @brief Converts @p dt (assumed UTC) to the zone identified by @p destinationTimeZoneId.
+         * @brief Converts @p dt between the two zones identified by id.
          *
          * C++ counterpart of .NET TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime, string, string).
+         * A non-Unspecified input Kind must agree with the source id.
          */
         static DateTime ConvertTimeBySystemTimeZoneId(const DateTime& dt,
                                                       const std::string& sourceTimeZoneId,
                                                       const std::string& destinationTimeZoneId) {
-            auto src = FindSystemTimeZoneById(sourceTimeZoneId);
-            auto dst = FindSystemTimeZoneById(destinationTimeZoneId);
-            DateTime utc = dt.Add(-src->baseUtcOffset_);
-            return utc.Add(dst->baseUtcOffset_);
+            // .NET special-cases a Local-kinded value whose source id names Local so cache
+            // refresh cannot break source reference identity. Its comparison is
+            // OrdinalIgnoreCase and occurs before ordinary lookup: `"local"` is not an IANA
+            // file, but it still names the canonical Local source for a Local DateTime.
+            const bool useCanonicalLocal =
+                dt.getKindProperty() == DateTimeKind::Local &&
+                foldZoneId(sourceTimeZoneId) == foldZoneId(Local().getIdProperty());
+            std::shared_ptr<TimeZoneInfo> sourceOwner;
+            const TimeZoneInfo* source = nullptr;
+            if (useCanonicalLocal) {
+                source = &Local();
+            } else {
+                sourceOwner = FindSystemTimeZoneById(sourceTimeZoneId);
+                source = sourceOwner.get();
+            }
+            auto destination = FindSystemTimeZoneById(destinationTimeZoneId);
+            return ConvertTime(dt, *source, *destination);
         }
 
         /**
@@ -848,17 +935,31 @@ namespace System {
          */
         static DateTimeOffset ConvertTime(const DateTimeOffset& dto,
                                           const TimeZoneInfo& destinationTimeZone) {
-            return DateTimeOffset(dto.getUtcDateTimeProperty().Add(destinationTimeZone.baseUtcOffset_),
-                                  destinationTimeZone.baseUtcOffset_);
+            // TimeZoneInfo.cs computes from raw UTC ticks because DateTime.Add would throw at
+            // the representable boundary. The DateTimeOffset overload instead saturates to its
+            // zero-offset MinValue/MaxValue constants.
+            const SharpRuntime::longcs destinationTicks =
+                dto.getUtcTicksProperty() + destinationTimeZone.baseUtcOffset_.getTicksProperty();
+            if (destinationTicks > DateTime::MaxTicks) return DateTimeOffset::MaxValue;
+            if (destinationTicks < 0) return DateTimeOffset::MinValue;
+
+            // The tick constructor interprets destinationTicks as the visible wall clock and
+            // stores DateTimeOffset.DateTime as Unspecified, independent of DateTime arithmetic.
+            return DateTimeOffset(destinationTicks, destinationTimeZone.baseUtcOffset_);
         }
 
         /**
-         * @brief Converts @p dt (assumed UTC) to the specified destination time zone.
+         * @brief Converts @p dt to the specified destination time zone.
          *
          * C++ counterpart of .NET TimeZoneInfo.ConvertTime(DateTime, TimeZoneInfo).
+         * A UTC input is read as UTC; Local and Unspecified inputs are read in TimeZoneInfo.Local.
+         * The result is Utc for the canonical Utc() destination, Local for canonical Local(),
+         * and Unspecified for every other destination.
          */
         static DateTime ConvertTime(const DateTime& dt, const TimeZoneInfo& destinationTimeZone) {
-            return dt.Add(destinationTimeZone.baseUtcOffset_);
+            const TimeZoneInfo& sourceTimeZone =
+                dt.getKindProperty() == DateTimeKind::Utc ? Utc() : Local();
+            return ConvertTime(dt, sourceTimeZone, destinationTimeZone);
         }
 
         /**
@@ -877,8 +978,7 @@ namespace System {
          *     => (ulong)ticks <= DateTime.MaxTicks ? new DateTime(ticks, kind)
          *                                          : (ticks < 0 ? DateTime.MinValue : DateTime.MaxValue);
          * @endcode
-         * (`TimeZoneInfo.Cache.cs:340-342`), and `ConvertTime` builds its result through it
-         * (`TimeZoneInfo.cs:685`).
+         * (`TimeZoneInfo.Cache.cs`), and `ConvertTime` builds its result through it.
          *
          * **The cast to `ulong` is the whole trick and is reproduced deliberately**: a negative
          * tick count wraps to something enormous, so one unsigned comparison rejects both ends of
@@ -889,45 +989,73 @@ namespace System {
          * `new DateTime(...)` and lets it throw, with a comment saying so explicitly
          * (`TimeZoneInfo.cs:661-667`) — that path needs `TimeZoneInfoOptions` and adjustment
          * rules this port's `TimeZoneInfo` does not model, so it is not reachable here.
+         * @param kind Kind for an in-range result. Like .NET's helper, an overflow returns the
+         *             Unspecified MinValue/MaxValue constant; ConvertTime subsequently stamps
+         *             the destination Kind on those clamped ticks.
          */
-        [[nodiscard]] static DateTime safeFromTicks(SharpRuntime::longcs ticks) {
+        [[nodiscard]] static DateTime safeFromTicks(
+            SharpRuntime::longcs ticks, DateTimeKind kind = DateTimeKind::Unspecified) {
             const auto unsignedTicks = static_cast<unsigned long long>(ticks);
             if (unsignedTicks <= static_cast<unsigned long long>(DateTime::MaxTicks))
-                return DateTime(ticks);
+                return DateTime(ticks, kind);
             return ticks < 0 ? DateTime::MinValue : DateTime::MaxValue;
         }
 
         static DateTime ConvertTime(const DateTime& dt,
                                     const TimeZoneInfo& sourceTimeZone,
                                     const TimeZoneInfo& destinationTimeZone) {
+            const DateTimeKind sourceKind = correspondingKind(sourceTimeZone);
+            if (dt.getKindProperty() != DateTimeKind::Unspecified &&
+                dt.getKindProperty() != sourceKind) {
+                throw System::ArgumentException(
+                    "The conversion could not be completed because the supplied DateTime did "
+                    "not have the Kind property set correctly. For example, when the Kind "
+                    "property is DateTimeKind.Local, the source time zone must be "
+                    "TimeZoneInfo.Local.",
+                    "sourceTimeZone");
+            }
+
+            const DateTimeKind targetKind = correspondingKind(destinationTimeZone);
+            // .NET's lossless identity shortcut. It is observable for the fourth packed
+            // LocalAmbiguousDst state even though this port cannot currently create that state:
+            // returning the input keeps it intact, while reconstructing from public Local would
+            // fold it away. Keeping the shortcut costs nothing and avoids baking in that loss.
+            if (dt.getKindProperty() != DateTimeKind::Unspecified &&
+                sourceKind != DateTimeKind::Unspecified && sourceKind == targetKind) {
+                return dt;
+            }
+
             // #2186: the intermediate UTC ticks may leave the range while the final local ticks
             // land back inside it, which is why .NET computes the result "from raw ticks to avoid
             // precision loss from double-clamping" (TimeZoneInfo.cs:683-685) and clamps only once,
             // at the end.
             const SharpRuntime::longcs utcTicks =
                 dt.getTicksProperty() - sourceTimeZone.baseUtcOffset_.getTicksProperty();
-            return safeFromTicks(utcTicks + destinationTimeZone.baseUtcOffset_.getTicksProperty());
+            const DateTime targetConverted =
+                safeFromTicks(utcTicks + destinationTimeZone.baseUtcOffset_.getTicksProperty());
+            return DateTime(targetConverted.getTicksProperty(), targetKind);
         }
 
         /**
          * @brief Converts a UTC DateTime to the specified destination time zone.
          *
          * C++ counterpart of .NET TimeZoneInfo.ConvertTimeFromUtc(DateTime, TimeZoneInfo).
+         * A Local input is rejected because its Kind conflicts with the UTC source. The result
+         * Kind follows the canonical-destination matrix used by every ConvertTime overload.
          */
         static DateTime ConvertTimeFromUtc(const DateTime& dt,
                                            const TimeZoneInfo& destinationTimeZone) {
-            return safeFromTicks(dt.getTicksProperty() +
-                                 destinationTimeZone.baseUtcOffset_.getTicksProperty());   // #2186
+            return ConvertTime(dt, Utc(), destinationTimeZone);
         }
 
         /**
          * @brief Converts a DateTime to UTC using the specified source time zone.
          *
          * C++ counterpart of .NET TimeZoneInfo.ConvertTimeToUtc(DateTime, TimeZoneInfo).
+         * The result Kind is always Utc, including a clamped MinValue/MaxValue result.
          */
         static DateTime ConvertTimeToUtc(const DateTime& dt, const TimeZoneInfo& sourceTimeZone) {
-            return safeFromTicks(dt.getTicksProperty() -
-                                 sourceTimeZone.baseUtcOffset_.getTicksProperty());   // #2186
+            return ConvertTime(dt, sourceTimeZone, Utc());
         }
 
         /**

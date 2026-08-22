@@ -20,20 +20,23 @@ namespace System {
     using SharpRuntime::longcs;
     using SharpRuntime::intcs;
 
+    class DateTimeOffset;
+    namespace Globalization { class DateTimeFormatInfo; }
+
     /**
      * @brief Represents an instant in time, expressed as the number of 100-nanosecond
      * ticks since the .NET epoch (0001-01-01 00:00:00).
      *
      * Partial C++ counterpart of .NET System.DateTime.
      *
-     * @note Status: Partial — since ticket #1941 (#1929 row 4D, **phase 1**) `DateTimeKind` is
-     *   STORED and reported, and `SpecifyKind` and a kind-taking constructor exist. **Since
-     *   #1941 phase 2, `ToLocalTime(zone)` and `ToUniversalTime(zone)` convert by it** -- taking
-     *   the zone explicitly, because `Core.Base` cannot name one; the no-argument forms .NET has
-     *   remain absent and that deviation is recorded on those members. Still absent: offset/`Z`
-     *   parse conversion and the `AssumeLocal`/`AssumeUniversal`/`AdjustToUniversal`/
-     *   `RoundtripKind` styles. A phase-2 approval must name a date-sensitive timezone provider
-     *   before any of those can exist. OLE Automation date, FILETIME, and binary-serialization conversions
+     * @note Status: Partial — ticket #1941 phase 1 added packed `DateTimeKind` storage, and the
+     *   post-#1941 ripple audit completed the existing-value contract: `Now`/`Today` are local,
+     *   `UnixEpoch` is UTC, and every DateTime-returning arithmetic operation preserves the
+     *   source's internal kind bits. **Since #1941 phase 2, `ToLocalTime(zone)` and
+     *   `ToUniversalTime(zone)` convert by the kind** -- taking the zone explicitly, because
+     *   `Core.Base` cannot name one; the no-argument forms .NET has remain absent and that
+     *   deviation is recorded on those members. Exact parsing honours the approved
+     *   `DateTimeStyles` subset since #1942. OLE Automation date, FILETIME, and binary-serialization conversions
      *   (ToOADate/FromOADate, ToFileTime/FromFileTime, ToBinary/FromBinary) are out of
      *   scope. **Since #1940 a culture-aware `ToString(format, IFormatProvider*)` exists** and
      *   honours the resolved `DateTimeFormatInfo`'s month and day names; `Parse`/`TryParse` still
@@ -57,6 +60,8 @@ namespace System {
         static constexpr longcs MaxTicks            = 3155378975999999999LL;
 
     private:
+        friend class DateTimeOffset;
+
         // Matches real .NET's private MaxDays/MaxHours constants (DateTime.cs: `MaxTicks /
         // TimeSpan.TicksPerDay` etc.) -- AddDays/AddHours must reject a unit count whose
         // product with TicksPer{Day,Hour} would itself overflow int64 *before* multiplying,
@@ -68,6 +73,8 @@ namespace System {
         // multiplication-overflow threshold for those units.
         static constexpr longcs MaxDays  = MaxTicks / TicksPerDay;
         static constexpr longcs MaxHours = MaxTicks / TicksPerHour;
+        static constexpr unsigned long long TicksMask = 0x3FFFFFFFFFFFFFFFULL;
+        static constexpr unsigned long long FlagsMask = 0xC000000000000000ULL;
 
         /**
          * @brief The tick count with the kind packed into its two most significant bits.
@@ -93,14 +100,36 @@ namespace System {
 
         /** @brief The tick count, with the kind bits removed. .NET's `UTicks`. */
         [[nodiscard]] constexpr longcs ticks() const noexcept {
-            return static_cast<longcs>(dateData_ & 0x3FFFFFFFFFFFFFFFULL);
+            return static_cast<longcs>(dateData_ & TicksMask);
         }
 
         /**
-         * @brief Decomposes ticks() into a UTC std::tm using the C standard library.
+         * @brief Replaces the tick payload while preserving all internal kind bits.
          *
-         * Uses floor division so that pre-1970 (negative Unix-timestamp) dates are
-         * decomposed correctly.
+         * This is .NET's `new DateTime(ticks | InternalKind)` arithmetic rule. Preserving the
+         * raw flags rather than reconstructing them through `getKindProperty()` also retains
+         * the reserved ambiguous-local encoding if a future conversion path produces it.
+         */
+        [[nodiscard]] DateTime withTicksPreservingKind(longcs replacementTicks) const;
+
+        /**
+         * @brief Formats one already-expanded custom pattern, optionally using an explicit
+         *        DateTimeOffset offset for the `z` and `K` tokens.
+         *
+         * Keeping this grammar on DateTime lets DateTimeOffset supply its stored offset without
+         * maintaining a second copy of every date, clock, fraction, quoting, and provider rule.
+         * A null @p offset preserves DateTime's existing kind-only `K` behaviour.
+         */
+        [[nodiscard]] std::string formatCustom(
+            const std::string& format,
+            const System::Globalization::DateTimeFormatInfo& info,
+            const TimeSpan* offset) const;
+
+        /**
+         * @brief Decomposes ticks() arithmetically into a std::tm-shaped component record.
+         *
+         * This deliberately does not call `gmtime`: the Windows CRT cannot represent the full
+         * DateTime year 1..9999 range.
          */
         [[nodiscard]] std::tm toTm() const;
 
@@ -142,11 +171,9 @@ namespace System {
         /**
          * @brief Initializes a new instance with the specified ticks and `DateTimeKind`.
          *
-         * Ticket #1941 (#1929 row 4D, **phase 1 only**). The kind is *stored and reported*;
-         * nothing converts by it. `ToLocalTime`, `ToUniversalTime`, offset/`Z` parse conversion,
-         * `AssumeLocal`, `AssumeUniversal`, `AdjustToUniversal` and `RoundtripKind` are all
-         * explicitly outside this phase and remain absent — a phase-2 approval must name a
-         * date-sensitive timezone provider first.
+         * Ticket #1941 (#1929 row 4D, phase 1) introduced this storage constructor. It stores
+         * the requested kind without converting the tick value; later phases added explicit
+         * conversion and style-aware parsing surfaces without changing that constructor rule.
          *
          * @param ticks A date and time expressed in 100-nanosecond ticks since 0001-01-01.
          * @param kind  Whether @p ticks is UTC, local, or unspecified.
@@ -224,8 +251,8 @@ namespace System {
          * repeated DST hour carries — onto `Local` here, with a bit trick whose comment explains
          * it: *"values 0-2 map directly to DateTimeKind, 3 (LocalAmbiguousDst) needs to be mapped
          * to 2 (Local)"* (`DateTime.cs:1458-1467`). The encoding reserves that fourth value even
-         * though nothing in this phase sets it, because reserving it now is what lets phase 2 add
-         * ambiguous-local handling without moving any bit.
+         * though current conversion paths do not set it, so an eventual ambiguity-capable local
+         * conversion can preserve the marker without moving any bit.
          */
         [[nodiscard]] DateTimeKind getKindProperty() const;
 
@@ -328,6 +355,9 @@ namespace System {
          *
          * @param value Time span to add.
          * @return A new DateTime that is the sum of this instance and @p value.
+         * @note The result preserves this instance's complete internal kind encoding. The same
+         *       rule applies to every DateTime-returning `Add*`, `Subtract(TimeSpan)`, `+`, and
+         *       `-` operation.
          */
         [[nodiscard]] DateTime Add(const TimeSpan& value) const;
 
@@ -423,15 +453,18 @@ namespace System {
         /**
          * @brief Gets the current local date and time.
          *
-         * @return Current local DateTime expressed in .NET-compatible ticks.
-         * @note DateTimeKind is not stored; the value reflects UTC-based system time.
+         * @return Current local wall-clock time expressed in .NET-compatible ticks, with kind
+         *         `DateTimeKind::Local`.
+         * @note The UTC system clock is decomposed with the platform's reentrant local-time API
+         *       (`localtime_r` or `localtime_s`), preserving sub-second ticks. Emscripten follows
+         *       the existing Core policy of treating the local zone as UTC.
          */
         [[nodiscard]] static DateTime getNowProperty();
 
         /**
          * @brief Gets the current date with the time component set to midnight (00:00:00).
          *
-         * @return Today's date at 00:00:00.
+         * @return Today's local date at 00:00:00, with kind `DateTimeKind::Local`.
          */
         [[nodiscard]] static DateTime getTodayProperty();
 
@@ -453,9 +486,22 @@ namespace System {
          * @brief Returns the date/time formatted according to @p format.
          *
          * C++ counterpart of .NET DateTime.ToString(string).
-         * Tokens: yyyy, yy, MMMM, MMM, MM, M, dddd, ddd, dd, d, HH, H, hh, h, mm, m, ss, s, fff,
-         * ff, f. ddd/dddd and MMM/MMMM use fixed invariant-culture English names (no locale
-         * support). Literal text can be enclosed in single quotes.
+         * Eighteen supported one-character standard specifiers expand through the current
+         * `DateTimeFormatInfo`. Standard `U` is deliberately rejected: .NET first converts it
+         * through the process-local timezone, while Core.Base has no implicit date-sensitive
+         * zone service and returning the original wall clock would be a plausible wrong value.
+         * Custom tokens include year/month/day and clock fields, required
+         * `f` through `fffffff`, optional `F` through `FFFFFFF`, `t`/`tt`, and `K`; month, day,
+         * and AM/PM names come from the resolved provider. Literal text can be enclosed in single
+         * or double quotes, and `%x` selects one custom token anywhere in a custom pattern.
+         *
+         * @note `K` emits `Z` for Utc and no marker for Unspecified. It also emits no marker for
+         *       Local in this Core.Base overload: a numeric local offset requires a timezone and
+         *       neither formatting signature carries one. The XML layer, which can reach
+         *       `TimeZone::CurrentTimeZone()`, owns the complete XSD local-offset rendering.
+         *       For the same dependency reason, custom `z`/`zz`/`zzz` on DateTime raise
+         *       `FormatException` rather than emitting a guessed or literal offset; those tokens
+         *       are fully supported on DateTimeOffset, which stores its offset.
          * @param format The format string.
          */
         [[nodiscard]] std::string ToString(const std::string& format) const;
@@ -490,7 +536,10 @@ namespace System {
          *
          * C++ counterpart of .NET DateTime.Parse(string).
          * Accepts "yyyy-MM-dd", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-ddTHH:mm:ss",
-         * or with optional ".fff" millisecond suffix.
+         * optional one-to-seven-digit fractional seconds, and the documented trailing zone
+         * shapes. A zone suffix is consumed but the result remains Unspecified: unlike the
+         * explicit-zone ParseExact overload, this Core.Base surface cannot obtain an implicit
+         * current-zone service without reversing the TimeZone dependency.
          * @throws System::FormatException if the string cannot be parsed.
          */
         [[nodiscard]] static DateTime Parse(const std::string& s);
@@ -507,22 +556,10 @@ namespace System {
          *
          * C++ counterpart of .NET `DateTime.ParseExact(string, string, IFormatProvider)`.
          *
-         * ADDED BY #2414, AND ITS ABSENCE WAS THE REASON #1942 HAD NOWHERE TO LAND: this type's
-         * entire parse surface was `Parse` and `TryParse`, so there was no exact-parsing member
-         * for a format provider or a `DateTimeStyles` to reach -- the same cycle #2412 resolved
-         * for `DateOnly` and `TimeOnly` one type over.
-         *
-         * @note **#1942 (SA-16.1) ADDED THE STYLE-TAKING OVERLOADS**, which #2414 left absent. The
-         *       paragraph below is kept because it records WHY they could not land then, and the
-         *       answer -- the zone is a parameter -- is the one it predicted.
-         *       `DateTimeStyles`'s kind-affecting members need a local time zone -- `AssumeLocal`
-         *       and `AdjustToUniversal` CONVERT, and .NET reaches `TimeZoneInfo.Local` internally
-         *       where `Core.Base` cannot. #1941 phase 2 resolved that one level down by TAKING THE
-         *       ZONE AS A PARAMETER, so the styles overload needs the same decision made about its
-         *       signature; it is #1942's, not this ticket's, and is recorded there rather than
-         *       guessed at here. `RoundtripKind` additionally has nothing to preserve, because
-         *       this port's exact grammar carries NO ZONE TOKEN at all (`z`, `K` and `g` are
-         *       rejected in every mode), so an input can never state its own kind.
+         * Added by #2414; #1942 (SA-16.1) subsequently added the style-taking overloads and the
+         * `z`/`K` zone tokens. Converting styles take an explicit `ILocalTimeZone` because
+         * Core.Base cannot name `TimeZoneInfo.Local`; non-converting overloads remain dependency
+         * free. `g` (era) remains outside the supported exact grammar.
          *
          * @throws System::FormatException if @p input does not match @p format.
          */

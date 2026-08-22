@@ -5,8 +5,11 @@
 // Functional tests for System::IO: Path, File, FileInfo, Directory, DirectoryInfo,
 // BinaryReader/Writer, StreamReader/Writer, BufferedStream, FileStream, IsolatedStorageFile.
 #include <gtest/gtest.h>
+#include <cstdlib>
 #include <cstdint>
+#include <ctime>
 #include <limits>
+#include <mutex>
 #include <string>
 #include <vector>
 #include "TestTemporaryDirectory.hpp"
@@ -25,7 +28,8 @@
 #include "System/IO/FileInfo.hpp"
 #include "System/IO/FileSystemInfo.hpp"
 #include "System/DateTime.hpp"
-#include "System/TimeZoneInfo.hpp"
+#include "System/TimeZone.hpp"
+#include "System/detail/ProcessTimeZoneState.hpp"
 #include "System/IO/Directory.hpp"
 #include "System/IO/DirectoryInfo.hpp"
 #include "System/IO/BinaryReader.hpp"
@@ -77,6 +81,33 @@ static std::string isolatedName(const char* name) {
     static const SharpRuntime::Tests::TestTemporaryDirectory temporary;
     return temporary.relativeName(name);
 }
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+class ScopedIoTimeZone final {
+    std::string saved_;
+    bool wasSet_;
+
+public:
+    explicit ScopedIoTimeZone(const char* zone) {
+        std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
+        const char* current = ::getenv("TZ");
+        wasSet_ = current != nullptr;
+        if (wasSet_) saved_ = current;
+        ::setenv("TZ", zone, 1);
+        ::tzset();
+    }
+
+    ScopedIoTimeZone(const ScopedIoTimeZone&) = delete;
+    ScopedIoTimeZone& operator=(const ScopedIoTimeZone&) = delete;
+
+    ~ScopedIoTimeZone() {
+        std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
+        if (wasSet_) ::setenv("TZ", saved_.c_str(), 1);
+        else         ::unsetenv("TZ");
+        ::tzset();
+    }
+};
+#endif
 
 // ===========================================================================
 // Path
@@ -451,7 +482,7 @@ TEST(FileSystemInfoTests, LastWriteTime_RoundTrips) {
 // Regression test for a wave-3 audit finding: CreationTime/LastAccessTime/LastWriteTime (the
 // "local" properties) returned the UTC value verbatim with no timezone conversion at all.
 // Verified against FileSystemInfo.cs, where each is `Xxx => XxxUtc.ToLocalTime()`. This
-// asserts the applied offset exactly matches TimeZoneInfo::Local()'s base UTC offset (rather
+// asserts the applied offset exactly matches the date-sensitive process zone (rather
 // than asserting local != utc, which would be a no-op in a UTC-configured CI environment) --
 // it fails under the old bug whenever the local zone's offset is non-zero, and also catches a
 // wrong-sign conversion.
@@ -461,8 +492,26 @@ TEST(FileSystemInfoTests, CreationTime_AppliesLocalUtcOffset) {
     FileInfo fi(path);
     System::DateTime utc = fi.getCreationTimeUtcProperty();
     System::DateTime local = fi.getCreationTimeProperty();
-    SharpRuntime::longcs expectedOffsetTicks = System::TimeZoneInfo::Local().getBaseUtcOffsetProperty().getTicksProperty();
+    SharpRuntime::longcs expectedOffsetTicks =
+        System::TimeZone::CurrentTimeZone().GetUtcOffsetFromUniversalTime(utc).getTicksProperty();
     EXPECT_EQ(local.getTicksProperty() - utc.getTicksProperty(), expectedOffsetTicks);
+    EXPECT_EQ(utc.getKindProperty(), System::DateTimeKind::Utc);
+    EXPECT_EQ(local.getKindProperty(), System::DateTimeKind::Local);
+    File::Delete(path);
+}
+
+TEST(FileSystemInfoTests, EveryUtcAndLocalTimestampPropertyCarriesItsContractKind) {
+    std::string path = tf("fsi_timestamp_kinds.txt");
+    File::WriteAllText(path, "content");
+    FileInfo fi(path);
+
+    EXPECT_EQ(fi.getCreationTimeUtcProperty().getKindProperty(), System::DateTimeKind::Utc);
+    EXPECT_EQ(fi.getLastAccessTimeUtcProperty().getKindProperty(), System::DateTimeKind::Utc);
+    EXPECT_EQ(fi.getLastWriteTimeUtcProperty().getKindProperty(), System::DateTimeKind::Utc);
+    EXPECT_EQ(fi.getCreationTimeProperty().getKindProperty(), System::DateTimeKind::Local);
+    EXPECT_EQ(fi.getLastAccessTimeProperty().getKindProperty(), System::DateTimeKind::Local);
+    EXPECT_EQ(fi.getLastWriteTimeProperty().getKindProperty(), System::DateTimeKind::Local);
+
     File::Delete(path);
 }
 
@@ -472,11 +521,94 @@ TEST(FileSystemInfoTests, SetLastWriteTime_ConvertsFromLocalToUtc) {
     FileInfo fi(path);
     System::DateTime localTarget(System::DateTime(2020, 6, 15, 12, 0, 0));
     fi.setLastWriteTimeProperty(localTarget);
-    System::DateTime expectedUtc = System::TimeZoneInfo::ConvertTimeToUtc(localTarget, System::TimeZoneInfo::Local());
+    System::DateTime expectedUtc =
+        localTarget.ToUniversalTime(System::TimeZone::CurrentTimeZone());
     EXPECT_EQ(fi.getLastWriteTimeUtcProperty().getTicksProperty() / System::DateTime::TicksPerSecond,
               expectedUtc.getTicksProperty() / System::DateTime::TicksPerSecond);
+    EXPECT_EQ(fi.getLastWriteTimeUtcProperty().getKindProperty(), System::DateTimeKind::Utc);
     File::Delete(path);
 }
+
+TEST(FileSystemInfoTests, SetLastWriteTime_PreservesAnAlreadyUtcValue) {
+    std::string path = tf("fsi_setutctime.txt");
+    File::WriteAllText(path, "content");
+    FileInfo fi(path);
+    const System::DateTime utcTarget(
+        System::DateTime(2020, 6, 15, 12, 0, 0).getTicksProperty(),
+        System::DateTimeKind::Utc);
+
+    EXPECT_NO_THROW(fi.setLastWriteTimeProperty(utcTarget));
+    const System::DateTime written = fi.getLastWriteTimeUtcProperty();
+    EXPECT_EQ(written.getTicksProperty() / System::DateTime::TicksPerSecond,
+              utcTarget.getTicksProperty() / System::DateTime::TicksPerSecond);
+    EXPECT_EQ(written.getKindProperty(), System::DateTimeKind::Utc);
+    File::Delete(path);
+}
+
+TEST(FileSystemInfoTests, UtcSetterFloorsNegativeSubsecondUnixTimes) {
+    std::string path = tf("fsi_pre_epoch_floor.txt");
+    File::WriteAllText(path, "content");
+    FileInfo fi(path);
+    const System::DateTime oneTickBeforeEpoch = System::DateTime::SpecifyKind(
+        System::DateTime::UnixEpoch.AddTicks(-1), System::DateTimeKind::Utc);
+
+    fi.setLastWriteTimeUtcProperty(oneTickBeforeEpoch);
+    const System::DateTime written = fi.getLastWriteTimeUtcProperty();
+    EXPECT_EQ(written.getTicksProperty(),
+              System::DateTime::UnixEpochTicks - System::DateTime::TicksPerSecond);
+    EXPECT_EQ(written.getKindProperty(), System::DateTimeKind::Utc);
+    File::Delete(path);
+}
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+TEST(FileSystemInfoTests, LocalLastWriteGetterUsesDateSensitiveWinterAndSummerOffsets) {
+    ScopedIoTimeZone tz("EST5EDT,M3.2.0/2,M11.1.0/2");
+    std::string path = tf("fsi_dst_getter.txt");
+    File::WriteAllText(path, "content");
+    FileInfo fi(path);
+
+    const auto verify = [&fi](int month, int expectedLocalHour) {
+        const System::DateTime utc(
+            System::DateTime(2024, month, 15, 12, 0, 0).getTicksProperty(),
+            System::DateTimeKind::Utc);
+        fi.setLastWriteTimeUtcProperty(utc);
+        const System::DateTime local = fi.getLastWriteTimeProperty();
+        EXPECT_EQ(local.getKindProperty(), System::DateTimeKind::Local);
+        EXPECT_EQ(local.getYearProperty(), 2024);
+        EXPECT_EQ(local.getMonthProperty(), month);
+        EXPECT_EQ(local.getDayProperty(), 15);
+        EXPECT_EQ(local.getHourProperty(), expectedLocalHour);
+    };
+
+    verify(1, 7);  // EST, UTC-05:00
+    verify(7, 8);  // EDT, UTC-04:00
+    File::Delete(path);
+}
+
+TEST(FileSystemInfoTests, LocalLastWriteSetterUsesDateSensitiveWinterAndSummerOffsets) {
+    ScopedIoTimeZone tz("EST5EDT,M3.2.0/2,M11.1.0/2");
+    std::string path = tf("fsi_dst_setter.txt");
+    File::WriteAllText(path, "content");
+    FileInfo fi(path);
+
+    const auto verify = [&fi](int month, int localHour) {
+        const System::DateTime local = System::DateTime::SpecifyKind(
+            System::DateTime(2024, month, 15, localHour, 0, 0),
+            System::DateTimeKind::Local);
+        fi.setLastWriteTimeProperty(local);
+        const System::DateTime utc = fi.getLastWriteTimeUtcProperty();
+        EXPECT_EQ(utc.getKindProperty(), System::DateTimeKind::Utc);
+        EXPECT_EQ(utc.getYearProperty(), 2024);
+        EXPECT_EQ(utc.getMonthProperty(), month);
+        EXPECT_EQ(utc.getDayProperty(), 15);
+        EXPECT_EQ(utc.getHourProperty(), 12);
+    };
+
+    verify(1, 7);  // 07:00 EST is 12:00 UTC
+    verify(7, 8);  // 08:00 EDT is 12:00 UTC
+    File::Delete(path);
+}
+#endif
 
 TEST(FileSystemInfoTests, CreationAndAccessTime_DoNotThrow_ForExistingFile) {
     std::string path = tf("fsi_times.txt");

@@ -3,10 +3,11 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
-// IMPLEMENTATION-ONLY header. It sits beside the sources under src/, not under include/, so it
-// never becomes part of this component's public surface and is included with a plain relative
-// path -- the same placement and spelling `modules/xml/src` already uses for
-// `XPathAstInternal.hpp` and `XmlNodeChangeEvents.hpp`.
+// SHARED INTERNAL header. Cookie parsing lives in Net while HTTP header values live in
+// Net.Http.Headers, which already depends privately on Net. Keeping the one parser in Net's
+// `detail` include path lets both layers use it without a reverse dependency or an eighth copy.
+// The `detail` path is not a supported public API even though module include propagation makes
+// the header physically reachable to the dependent component.
 //
 // Ticket #2125 (SR-AUD-321, cause NH-H, docs/SystemNetHttpHeadersNamespaceReviewPlan.md §4.3).
 //
@@ -20,13 +21,11 @@
 // that proves this is a *consumption* defect rather than a permissive grammar is that
 // `"garbage"` was, and still is, rejected.
 //
-// **What this deliberately does NOT change: the accepted grammar.** The `sscanf` conversion
-// string is kept verbatim and `%n` is appended, so a value that parsed before parses to exactly
-// the same instant now, and a value that failed before still fails. Rewriting this as a
-// hand-written fixed-width scanner would additionally reject things `sscanf` accepts (a signed
-// or over-wide day field, for instance), and with `/rv/tmp/runtime/` absent there is no evidence
-// in this repository for what .NET does with those. #2125's job is full consumption; narrowing
-// the grammar is not authorised and is not done here.
+// **Historical #2125 checkpoint.** That ticket deliberately changed only whole-input consumption:
+// its `sscanf` conversion string stayed verbatim with `%n` appended. The table below records the
+// grammar at that checkpoint, not the current parser's final surface. #2130 subsequently added
+// RFC 9110's RFC 850 and asctime forms, and #2360 added the remaining measured .NET leniency;
+// those current implementations and their exact bounds are documented at their bodies below.
 //
 // **The obsolete formats, measured rather than assumed** (this is the pin #2125's acceptance
 // criteria require and the measurement #2130 asked for on the port side):
@@ -37,39 +36,41 @@
 //   | RFC 850 (obsolete)      | `Sunday, 06-Nov-94 08:49:37 GMT` | **rejected** | **rejected** |
 //   | ANSI C asctime (obsolete)| `Sun Nov  6 08:49:37 1994`      | **rejected** | **rejected** |
 //
-// Neither obsolete form was ever accepted -- the conversion string requires a comma immediately
-// after a three-letter day name, which both obsolete forms fail -- so #2125 cannot have narrowed
-// one away. RFC 9110 §5.6.7 requires a *recipient* to accept all three; whether .NET's parser
-// does is the still-open question **#2130**, and it is a widening, not something this ticket
-// may guess at.
+// Neither obsolete form was accepted *at #2125* -- the conversion string required a comma
+// immediately after a three-letter day name. #2130 resolved that then-open question from the
+// reference and widened the one shared parser rather than recreating per-consumer copies.
 
-#include "SharpRuntime/PortableScan.hpp"
 #include "System/DateTimeOffset.hpp"
 #include "System/TimeSpan.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cctype>
-#include <cstdio>
-#include <cstring>
 #include <string>
+#include <string_view>
 
 namespace System::Net::Http::Headers::detail {
 
-    /**
-     * @brief Parses one HTTP-date in the preferred IMF-fixdate form, consuming the whole value.
-     *
-     * @param s The candidate field value.
-     * @param result Receives the parsed instant (UTC) on success.
-     * @return true only if @p s is a complete HTTP-date. Trailing text after the `GMT` token
-     * makes the value invalid; trailing *whitespace* does not, because whitespace was accepted
-     * before #2125 and is not what the finding is about.
-     */
+    /** @brief ASCII-only case-insensitive equality used by invariant HTTP date names. */
+    inline bool AsciiEqualsIgnoreCase(std::string_view left, std::string_view right) noexcept {
+        if (left.size() != right.size()) return false;
+        for (std::size_t i = 0; i < left.size(); ++i) {
+            const auto fold = [](unsigned char c) noexcept {
+                return c >= 'A' && c <= 'Z' ? static_cast<unsigned char>(c + ('a' - 'A')) : c;
+            };
+            if (fold(static_cast<unsigned char>(left[i])) !=
+                fold(static_cast<unsigned char>(right[i])))
+                return false;
+        }
+        return true;
+    }
+
     /** @brief The three-letter month names, in order, as every HTTP-date form spells them. */
-    inline int MonthIndexFromName(const char* name) {
+    inline int MonthIndexFromName(std::string_view name) {
         static constexpr std::array<const char*, 12> months = {
             "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
         for (int i = 0; i < 12; ++i) {
-            if (std::strcmp(name, months[static_cast<size_t>(i)]) == 0) return i;
+            if (AsciiEqualsIgnoreCase(name, months[static_cast<std::size_t>(i)])) return i;
         }
         return -1;
     }
@@ -77,37 +78,30 @@ namespace System::Net::Http::Headers::detail {
     /**
      * @brief Expands an RFC 850 two-digit year the way .NET's invariant calendar does.
      *
-     * Ticket #2130. `DateTimeFormatInfo.InvariantInfo`'s Gregorian calendar has
-     * `TwoDigitYearMax == 2029`, so `00`..`29` are 2000..2029 and `30`..`99` are 1930..1999.
-     * Getting this wrong is the easy mistake in RFC 850 support -- a naive `1900 + yy` turns
-     * `Sunday, 06-Nov-06 ...` into 1906 -- so it is pinned by a test at both ends of the window.
+     * The runtime's invariant Gregorian policy is `TwoDigitYearMax == 2049`, so `00`..`49` are
+     * 2000..2049 and `50`..`99` are 1950..1999. Keeping a second, obsolete 2029 cutoff here made
+     * HTTP-date disagree with `Calendar::ToFourDigitYear`; both ends are pinned by tests.
      */
     inline int ExpandTwoDigitYear(int twoDigitYear) {
-        return twoDigitYear <= 29 ? 2000 + twoDigitYear : 1900 + twoDigitYear;
+        return twoDigitYear <= 49 ? 2000 + twoDigitYear : 1900 + twoDigitYear;
     }
 
-    /** @brief Builds the result, returning false for a date the calendar rejects. */
+    /** @brief Builds the result and verifies an optional weekday against the calendar date. */
     inline bool BuildHttpDate(int year, int monthIndex, int day, int hour, int minute, int second,
-                              System::DateTimeOffset& result) {
+                              System::DateTimeOffset& result, int expectedWeekday = -1) {
         if (monthIndex < 0) return false;
         try {
-            result = System::DateTimeOffset(year, monthIndex + 1, day, hour, minute, second,
-                                            System::TimeSpan::Zero);
+            const System::DateTimeOffset candidate(
+                year, monthIndex + 1, day, hour, minute, second, System::TimeSpan::Zero);
+            if (expectedWeekday >= 0 &&
+                static_cast<int>(candidate.getDayOfWeekProperty()) != expectedWeekday)
+                return false;
+            result = candidate;
             return true;
         } catch (...) {
             return false;
         }
     }
-
-    /** @brief True when everything from @p from to the end of @p s is whitespace. */
-    inline bool OnlyTrailingWhitespace(const std::string& s, int from) {
-        if (from < 0) return false;
-        for (size_t i = static_cast<size_t>(from); i < s.size(); ++i) {
-            if (std::isspace(static_cast<unsigned char>(s[i])) == 0) return false;
-        }
-        return true;
-    }
-
 
     // -----------------------------------------------------------------------------------------
     // Ticket #2360 (2026-08-18) -- the sixteen LENIENT formats.
@@ -140,9 +134,9 @@ namespace System::Net::Http::Headers::detail {
     // rejected at 60. A missing zone means UTC, which is DateTimeStyles.AssumeUniversal rather
     // than an assumption of this port's.
     //
-    // This runs AFTER the three strict arms above, and that ordering is the safety property: any
-    // value they accept never reaches here, so no already-parsing input can change its answer.
-    // It is a pure widening.
+    // The same explicit cursor parses the RFC 1123 / RFC 850 required forms and the measured
+    // lenient variants. This avoids passing attacker-controlled unbounded integers through
+    // `scanf`: every numeric token has its format-defined lexical width before conversion.
     // -----------------------------------------------------------------------------------------
 
     /**
@@ -152,23 +146,31 @@ namespace System::Net::Http::Headers::detail {
      * `%3[A-Za-z]` matches any three letters, so `"Xyz, 06 Nov 1994 08:49:37 GMT"` parsed here
      * and does not in .NET.
      */
-    inline bool IsAbbreviatedWeekdayName(const std::string& name) {
+    inline int AbbreviatedWeekdayIndex(std::string_view name) {
         static constexpr std::array<const char*, 7> days = {
             "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-        for (const char* d : days) {
-            if (name == d) return true;
+        for (int i = 0; i < 7; ++i) {
+            if (AsciiEqualsIgnoreCase(name, days[static_cast<std::size_t>(i)])) return i;
         }
-        return false;
+        return -1;
+    }
+
+    inline bool IsAbbreviatedWeekdayName(std::string_view name) {
+        return AbbreviatedWeekdayIndex(name) >= 0;
     }
 
     /** @brief The seven full weekday names, for the RFC 850 shape's `dddd`. */
-    inline bool IsFullWeekdayName(const std::string& name) {
+    inline int FullWeekdayIndex(std::string_view name) {
         static constexpr std::array<const char*, 7> days = {
             "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-        for (const char* d : days) {
-            if (name == d) return true;
+        for (int i = 0; i < 7; ++i) {
+            if (AsciiEqualsIgnoreCase(name, days[static_cast<std::size_t>(i)])) return i;
         }
-        return false;
+        return -1;
+    }
+
+    inline bool IsFullWeekdayName(std::string_view name) {
+        return FullWeekdayIndex(name) >= 0;
     }
 
     /** @brief A forward-only cursor, deliberately not `sscanf`: `%d` accepts a sign and `+3` is not a day. */
@@ -211,7 +213,8 @@ namespace System::Net::Http::Headers::detail {
         bool takeLetters(std::size_t maxLetters, std::string& out) {
             const std::size_t start = index_;
             while (index_ < text_.size() &&
-                   std::isalpha(static_cast<unsigned char>(text_[index_])) != 0 &&
+                   ((text_[index_] >= 'A' && text_[index_] <= 'Z') ||
+                    (text_[index_] >= 'a' && text_[index_] <= 'z')) &&
                    index_ - start < maxLetters)
                 ++index_;
             if (index_ == start) return false;
@@ -275,10 +278,7 @@ namespace System::Net::Http::Headers::detail {
     }
 
     /**
-     * @brief Parses the sixteen lenient forms .NET accepts beyond RFC 9110's three.
-     *
-     * Runs only after the three strict arms have declined, so it can never change an answer an
-     * already-accepted value had.
+     * @brief Parses RFC 1123 / RFC 850 and the sixteen additional measured .NET forms.
      */
     inline bool TryParseLenientHttpDate(const std::string& s, System::DateTimeOffset& result) {
         HttpDateCursor cursor(s);
@@ -348,17 +348,20 @@ namespace System::Net::Http::Headers::detail {
         if (!cursor.atEnd()) return false;   // trailing text, which #2125 made a failure
 
         // Now judge the combination against .NET's twenty-one, rather than against the cross.
+        int expectedWeekday = -1;
         if (hyphenated) {
             // RFC 850: the weekday is REQUIRED and must be a full name; the year is two digits.
-            if (!haveWeekday || !IsFullWeekdayName(weekday)) return false;
+            if (!haveWeekday || (expectedWeekday = FullWeekdayIndex(weekday)) < 0) return false;
             if (yearWidth != 2) return false;
         } else {
             // RFC 1123 / RFC 5322: the weekday is optional and must be one of the seven
             // three-letter names. #2376: checking only the LENGTH accepted an invented
             // abbreviation, and .NET's `ddd` is MatchAbbreviatedDayName -- a name table, not a
             // width. The lenient arm needs the same rule as the strict ones, or a value the
-            // strict arm has just refused for a bad weekday is accepted here instead.
-            if (haveWeekday && !IsAbbreviatedWeekdayName(weekday)) return false;
+            // same shared arm does not accept a value carrying an invented weekday.
+            if (haveWeekday &&
+                (expectedWeekday = AbbreviatedWeekdayIndex(weekday)) < 0)
+                return false;
             // THE TWO MISSING CELLS. A two-digit year with a numeric offset is not in .NET's
             // list -- neither "ddd, d MMM yy H:m:s zzz" nor "d MMM yy H:m:s zzz" appears -- so
             // it is rejected rather than completed by symmetry.
@@ -368,11 +371,60 @@ namespace System::Net::Http::Headers::detail {
         if (yearWidth == 2) year = ExpandTwoDigitYear(year);
 
         try {
-            result = System::DateTimeOffset(year, monthIndex + 1, day, hour, minute, second, offset);
+            const System::DateTimeOffset candidate(
+                year, monthIndex + 1, day, hour, minute, second, offset);
+            if (expectedWeekday >= 0 &&
+                static_cast<int>(candidate.getDayOfWeekProperty()) != expectedWeekday)
+                return false;
+            result = candidate;
             return true;
         } catch (...) {
             return false;
         }
+    }
+
+    /** @brief Parses ANSI C's asctime HTTP-date shape with bounded lexical fields. */
+    inline bool TryParseAsctimeHttpDate(const std::string& s,
+                                        System::DateTimeOffset& result) {
+        HttpDateCursor cursor(s);
+        cursor.skipWhite();
+
+        std::string weekday;
+        if (!cursor.takeLetters(3, weekday)) return false;
+        const int expectedWeekday = AbbreviatedWeekdayIndex(weekday);
+        if (expectedWeekday < 0) return false;
+
+        const std::size_t beforeMonthSpace = cursor.position();
+        cursor.skipWhite();
+        if (cursor.position() == beforeMonthSpace) return false;
+        std::string monthName;
+        if (!cursor.takeLetters(3, monthName)) return false;
+
+        const std::size_t beforeDaySpace = cursor.position();
+        cursor.skipWhite();
+        if (cursor.position() == beforeDaySpace) return false;
+        int day = 0;
+        if (!cursor.takeDigits(1, 2, day)) return false;
+
+        const std::size_t beforeTimeSpace = cursor.position();
+        cursor.skipWhite();
+        if (cursor.position() == beforeTimeSpace) return false;
+        int hour = 0, minute = 0, second = 0;
+        if (!cursor.takeDigits(1, 2, hour) || !cursor.take(':') ||
+            !cursor.takeDigits(1, 2, minute) || !cursor.take(':') ||
+            !cursor.takeDigits(1, 2, second))
+            return false;
+
+        const std::size_t beforeYearSpace = cursor.position();
+        cursor.skipWhite();
+        if (cursor.position() == beforeYearSpace) return false;
+        int year = 0, yearWidth = 0;
+        if (!cursor.takeDigits(4, 4, year, &yearWidth) || yearWidth != 4) return false;
+        cursor.skipWhite();
+        if (!cursor.atEnd()) return false;
+
+        return BuildHttpDate(year, MonthIndexFromName(monthName), day, hour, minute, second,
+                             result, expectedWeekday);
     }
 
     /**
@@ -386,7 +438,7 @@ namespace System::Net::Http::Headers::detail {
      *
      * ---
      *
-     * **Ticket #2130 (deferred verification) — the obsolete forms are now accepted.**
+     * **Ticket #2130 (resolved verification) — the obsolete forms are accepted.**
      *
      * #2125 recorded, correctly, that neither obsolete form had *ever* been accepted here, so it
      * could not have narrowed one away; and that whether .NET accepts them "is the still-open
@@ -403,106 +455,62 @@ namespace System::Net::Http::Headers::detail {
      *   | RFC 850 (obsolete) | `Sunday, 06-Nov-94 08:49:37 GMT` |
      *   | ANSI C `asctime` (obsolete) | `Sun Nov  6 08:49:37 1994` |
      *
-     * **What is deliberately NOT adopted, and it is most of .NET's list.** The remaining sixteen
-     * formats are *leniency*, not required forms: a `UTC` zone token instead of `GMT`, no zone
-     * token at all, a missing day-of-week, a two-digit year on an IMF-fixdate, and RFC 5322
-     * numeric offsets. Adopting them would accept text RFC 9110 does not define as an HTTP-date,
-     * which is a much larger widening than the one this ticket asked for, and each has its own
-     * ambiguities (a bare `08:49:37` with no zone is only UTC because .NET *assumes* it is). That
-     * gap is recorded as ticket **#2360** rather than smuggled in here.
+     * #2360 subsequently adopted .NET's sixteen additional measured formats. The explicit
+     * cursor keeps the exact cross and its two deliberately absent cells visible while also
+     * bounding every integer lexeme before conversion.
      *
      * `asctime` carries no zone; like .NET's `DateTimeStyles.AssumeUniversal`, it is read as UTC.
      */
     inline bool TryParseHttpDate(const std::string& s, System::DateTimeOffset& result) {
-        // An embedded NUL would let sscanf stop early and report a complete match over a prefix,
-        // so it is rejected before c_str() hides the rest of the value (#2125).
+        // An embedded NUL is not text in any HTTP-date token and must never truncate the value.
+        if (s.find('\0') != std::string::npos) return false;
+        if (TryParseAsctimeHttpDate(s, result)) return true;
+        return TryParseLenientHttpDate(s, result);
+    }
+
+    /**
+     * @brief Parses a Set-Cookie Expires date without widening the HTTP header grammar.
+     *
+     * .NET's CookieParser uses ParseCookieDate rather than HttpDateParser. In addition to the
+     * ordinary HTTP-date forms it accepts `d-MMM-yyyy H:m:s GMT` and the two-digit-year variant
+     * with no weekday. Keep that extra shape behind this cookie-only door: accepting it for Date,
+     * Retry-After or If-Range would silently broaden those contracts.
+     */
+    inline bool TryParseCookieDate(const std::string& s, System::DateTimeOffset& result) {
+        if (TryParseHttpDate(s, result)) return true;
         if (s.find('\0') != std::string::npos) return false;
 
-        char dayName[16] = {};
-        char monthName[4] = {};
-        int day = 0, year = 0, hour = 0, minute = 0, second = 0;
-        char zone[4] = {};
-        int consumed = -1;
+        HttpDateCursor cursor(s);
+        cursor.skipWhite();
+        int day = 0;
+        if (!cursor.takeDigits(1, 2, day) || !cursor.take('-')) return false;
+        std::string monthName;
+        if (!cursor.takeLetters(3, monthName) || !cursor.take('-')) return false;
+        int year = 0, yearWidth = 0;
+        if (!cursor.takeDigits(2, 4, year, &yearWidth) ||
+            (yearWidth != 2 && yearWidth != 4))
+            return false;
 
-        // 1. IMF-fixdate -- the preferred form, and the only one this parser used to accept.
-        //    The conversion string is #2125's verbatim apart from the two %n markers that
-        //    bracket the year, so a value that parsed before parses to exactly the same instant
-        //    now -- with ONE correction, below.
-        int yearBegin = -1, yearEnd = -1;
-        if (SHARP_RUNTIME_SSCANF(
-                s.c_str(), "%3[A-Za-z], %d %3[A-Za-z] %n%d%n %d:%d:%d %3s%n",
-                SHARP_RUNTIME_SCANF_BUFFER(dayName), &day, SHARP_RUNTIME_SCANF_BUFFER(monthName),
-                &yearBegin, &year, &yearEnd, &hour, &minute, &second,
-                SHARP_RUNTIME_SCANF_BUFFER(zone), &consumed) == 8 &&
-            std::strcmp(zone, "GMT") == 0 && OnlyTrailingWhitespace(s, consumed) &&
-            // Ticket #2376. sscanf's %d and %3[A-Za-z] do not bound a field, so this arm was
-            // WIDER than the format string it transcribes. .NET's `ddd` is MatchAbbreviatedDayName
-            // (seven names, not any three letters) and its `yyyy`/`yy` are ParseDigits with an
-            // EXACT width -- so "Sun, 06 Nov 199 08:49:37 GMT" parsed here as the year 199 AD and
-            // does not parse in .NET at all.
-            IsAbbreviatedWeekdayName(dayName) && yearBegin >= 0 &&
-            (yearEnd == yearBegin + 2 || yearEnd == yearBegin + 4)) {
-            // #2130, and this is a CORRECTION rather than a widening. `%d` read a two-digit year
-            // literally, so "Sun, 06 Nov 94 08:49:37 GMT" was ACCEPTED and reported the year
-            // **94 AD** -- a silently wrong instant, off by nineteen centuries, not a rejected
-            // format. .NET accepts the same text and reads 1994 ("ddd, d MMM yy H:m:s 'GMT'",
-            // HttpDateParser.cs:17), so the port's answer was wrong rather than merely strict.
-            //
-            // Only an exactly-two-digit token is expanded. Every other width keeps the value it
-            // had, so nothing else moves.
-            if (yearBegin >= 0 && yearEnd == yearBegin + 2 && year >= 0 && year <= 99) {
-                year = ExpandTwoDigitYear(year);
-            }
-            return BuildHttpDate(year, MonthIndexFromName(monthName), day, hour, minute, second,
-                                 result);
-        }
+        const std::size_t beforeTimeSpace = cursor.position();
+        cursor.skipWhite();
+        if (cursor.position() == beforeTimeSpace) return false;
+        int hour = 0, minute = 0, second = 0;
+        if (!cursor.takeDigits(1, 2, hour) || !cursor.take(':') ||
+            !cursor.takeDigits(1, 2, minute) || !cursor.take(':') ||
+            !cursor.takeDigits(1, 2, second))
+            return false;
 
-        // 2. RFC 850 -- a FULL weekday name, hyphen-separated date, two-digit year.
-        //    HttpDateParser.cs:22 -- "dddd, d'-'MMM'-'yy H:m:s 'GMT'".
-        std::memset(dayName, 0, sizeof(dayName));
-        std::memset(monthName, 0, sizeof(monthName));
-        std::memset(zone, 0, sizeof(zone));
-        consumed = -1;
-        int twoDigitYear = 0;
-        if (SHARP_RUNTIME_SSCANF(
-                s.c_str(), "%15[A-Za-z], %d-%3[A-Za-z]-%d %d:%d:%d %3s%n",
-                SHARP_RUNTIME_SCANF_BUFFER(dayName), &day, SHARP_RUNTIME_SCANF_BUFFER(monthName),
-                &twoDigitYear, &hour, &minute, &second, SHARP_RUNTIME_SCANF_BUFFER(zone),
-                &consumed) == 8 &&
-            std::strcmp(zone, "GMT") == 0 && OnlyTrailingWhitespace(s, consumed) &&
-            twoDigitYear >= 0 && twoDigitYear <= 99 &&
-            // #2376. .NET spells this shape's weekday `dddd` (HttpDateParser.cs:22-25), which
-            // matches a FULL name only, so "Sun, 06-Nov-94 08:49:37 GMT" parsed here and does not
-            // in .NET. %15[A-Za-z] accepts any run of up to fifteen letters.
-            IsFullWeekdayName(dayName)) {
-            return BuildHttpDate(ExpandTwoDigitYear(twoDigitYear), MonthIndexFromName(monthName),
-                                 day, hour, minute, second, result);
-        }
+        const std::size_t beforeZoneSpace = cursor.position();
+        cursor.skipWhite();
+        if (cursor.position() == beforeZoneSpace) return false;
+        std::string zone;
+        if (!cursor.takeLetters(3, zone) || zone != "GMT") return false;
+        cursor.skipWhite();
+        if (!cursor.atEnd()) return false;
 
-        // 3. ANSI C asctime -- no zone, no comma, and a SPACE-PADDED day.
-        //    HttpDateParser.cs:26 -- "ddd MMM d H:m:s yyyy". sscanf's %d already skips the
-        //    padding, so "Nov  6" and "Nov 16" both work without a second conversion string.
-        std::memset(dayName, 0, sizeof(dayName));
-        std::memset(monthName, 0, sizeof(monthName));
-        consumed = -1;
-        int asctimeYearBegin = -1, asctimeYearEnd = -1;
-        if (SHARP_RUNTIME_SSCANF(
-                s.c_str(), "%3[A-Za-z] %3[A-Za-z] %d %d:%d:%d %n%d%n",
-                SHARP_RUNTIME_SCANF_BUFFER(dayName), SHARP_RUNTIME_SCANF_BUFFER(monthName), &day,
-                &hour, &minute, &second, &asctimeYearBegin, &year, &asctimeYearEnd) == 7 &&
-            OnlyTrailingWhitespace(s, asctimeYearEnd) &&
-            // #2376, the third site of the same defect. asctime's year is `yyyy` -- exactly four
-            // digits -- and its weekday is `ddd` (HttpDateParser.cs:26). The ticket named two
-            // sites and there are three; leaving the third would repair two thirds of one rule.
-            IsAbbreviatedWeekdayName(dayName) && asctimeYearBegin >= 0 &&
-            asctimeYearEnd == asctimeYearBegin + 4) {
-            return BuildHttpDate(year, MonthIndexFromName(monthName), day, hour, minute, second,
-                                 result);
-        }
-
-        // 4. #2360 -- the sixteen lenient forms, tried last so the three strict arms above keep
-        //    every answer they already gave.
-        return TryParseLenientHttpDate(s, result);
+        if (yearWidth == 2) year = ExpandTwoDigitYear(year);
+        return BuildHttpDate(year, MonthIndexFromName(monthName), day, hour, minute, second,
+                             result);
     }
 
 } // namespace System::Net::Http::Headers::detail

@@ -676,11 +676,12 @@ TEST(DateOnlyTests, Fix1939_TheDigitWidthRuleIsDotNetsNotTheSpecifierCount) {
     EXPECT_FALSE(System::DateOnly::TryParseExact("2024-6-5", "yyyy-MM-dd", out))
         << "two specifiers accept exactly two";
 
-    // yy uses the invariant calendar's fixed TwoDigitYearMax of 2029, which is a property of the
+    // yy uses the invariant calendar's fixed TwoDigitYearMax of 2049, which is a property of the
     // invariant culture rather than culture state -- so it is available here even though #1929
     // declined a two-digit year in the GENERAL parser, where nothing says what was meant.
     EXPECT_EQ(System::DateOnly::ParseExact("24-06-15", "yy-MM-dd"), System::DateOnly(2024, 6, 15));
-    EXPECT_EQ(System::DateOnly::ParseExact("30-06-15", "yy-MM-dd"), System::DateOnly(1930, 6, 15));
+    EXPECT_EQ(System::DateOnly::ParseExact("49-06-15", "yy-MM-dd"), System::DateOnly(2049, 6, 15));
+    EXPECT_EQ(System::DateOnly::ParseExact("50-06-15", "yy-MM-dd"), System::DateOnly(1950, 6, 15));
 }
 
 TEST(DateOnlyTests, Fix1939_NamesLiteralsAndEscapes) {

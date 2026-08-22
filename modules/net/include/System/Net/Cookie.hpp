@@ -118,10 +118,14 @@ namespace System::Net {
         [[nodiscard]] bool getHttpOnlyProperty() const { return httpOnly_; }
         void setHttpOnlyProperty(bool v) { httpOnly_ = v; }
 
-        /** @brief Returns true if the cookie's Expires time has passed (session cookies never expire here). */
-        [[nodiscard]] bool getExpiredProperty() const {
-            return expires_ != DateTime::MinValue && expires_ <= DateTime::getNowProperty();
-        }
+        /**
+         * @brief Returns true if the cookie's Expires time has passed.
+         *
+         * Session cookies (`DateTime::MinValue`) never expire here. Other values are compared on
+         * the UTC timeline, matching .NET's `Expires.ToUniversalTime() <= DateTime.UtcNow` rather
+         * than comparing a UTC-valued wire timestamp with local wall-clock ticks.
+         */
+        [[nodiscard]] bool getExpiredProperty() const;
 
         /** @brief Marks the cookie for discard by the client (used by SetCookies to expire a cookie immediately). */
         void setExpiredProperty(bool v) {

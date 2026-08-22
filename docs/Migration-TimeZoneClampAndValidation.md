@@ -63,9 +63,12 @@ was the right call, and the reference shows why:
   `1h30m30s` fails as surely as `30s` does;
 * the time-of-day check **exempts** `MinValue` for `dateStart` and `MaxValue` for `dateEnd`.
 
-One conjunct of .NET's time-of-day check is `Kind == Unspecified`. This port has no `DateTimeKind`
-(a permanent deviation), so it is absent — which makes this port **stricter** for a UTC-kinded
-argument and identical for every argument this port can express.
+At the time #2186 landed, this port had no stored `DateTimeKind`, so the reference's Kind guards
+could not be expressed. That statement became stale when #1941 added Kind. The post-#1941
+`TimeZoneInfo` ripple audit now makes the **public** factories require Unspecified
+`dateStart`/`dateEnd`; both Local and UTC are rejected before the time-of-day and range checks.
+The runtime's broader internal rule factories are not exposed here. See
+`docs/Migration-TimeZoneInfoDateTimeKind.md`.
 
 ## 4. Question 4 — two questions, two different answers
 

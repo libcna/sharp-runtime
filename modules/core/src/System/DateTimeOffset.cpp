@@ -10,11 +10,14 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
+#include "System/Globalization/DateTimeFormatInfo.hpp"
+#include "System/detail/ProcessTimeZoneState.hpp"
 #include <chrono>
 #include <cstdio>
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <string_view>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -34,17 +37,75 @@ namespace {
 #if defined(_WIN32)
         TIME_ZONE_INFORMATION tz{};
         DWORD r = GetTimeZoneInformation(&tz);
-        if (r != TIME_ZONE_ID_INVALID)
-            offset_secs = -static_cast<long>(tz.Bias) * 60;
+        if (r != TIME_ZONE_ID_INVALID) {
+            // Bias is the base difference from UTC. Windows carries the active standard or
+            // daylight adjustment separately; ignoring it makes every DST-observing zone wrong
+            // for part of the year even under this deliberately current-offset-only model.
+            LONG activeBias = tz.Bias;
+            if (r == TIME_ZONE_ID_STANDARD) activeBias += tz.StandardBias;
+            if (r == TIME_ZONE_ID_DAYLIGHT) activeBias += tz.DaylightBias;
+            offset_secs = -static_cast<long>(activeBias) * 60;
+        }
 #elif defined(__EMSCRIPTEN__)
         offset_secs = 0;
 #else
         std::time_t t = std::time(nullptr);
         struct tm local_tm{};
+        std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
         localtime_r(&t, &local_tm);
         offset_secs = local_tm.tm_gmtoff;
 #endif
         return static_cast<longcs>(offset_secs) * TimeSpan::TicksPerSecond;
+    }
+
+    // DateTimeOffset.cs has a deliberately different style validator from DateTime's. In
+    // particular NoCurrentDateDefault is invalid, RoundtripKind is accepted then ignored for
+    // backward compatibility, and AssumeLocal is accepted then ignored because local is this
+    // type's default. Reusing DateTimeFormatInfo.ValidateStyles loses all three distinctions.
+    System::Globalization::DateTimeStyles validateDateTimeOffsetStyles(
+            System::Globalization::DateTimeStyles styles) {
+        using System::Globalization::DateTimeStyles;
+        constexpr int kAllowed =
+            static_cast<int>(DateTimeStyles::AllowLeadingWhite) |
+            static_cast<int>(DateTimeStyles::AllowTrailingWhite) |
+            static_cast<int>(DateTimeStyles::AllowInnerWhite) |
+            static_cast<int>(DateTimeStyles::AdjustToUniversal) |
+            static_cast<int>(DateTimeStyles::AssumeLocal) |
+            static_cast<int>(DateTimeStyles::AssumeUniversal) |
+            static_cast<int>(DateTimeStyles::RoundtripKind);
+        const int raw = static_cast<int>(styles);
+        const int assumeBoth = static_cast<int>(DateTimeStyles::AssumeLocal) |
+                               static_cast<int>(DateTimeStyles::AssumeUniversal);
+
+        if ((raw & ~kAllowed) != 0) {
+            throw System::ArgumentException(
+                "An undefined or unsupported DateTimeStyles value is being used for "
+                "DateTimeOffset.", "styles");
+        }
+        if ((raw & assumeBoth) == assumeBoth) {
+            throw System::ArgumentException(
+                "The DateTimeStyles values AssumeLocal and AssumeUniversal cannot be used "
+                "together.", "styles");
+        }
+
+        const int ignored = static_cast<int>(DateTimeStyles::RoundtripKind) |
+                            static_cast<int>(DateTimeStyles::AssumeLocal);
+        return static_cast<DateTimeStyles>(raw & ~ignored);
+    }
+
+    // DateTime::Now is a LOCAL wall-clock value after #1941's Kind ripple repair. A UTC factory
+    // must therefore read system_clock directly rather than treating DateTime::Now's ticks as
+    // UTC; DateTimeOffset::Now must do the same or it adds the local offset twice.
+    DateTime utcNowDateTime() {
+        using namespace std::chrono;
+        const auto now      = system_clock::now();
+        const auto duration = now.time_since_epoch();
+        const auto secs     = duration_cast<seconds>(duration);
+        const auto sub      = duration - secs;
+        const longcs ticks  = DateTime::UnixEpochTicks
+            + static_cast<longcs>(secs.count()) * DateTime::TicksPerSecond
+            + static_cast<longcs>(duration_cast<nanoseconds>(sub).count() / 100);
+        return DateTime(ticks, DateTimeKind::Utc);
     }
 
     // C++ counterpart of .NET DateTimeOffset's private ValidateOffset helper
@@ -116,11 +177,39 @@ namespace System {
 
     DateTimeOffset::DateTimeOffset(const DateTime& dateTime, const TimeSpan& offset)
         : dateTime_(dateTime), offset_(offset) {
+        // DateTimeOffset.cs:99-116. Kind/offset consistency is checked before the ordinary
+        // offset shape/range checks. In particular, Utc +15h is the KIND mismatch
+        // ArgumentException, not the later out-of-range exception, and Local is compared with
+        // the same current-offset model used by the one-argument constructor below.
+        if (dateTime.getKindProperty() == DateTimeKind::Local &&
+            offset.getTicksProperty() != currentLocalOffsetTicks()) {
+            throw ArgumentException(
+                "The UTC Offset of the local dateTime parameter does not match the offset argument.",
+                "offset");
+        }
+        if (dateTime.getKindProperty() == DateTimeKind::Utc &&
+            offset.getTicksProperty() != 0) {
+            throw ArgumentException("The UTC Offset for Utc DateTime instances must be 0.",
+                                    "offset");
+        }
         validateOffsetAndRange(dateTime_, offset_);
+
+        // A DateTimeOffset carries an instant and an offset, never a DateTimeKind. .NET's
+        // DateTime property is therefore always Unspecified even when a Local or Utc DateTime
+        // selected/validated the offset at construction.
+        dateTime_ = DateTime::SpecifyKind(dateTime_, DateTimeKind::Unspecified);
     }
 
     DateTimeOffset::DateTimeOffset(const DateTime& dateTime)
-        : DateTimeOffset(dateTime, TimeSpan::Zero) {}
+        : dateTime_(DateTime::SpecifyKind(dateTime, DateTimeKind::Unspecified)),
+          offset_(dateTime.getKindProperty() == DateTimeKind::Utc
+                      ? TimeSpan(static_cast<longcs>(0))
+                      : TimeSpan(currentLocalOffsetTicks())) {
+        // DateTimeOffset.cs:79-95. Utc chooses zero; Local and Unspecified both choose the
+        // process-local offset. Keeping this body separate from the two-argument constructor
+        // avoids sampling the current offset twice across a possible transition boundary.
+        validateOffsetAndRange(dateTime_, offset_);
+    }
 
     DateTimeOffset::DateTimeOffset(longcs ticks, const TimeSpan& offset)
         : DateTimeOffset(clockOf(offset, ticks), offset) {}
@@ -151,14 +240,16 @@ namespace System {
     // -------------------------------------------------------------------------
 
     DateTimeOffset DateTimeOffset::getUtcNowProperty() {
-        return DateTimeOffset(DateTime::getNowProperty(), TimeSpan::Zero);
+        return DateTimeOffset(utcNowDateTime());
     }
 
     DateTimeOffset DateTimeOffset::getNowProperty() {
-        // system_clock::now() is UTC; get the local offset to compute local DateTime
-        DateTime utc = DateTime::getNowProperty();
+        // system_clock::now() is UTC; get the current local offset to compute the visible clock.
+        // The clock DateTime is deliberately Unspecified, which is DateTimeOffset.DateTime's
+        // contract and also avoids resampling the offset in the Local-kind validation path.
+        DateTime utc = utcNowDateTime();
         TimeSpan off(currentLocalOffsetTicks());
-        return DateTimeOffset(utc.Add(off), off);
+        return DateTimeOffset(DateTime(utc.getTicksProperty() + off.getTicksProperty()), off);
     }
 
     // -------------------------------------------------------------------------
@@ -197,15 +288,24 @@ namespace System {
     }
 
     DateTime DateTimeOffset::getUtcDateTimeProperty() const {
-        return DateTime(getUtcTicksProperty());
+        return DateTime(getUtcTicksProperty(), DateTimeKind::Utc);
     }
 
     DateTime DateTimeOffset::getLocalDateTimeProperty() const {
-        return ToLocalTime().getDateTimeProperty();
+        const DateTime localClock = ToLocalTime().getDateTimeProperty();
+        return DateTime::SpecifyKind(localClock, DateTimeKind::Local);
     }
 
     DateTimeOffset DateTimeOffset::ToOffset(const TimeSpan& offset) const {
-        return DateTimeOffset(getUtcDateTimeProperty().Add(offset), offset);
+        // This is the target offset's CLOCK value, not a Utc DateTime. Spell it as
+        // Unspecified explicitly instead of depending on DateTime::Add's Kind propagation;
+        // the public two-argument constructor correctly refuses Utc + nonzero.
+        // Keep the addition inside DateTime::Add as well: a TimeSpan can carry any int64 tick
+        // payload, so a raw signed `utcTicks + offsetTicks` is undefined on overflow before the
+        // constructor gets a chance to reject it. The Unspecified source gives Add's checked
+        // arithmetic without reintroducing the Utc/nonzero constructor mismatch.
+        const DateTime clock = DateTime(getUtcTicksProperty()).Add(offset);
+        return DateTimeOffset(clock, offset);
     }
 
     // -------------------------------------------------------------------------
@@ -271,9 +371,20 @@ namespace System {
     }
 
     DateTimeOffset DateTimeOffset::ToLocalTime() const {
-        DateTime utc = getUtcDateTimeProperty();
         TimeSpan off(currentLocalOffsetTicks());
-        return DateTimeOffset(utc.Add(off), off);
+        // As in ToOffset(), the shifted value is a visible clock and must enter the
+        // DateTimeOffset constructor as Unspecified, whatever DateTime arithmetic does with Kind.
+        // DateTimeOffset.cs:775-789 uses the non-throwing conversion path here: when applying the
+        // local offset would leave DateTime's range, the visible clock clamps to MinValue or
+        // MaxValue. Perform the addition in the unsigned domain so even an extreme platform
+        // offset cannot create signed-overflow UB before that clamp.
+        const longcs offsetTicks = off.getTicksProperty();
+        const auto shifted = static_cast<SharpRuntime::ulongcs>(getUtcTicksProperty())
+                           + static_cast<SharpRuntime::ulongcs>(offsetTicks);
+        const longcs clockTicks = shifted > static_cast<SharpRuntime::ulongcs>(DateTime::MaxTicks)
+                                ? (offsetTicks < 0 ? 0LL : DateTime::MaxTicks)
+                                : static_cast<longcs>(shifted);
+        return DateTimeOffset(DateTime(clockTicks), off);
     }
 
     // -------------------------------------------------------------------------
@@ -346,7 +457,9 @@ namespace System {
         if (!detail::takeDateTimeParts(scanner, parts)) return fail();
 
         TimeSpan offset = TimeSpan::Zero;
-        if (!scanner.take('Z') && !scanner.take('z') && !scanner.atEnd()) {
+        if (scanner.take('Z') || scanner.take('z')) {
+            // A literal UTC designator names offset zero.
+        } else if (!scanner.atEnd()) {
             int signedMinutes = 0;
             if (!detail::takeUtcOffsetMinutes(scanner, signedMinutes)) return fail();
 
@@ -374,6 +487,12 @@ namespace System {
             // parses an offset and discards it, must not inherit the check.
             if (signedMinutes < -14 * 60 || signedMinutes > 14 * 60) return fail();
             offset = TimeSpan::FromMinutes(signedMinutes);
+        } else {
+            // DateTimeOffset.Parse defaults an offset-less input to local. This Core.Base
+            // implementation uses its documented current-offset-only model rather than a
+            // date-sensitive timezone database, but zero is not a valid substitute in a
+            // non-UTC process zone.
+            offset = TimeSpan(currentLocalOffsetTicks());
         }
         if (!scanner.atEnd()) return fail();
 
@@ -426,17 +545,13 @@ namespace System {
     }
 
     std::string DateTimeOffset::ToString(const std::string& format) const {
+        if (format.empty()) return ToString();
+        const auto& info = System::Globalization::DateTimeFormatInfo::GetInstance(nullptr);
         if (format == "O" || format == "o") {
-            // ISO 8601 round-trip: yyyy-MM-ddTHH:mm:ss.fffffffzzz. The offset is preserved
-            // (not converted to UTC) since round-tripping must reconstruct the exact original
-            // DateTimeOffset, including its specific offset -- matches real .NET.
-            // Note: DateTime::ToString's own "f" specifier tops out at millisecond (3-digit)
-            // precision in this port, not .NET's full 7-digit (100ns tick) precision -- a
-            // pre-existing limitation of DateTime's formatting engine, not introduced here.
-            // ".fff" is still added (previously the fractional-seconds component was omitted
-            // entirely), since that's a real, confirmed loss of round-trip fidelity for any
-            // sub-second component -- millisecond precision is strictly better than none.
-            return dateTime_.ToString("yyyy-MM-ddTHH:mm:ss.fff") + formatOffset(offset_);
+            // ISO 8601 round-trip: preserve both all seven 100ns fraction digits and the stored
+            // offset. The offset-aware DateTime custom helper keeps this on the same grammar as
+            // every other date/clock/fraction token instead of assembling a partial timestamp.
+            return dateTime_.formatCustom("yyyy-MM-ddTHH:mm:ss.fffffffzzz", info, &offset_);
         }
         if (format == "R" || format == "r") {
             // Verified against DateTimeFormat.cs's TryFormatR: real .NET converts to UTC
@@ -456,8 +571,20 @@ namespace System {
             // output for any non-zero offset (a "Z"-suffixed timestamp that wasn't actually UTC).
             return getUtcDateTimeProperty().ToString("yyyy-MM-dd HH:mm:ssZ");
         }
-        // General format: delegate to DateTime and append offset
-        return dateTime_.ToString(format) + formatOffset(offset_);
+        if (format == "U") {
+            // DateTimeOffset has no "U" standard format in .NET: unlike DateTime there is no
+            // local-kind value for this specifier to convert before using the full-date pattern.
+            throw FormatException("Format specifier was invalid.");
+        }
+
+        if (format.size() == 1) {
+            // Every remaining supported standard specifier expands through DateTimeFormatInfo
+            // and describes only the stored clock. It does not acquire an offset suffix merely
+            // because the value is a DateTimeOffset; only an explicit custom z/K token emits one.
+            return dateTime_.ToString(format);
+        }
+
+        return dateTime_.formatCustom(format, info, &offset_);
     }
 
     // -------------------------------------------------------------------------
@@ -525,7 +652,7 @@ namespace System {
         using System::Globalization::DateTimeStyles;
         // Validation runs BEFORE the result is written, so a rejected style leaves the caller's
         // variable untouched -- two claims, each asserted.
-        detail::ValidateDateTimeStyles(styles, "styles");
+        styles = validateDateTimeOffsetStyles(styles);
 
         result = DateTimeOffset();
 
@@ -576,9 +703,9 @@ namespace System {
         // -------------------------------------------------------------------------------
         // .NET's DateTimeOffsetTimeZonePostProcessing (DateTimeParse.cs:2841-2880).
         // -------------------------------------------------------------------------------
-        // THIS IS NOT THE `DateTime` MATRIX WITH A DIFFERENT RESULT TYPE. A DateTimeOffset
-        // CAPTURES the offset rather than adjusting the value by it, so nothing here converts:
-        // the parsed wall-clock time is kept exactly as written and only the offset is chosen.
+        // A DateTimeOffset normally CAPTURES the parsed wall-clock and offset. The one explicit
+        // exception is AdjustToUniversal: after validating both represented values it returns
+        // the same instant as a UTC clock with offset zero.
         TimeSpan offset(static_cast<longcs>(0));
         if (fields.hasOffset) {
             if (fields.offsetMinutes < -14 * 60 || fields.offsetMinutes > 14 * 60) return false;
@@ -602,11 +729,30 @@ namespace System {
             offset = zone->GetUtcOffset(candidate);
         }
 
-        // Both the parsed time AND its UTC equivalent must fit a DateTime (.NET's Format_UTCOutOfRange).
-        const longcs utcTicks = candidate.getTicksProperty() - offset.getTicksProperty();
-        if (utcTicks < DateTime::MinValue.getTicksProperty() ||
-            utcTicks > DateTime::MaxValue.getTicksProperty())
+        // ILocalTimeZone is public in this port, unlike .NET's trusted internal provider. Treat
+        // an invalid implementation as a parse failure: accepting a sub-minute / >14-hour
+        // offset would violate every DateTimeOffset constructor, and subtracting an extreme
+        // TimeSpan in signed arithmetic would itself be undefined before the range check.
+        const longcs offsetTicks = offset.getTicksProperty();
+        if (offsetTicks % TimeSpan::TicksPerMinute != 0 ||
+            offsetTicks < -14LL * TimeSpan::TicksPerHour ||
+            offsetTicks > 14LL * TimeSpan::TicksPerHour)
             return false;
+
+        // Both the parsed time AND its UTC equivalent must fit a DateTime
+        // (.NET's Format_UTCOutOfRange). Modular unsigned subtraction makes both underflow and
+        // overflow well-defined; either lands above MaxTicks and is rejected before construction.
+        const auto utcTicksUnsigned =
+            static_cast<SharpRuntime::ulongcs>(candidate.getTicksProperty()) -
+            static_cast<SharpRuntime::ulongcs>(offsetTicks);
+        if (utcTicksUnsigned > static_cast<SharpRuntime::ulongcs>(DateTime::MaxTicks)) return false;
+        const longcs utcTicks = static_cast<longcs>(utcTicksUnsigned);
+
+        if ((static_cast<int>(styles) &
+             static_cast<int>(DateTimeStyles::AdjustToUniversal)) != 0) {
+            candidate = DateTime(utcTicks);
+            offset = TimeSpan::Zero;
+        }
 
         result = DateTimeOffset(candidate, offset);
         return true;
@@ -627,7 +773,7 @@ namespace System {
         // The style is validated ONCE, before the loop, so an illegal style raises whatever the
         // formats are -- including an empty collection, where no single-format call would ever
         // run. Validating inside the loop would make the exception depend on the format list.
-        detail::ValidateDateTimeStyles(styles, "styles");
+        styles = validateDateTimeOffsetStyles(styles);
         result = DateTimeOffset();
         DateTimeOffset candidate = DateTimeOffset();
         const auto outcome = detail::MatchFirstOfManyFormats(
@@ -645,6 +791,7 @@ namespace System {
                                               const System::IFormatProvider* provider,
                                               System::Globalization::DateTimeStyles styles,
                                               const System::ILocalTimeZone* zone) {
+        styles = validateDateTimeOffsetStyles(styles);
         DateTimeOffset result = DateTimeOffset();
         DateTimeOffset candidate = DateTimeOffset();
         const auto outcome = detail::MatchFirstOfManyFormats(

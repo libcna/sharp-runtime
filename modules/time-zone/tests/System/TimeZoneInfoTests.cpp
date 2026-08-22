@@ -9,13 +9,16 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/TimeZoneInfo.hpp"
 #include "System/TimeZoneNotFoundException.hpp"
+#include "System/detail/ProcessTimeZoneState.hpp"
 
 using System::TimeZoneInfo;
 using System::TimeSpan;
 using System::DateTime;
+using System::DateTimeKind;
 using System::TimeZoneNotFoundException;
 
 // ---------------------------------------------------------------------------
@@ -89,10 +92,11 @@ TEST(TimeZoneInfoTests, Utc_IsInvalidTime_ReturnsFalse) {
 }
 
 TEST(TimeZoneInfoTests, Utc_ConvertTimeToUtc_ZeroOffsetPreservesRawValue) {
-    // UTC zone has zero offset, so ConvertTimeToUtc == Add(Zero) == identity on ticks
+    // UTC zone has zero offset, so the clock value is unchanged, but the result is explicitly UTC.
     DateTime dt;
     DateTime result = TimeZoneInfo::Utc().ConvertTimeToUtc(dt);
     EXPECT_EQ(result.getTicksProperty(), dt.getTicksProperty());
+    EXPECT_EQ(result.getKindProperty(), DateTimeKind::Utc);
 }
 
 // ---------------------------------------------------------------------------
@@ -215,9 +219,10 @@ TEST(TimeZoneInfoTests, ConvertTimeBySystemTimeZoneId_Unknown_Throws) {
 
 TEST(TimeZoneInfoTests, ConvertTime_DestZone_AddsOffset) {
     auto utcPlus2 = TimeZoneInfo::CreateCustomTimeZone("+02", TimeSpan::FromHours(2), "+2", "+2");
-    DateTime utc(2025, 1, 1, 12, 0, 0);
+    DateTime utc = DateTime::SpecifyKind(DateTime(2025, 1, 1, 12, 0, 0), DateTimeKind::Utc);
     DateTime local = TimeZoneInfo::ConvertTime(utc, *utcPlus2);
     EXPECT_EQ(local.getHourProperty(), 14);
+    EXPECT_EQ(local.getKindProperty(), DateTimeKind::Unspecified);
 }
 
 TEST(TimeZoneInfoTests, ConvertTime_SrcDst_Correct) {
@@ -230,9 +235,10 @@ TEST(TimeZoneInfoTests, ConvertTime_SrcDst_Correct) {
 
 TEST(TimeZoneInfoTests, ConvertTimeFromUtc_AddsOffset) {
     auto utcPlus3 = TimeZoneInfo::CreateCustomTimeZone("+03", TimeSpan::FromHours(3), "+3", "+3");
-    DateTime utc(2025, 6, 1, 9, 0, 0);
+    DateTime utc = DateTime::SpecifyKind(DateTime(2025, 6, 1, 9, 0, 0), DateTimeKind::Utc);
     DateTime local = TimeZoneInfo::ConvertTimeFromUtc(utc, *utcPlus3);
     EXPECT_EQ(local.getHourProperty(), 12);
+    EXPECT_EQ(local.getKindProperty(), DateTimeKind::Unspecified);
 }
 
 // ---------------------------------------------------------------------------
@@ -395,6 +401,7 @@ TEST(TimeZoneInfoTests, ConvertTimeToUtc_Static_SubtractsOffset) {
     DateTime local(2025, 6, 1, 14, 0, 0);
     DateTime utc = TimeZoneInfo::ConvertTimeToUtc(local, *tz);
     EXPECT_EQ(utc.getHourProperty(), 12);
+    EXPECT_EQ(utc.getKindProperty(), DateTimeKind::Utc);
 }
 
 // ---------------------------------------------------------------------------
@@ -488,20 +495,22 @@ TEST(TimeZoneInfoTests, TransitionTime_GetHashCode_SameInputSameHash) {
 TEST(TimeZoneInfoTests, AdjustmentRule_GetHashCode_Consistent) {
     System::DateTime start(2020, 1, 1), end(2020, 12, 31);
     System::DateTime tod;
-    auto tt = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 14);
+    auto ttStart = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 14);
+    auto ttEnd = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 10, 7);
     auto r = TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
-        start, end, System::TimeSpan::Zero, tt, tt);
+        start, end, System::TimeSpan::Zero, ttStart, ttEnd);
     EXPECT_EQ(r->GetHashCode(), r->GetHashCode());
 }
 
 TEST(TimeZoneInfoTests, AdjustmentRule_Equals_SameRules_True) {
     System::DateTime start(2020, 1, 1), end(2020, 12, 31);
     System::DateTime tod;
-    auto tt = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 14);
+    auto ttStart = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 14);
+    auto ttEnd = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 10, 7);
     auto a = TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
-        start, end, System::TimeSpan::Zero, tt, tt);
+        start, end, System::TimeSpan::Zero, ttStart, ttEnd);
     auto b = TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
-        start, end, System::TimeSpan::Zero, tt, tt);
+        start, end, System::TimeSpan::Zero, ttStart, ttEnd);
     EXPECT_TRUE(a->Equals(*b));
     EXPECT_TRUE(*a == *b);
     EXPECT_FALSE(*a != *b);
@@ -511,11 +520,12 @@ TEST(TimeZoneInfoTests, AdjustmentRule_Equals_DiffEnd_False) {
     System::DateTime start(2020, 1, 1);
     System::DateTime end1(2020, 12, 31), end2(2021, 12, 31);
     System::DateTime tod;
-    auto tt = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 14);
+    auto ttStart = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 14);
+    auto ttEnd = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 10, 7);
     auto a = TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
-        start, end1, System::TimeSpan::Zero, tt, tt);
+        start, end1, System::TimeSpan::Zero, ttStart, ttEnd);
     auto b = TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
-        start, end2, System::TimeSpan::Zero, tt, tt);
+        start, end2, System::TimeSpan::Zero, ttStart, ttEnd);
     EXPECT_FALSE(a->Equals(*b));
     EXPECT_TRUE(*a != *b);
 }
@@ -975,6 +985,10 @@ struct ZoneOracle {
 };
 
 ZoneOracle oracleFor(const std::string& id) {
+    // The oracle intentionally manipulates the same process-global C-library state as production
+    // lookups. Keep save/select/all localtime reads/restore in one critical section so an
+    // unrelated DateTime::Now or TimeZone query cannot observe the temporary zone.
+    std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
     ZoneOracle out;
     const char* previous = ::getenv("TZ");
     const std::string saved = previous != nullptr ? std::string(previous) : std::string();
@@ -1494,4 +1508,254 @@ TEST(TimeZoneInfoTests, PIN_TimeZoneInfoItselfModelsNoDaylightTransitions) {
     EXPECT_FALSE(ny->IsAmbiguousTime(DateTime(2025, 11, 2, 1, 30, 0)));
     EXPECT_FALSE(ny->IsInvalidTime(DateTime(2025, 3, 9, 2, 30, 0)));
     EXPECT_TRUE(ny->GetAmbiguousTimeOffsets(DateTime(2025, 11, 2, 1, 30, 0)).empty());
+}
+
+// ---------------------------------------------------------------------------
+// Post-#1941 ripple audit: TimeZoneInfo must consume and produce DateTimeKind.
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, Post1941_TransitionTimeRequiresAnUnspecifiedClockAtBothFactories) {
+    const SharpRuntime::longcs clockTicks = 2 * TimeSpan::TicksPerHour;
+    for (DateTimeKind kind : {DateTimeKind::Utc, DateTimeKind::Local}) {
+        const DateTime clock(clockTicks, kind);
+        EXPECT_THROW((void)TimeZoneInfo::TransitionTime::CreateFixedDateRule(clock, 3, 14),
+                     System::ArgumentException)
+            << static_cast<int>(kind);
+        EXPECT_THROW((void)TimeZoneInfo::TransitionTime::CreateFloatingDateRule(
+                         clock, 10, 4, System::DayOfWeek::Sunday),
+                     System::ArgumentException)
+            << static_cast<int>(kind);
+    }
+
+    const DateTime unspecified(clockTicks, DateTimeKind::Unspecified);
+    EXPECT_NO_THROW((void)TimeZoneInfo::TransitionTime::CreateFixedDateRule(
+        unspecified, 3, 14));
+
+    try {
+        // Kind is the first reference validation, ahead of even an invalid month/day pair.
+        (void)TimeZoneInfo::TransitionTime::CreateFixedDateRule(
+            DateTime(clockTicks, DateTimeKind::Utc), 0, 0);
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "timeOfDay");
+        EXPECT_NE(std::string(e.what()).find("DateTimeKind.Unspecified"), std::string::npos);
+    }
+}
+
+TEST(TimeZoneInfoTests, Post1941_ConvertTimeKindFollowsCanonicalDestinationIdentity) {
+    const DateTime utc = DateTime::SpecifyKind(DateTime(2025, 6, 15, 12, 0, 0),
+                                                DateTimeKind::Utc);
+    auto other = TimeZoneInfo::CreateCustomTimeZone(
+        "Other", TimeSpan::FromHours(2), "Other", "Other");
+    auto utcLookalike = TimeZoneInfo::CreateCustomTimeZone(
+        "UTC", TimeSpan::Zero, "Coordinated Universal Time", "Coordinated Universal Time");
+
+    EXPECT_EQ(TimeZoneInfo::ConvertTime(utc, TimeZoneInfo::Utc(), TimeZoneInfo::Utc())
+                  .getKindProperty(),
+              DateTimeKind::Utc);
+    EXPECT_EQ(TimeZoneInfo::ConvertTime(utc, TimeZoneInfo::Utc(), TimeZoneInfo::Local())
+                  .getKindProperty(),
+              DateTimeKind::Local);
+    EXPECT_EQ(TimeZoneInfo::ConvertTime(utc, TimeZoneInfo::Utc(), *other).getKindProperty(),
+              DateTimeKind::Unspecified);
+
+    // The mapping is intentionally identity-based, like .NET's. Equal id/offset data does not
+    // make an arbitrary custom zone the canonical UTC singleton.
+    EXPECT_EQ(TimeZoneInfo::ConvertTime(utc, TimeZoneInfo::Utc(), *utcLookalike)
+                  .getKindProperty(),
+              DateTimeKind::Unspecified);
+}
+
+TEST(TimeZoneInfoTests, Post1941_EveryDateTimeConversionDoorUsesTheDestinationKindMatrix) {
+    const DateTime utc = DateTime::SpecifyKind(DateTime(2025, 6, 15, 12, 0, 0),
+                                                DateTimeKind::Utc);
+    const DateTime local = DateTime::SpecifyKind(DateTime(2025, 6, 15, 12, 0, 0),
+                                                  DateTimeKind::Local);
+    auto other = TimeZoneInfo::CreateCustomTimeZone(
+        "Other", TimeSpan::FromHours(2), "Other", "Other");
+
+    EXPECT_EQ(TimeZoneInfo::ConvertTime(utc, TimeZoneInfo::Utc()).getKindProperty(),
+              DateTimeKind::Utc);
+    EXPECT_EQ(TimeZoneInfo::ConvertTime(local, TimeZoneInfo::Local()).getKindProperty(),
+              DateTimeKind::Local);
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeFromUtc(utc, *other).getKindProperty(),
+              DateTimeKind::Unspecified);
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeBySystemTimeZoneId(utc, "UTC").getKindProperty(),
+              DateTimeKind::Utc);
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeBySystemTimeZoneId(utc, "UTC", "Local")
+                  .getKindProperty(),
+              DateTimeKind::Unspecified);
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeBySystemTimeZoneId(local, "Local", "UTC")
+                  .getKindProperty(),
+              DateTimeKind::Utc);
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeBySystemTimeZoneId(local, "lOcAl", "UTC")
+                  .getKindProperty(),
+              DateTimeKind::Utc);
+}
+
+TEST(TimeZoneInfoTests, Post1941_UtcLookupIsCanonicalButLocalLookupIsDeliberatelyACopy) {
+    const DateTime utc = DateTime::SpecifyKind(DateTime(2025, 6, 15, 12, 0, 0),
+                                                DateTimeKind::Utc);
+    const auto foundUtc = TimeZoneInfo::FindSystemTimeZoneById("UTC");
+    const auto foundMixedCaseUtc = TimeZoneInfo::FindSystemTimeZoneById("uTc");
+    const auto foundLocal = TimeZoneInfo::FindSystemTimeZoneById("Local");
+
+    ASSERT_NE(foundUtc, nullptr);
+    ASSERT_NE(foundMixedCaseUtc, nullptr);
+    ASSERT_NE(foundLocal, nullptr);
+    EXPECT_EQ(foundUtc.get(), &TimeZoneInfo::Utc());
+    EXPECT_EQ(foundMixedCaseUtc.get(), &TimeZoneInfo::Utc());
+    EXPECT_NE(foundLocal.get(), &TimeZoneInfo::Local());
+
+    // .NET's UTC lookup returns its canonical singleton. Local lookup intentionally returns the
+    // equivalent database object, not TimeZoneInfo.Local, so the two destinations have different
+    // result Kinds despite both being built-in ids in this port.
+    EXPECT_EQ(TimeZoneInfo::ConvertTime(utc, *foundUtc).getKindProperty(), DateTimeKind::Utc);
+    EXPECT_EQ(TimeZoneInfo::ConvertTime(utc, *foundMixedCaseUtc).getKindProperty(),
+              DateTimeKind::Utc);
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeBySystemTimeZoneId(utc, "uTc").getKindProperty(),
+              DateTimeKind::Utc);
+    EXPECT_EQ(TimeZoneInfo::ConvertTime(utc, *foundLocal).getKindProperty(),
+              DateTimeKind::Unspecified);
+    EXPECT_EQ(TimeZoneInfo::ConvertTime(utc, TimeZoneInfo::Local()).getKindProperty(),
+              DateTimeKind::Local);
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeBySystemTimeZoneId(utc, "Local").getKindProperty(),
+              DateTimeKind::Unspecified);
+
+    const auto zones = TimeZoneInfo::GetSystemTimeZones();
+    ASSERT_GE(zones.size(), 2u);
+    EXPECT_EQ(zones.front().get(), &TimeZoneInfo::Utc());
+    EXPECT_NE(zones.back().get(), &TimeZoneInfo::Local());
+}
+
+#if defined(__EMSCRIPTEN__)
+TEST(TimeZoneInfoTests, Post1941_EmscriptenLocalIsDistinctFromUtcEvenAtZeroOffset) {
+    EXPECT_EQ(TimeZoneInfo::Local().getIdProperty(), "Local");
+    EXPECT_EQ(TimeZoneInfo::Utc().getIdProperty(), "UTC");
+    EXPECT_NE(&TimeZoneInfo::Local(), &TimeZoneInfo::Utc());
+    EXPECT_FALSE(TimeZoneInfo::Local().Equals(TimeZoneInfo::Utc()));
+
+    const DateTime local = DateTime::SpecifyKind(DateTime(2025, 6, 15, 12, 0, 0),
+                                                  DateTimeKind::Local);
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeBySystemTimeZoneId(local, "local", "UTC")
+                  .getKindProperty(),
+              DateTimeKind::Utc);
+}
+#endif
+
+TEST(TimeZoneInfoTests, Post1941_CanonicalUtcAliasCannotMutateTheSingleton) {
+    // FindSystemTimeZoneById("UTC") deliberately aliases TimeZoneInfo::Utc so destination Kind
+    // is selected by the same reference identity as .NET. The pointee type must therefore not be
+    // assignable: otherwise `*found = *custom` would overwrite the process-wide singleton and
+    // corrupt every later conversion. Copy construction remains available for the deliberately
+    // copied Local lookup and for ordinary value snapshots.
+    static_assert(std::is_copy_constructible_v<TimeZoneInfo>);
+    static_assert(!std::is_move_constructible_v<TimeZoneInfo>);
+    static_assert(!std::is_copy_assignable_v<TimeZoneInfo>);
+    static_assert(!std::is_move_assignable_v<TimeZoneInfo>);
+
+    const auto foundUtc = TimeZoneInfo::FindSystemTimeZoneById("UTC");
+    ASSERT_NE(foundUtc, nullptr);
+    EXPECT_EQ(foundUtc.get(), &TimeZoneInfo::Utc());
+    EXPECT_EQ(TimeZoneInfo::Utc().getIdProperty(), "UTC");
+    EXPECT_EQ(TimeZoneInfo::Utc().getBaseUtcOffsetProperty(), TimeSpan::Zero);
+}
+
+TEST(TimeZoneInfoTests, Post1941_ConvertTimeRejectsAKindThatConflictsWithTheSourceZone) {
+    const DateTime utc = DateTime::SpecifyKind(DateTime(2025, 6, 15, 12, 0, 0),
+                                                DateTimeKind::Utc);
+    const DateTime local = DateTime::SpecifyKind(DateTime(2025, 6, 15, 12, 0, 0),
+                                                  DateTimeKind::Local);
+    const DateTime unspecified(2025, 6, 15, 12, 0, 0);
+    auto other = TimeZoneInfo::CreateCustomTimeZone(
+        "Other", TimeSpan::FromHours(2), "Other", "Other");
+
+    EXPECT_THROW((void)TimeZoneInfo::ConvertTime(utc, *other, TimeZoneInfo::Utc()),
+                 System::ArgumentException);
+    EXPECT_THROW((void)TimeZoneInfo::ConvertTime(local, TimeZoneInfo::Utc(), *other),
+                 System::ArgumentException);
+    EXPECT_THROW((void)TimeZoneInfo::ConvertTimeFromUtc(local, *other),
+                 System::ArgumentException);
+    EXPECT_NO_THROW((void)TimeZoneInfo::ConvertTime(
+        unspecified, *other, TimeZoneInfo::Utc()));
+
+    try {
+        (void)TimeZoneInfo::ConvertTime(utc, *other, TimeZoneInfo::Utc());
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "sourceTimeZone");
+        EXPECT_NE(std::string(e.what()).find("Kind property set correctly"), std::string::npos);
+    }
+}
+
+TEST(TimeZoneInfoTests, Post1941_ConvertTimeToUtcStampsUtcEvenWhenTheClockClamps) {
+    auto plus14 = TimeZoneInfo::CreateCustomTimeZone(
+        "+14", TimeSpan::FromHours(14), "+14", "+14");
+    const DateTime ordinary(2025, 6, 15, 12, 0, 0);
+
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeToUtc(ordinary, *plus14).getKindProperty(),
+              DateTimeKind::Utc);
+    EXPECT_EQ(plus14->ConvertTimeToUtc(ordinary).getKindProperty(), DateTimeKind::Utc);
+
+    const DateTime clamped = TimeZoneInfo::ConvertTimeToUtc(DateTime::MinValue, *plus14);
+    EXPECT_EQ(clamped.getTicksProperty(), DateTime::MinValue.getTicksProperty());
+    EXPECT_EQ(clamped.getKindProperty(), DateTimeKind::Utc);
+}
+
+TEST(TimeZoneInfoTests, Post1941_SafeFromTicksCarriesKindOnlyForAnInRangeConstruction) {
+    EXPECT_EQ(TimeZoneInfo::safeFromTicks(42, DateTimeKind::Utc).getKindProperty(),
+              DateTimeKind::Utc);
+    EXPECT_EQ(TimeZoneInfo::safeFromTicks(-1, DateTimeKind::Utc).getKindProperty(),
+              DateTimeKind::Unspecified);
+    EXPECT_EQ(TimeZoneInfo::safeFromTicks(DateTime::MaxTicks + 1, DateTimeKind::Local)
+                  .getKindProperty(),
+              DateTimeKind::Unspecified);
+}
+
+TEST(TimeZoneInfoTests, Post1941_DateTimeOffsetConversionBuildsAnUnspecifiedDestinationClock) {
+    const DateTime utc = DateTime::SpecifyKind(DateTime(2025, 6, 15, 12, 0, 0),
+                                                DateTimeKind::Utc);
+    const System::DateTimeOffset input(utc, TimeSpan::Zero);
+    auto plus2 = TimeZoneInfo::CreateCustomTimeZone(
+        "+02", TimeSpan::FromHours(2), "+02", "+02");
+
+    System::DateTimeOffset converted;
+    EXPECT_NO_THROW(converted = TimeZoneInfo::ConvertTime(input, *plus2));
+    EXPECT_EQ(converted.getOffsetProperty(), TimeSpan::FromHours(2));
+    EXPECT_EQ(converted.getHourProperty(), 14);
+    EXPECT_EQ(converted.getDateTimeProperty().getKindProperty(), DateTimeKind::Unspecified);
+    EXPECT_EQ(converted.getUtcDateTimeProperty().getKindProperty(), DateTimeKind::Utc);
+    EXPECT_EQ(converted.getUtcTicksProperty(), input.getUtcTicksProperty());
+}
+
+TEST(TimeZoneInfoTests, Post1941_DateTimeOffsetConversionClampsAtBothRangeEnds) {
+    auto plus14 = TimeZoneInfo::CreateCustomTimeZone(
+        "+14", TimeSpan::FromHours(14), "+14", "+14");
+    auto minus14 = TimeZoneInfo::CreateCustomTimeZone(
+        "-14", TimeSpan::FromHours(-14), "-14", "-14");
+
+    System::DateTimeOffset upper;
+    System::DateTimeOffset lower;
+    EXPECT_NO_THROW(upper = TimeZoneInfo::ConvertTime(System::DateTimeOffset::MaxValue,
+                                                       *plus14));
+    EXPECT_NO_THROW(lower = TimeZoneInfo::ConvertTime(System::DateTimeOffset::MinValue,
+                                                       *minus14));
+    EXPECT_EQ(upper.getTicksProperty(), System::DateTimeOffset::MaxValue.getTicksProperty());
+    EXPECT_EQ(upper.getOffsetProperty(), TimeSpan::Zero);
+    EXPECT_EQ(lower.getTicksProperty(), System::DateTimeOffset::MinValue.getTicksProperty());
+    EXPECT_EQ(lower.getOffsetProperty(), TimeSpan::Zero);
+
+    // Exactly reaching a boundary is representable and retains the destination offset; only a
+    // value beyond the boundary saturates to the zero-offset constants above.
+    const auto nearUpper = System::DateTimeOffset::MaxValue.AddHours(-14);
+    const auto exactUpper = TimeZoneInfo::ConvertTime(nearUpper, *plus14);
+    EXPECT_EQ(exactUpper.getTicksProperty(), DateTime::MaxTicks);
+    EXPECT_EQ(exactUpper.getOffsetProperty(), TimeSpan::FromHours(14));
+    EXPECT_EQ(exactUpper.getUtcTicksProperty(), nearUpper.getUtcTicksProperty());
+
+    const auto nearLower = System::DateTimeOffset::MinValue.AddHours(14);
+    const auto exactLower = TimeZoneInfo::ConvertTime(nearLower, *minus14);
+    EXPECT_EQ(exactLower.getTicksProperty(), 0);
+    EXPECT_EQ(exactLower.getOffsetProperty(), TimeSpan::FromHours(-14));
+    EXPECT_EQ(exactLower.getUtcTicksProperty(), nearLower.getUtcTicksProperty());
 }

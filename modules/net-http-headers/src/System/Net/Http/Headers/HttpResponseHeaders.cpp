@@ -3,7 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Http/Headers/HttpResponseHeaders.hpp"
 #include "HeaderFieldSplitter.hpp"
-#include "HttpDateParser.hpp"
+#include "System/Net/detail/HttpDateParser.hpp"
 #include <algorithm>
 #include <array>
 #include <cctype>

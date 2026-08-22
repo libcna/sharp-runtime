@@ -9,27 +9,12 @@
 
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 
+#include "System/detail/ProcessTimeZoneState.hpp"
 #include <cstdlib>
 #include <ctime>
-#include <mutex>
 #include <string>
 
 namespace System::detail {
-
-    /**
-     * @brief Guards every read or write of the process-global timezone state.
-     *
-     * FindSystemTimeZoneById() temporarily overwrites the TZ environment variable to query a
-     * different zone; without serializing every reader against that window too, a concurrent
-     * Local() call on another thread could transiently observe the wrong zone's offset or name
-     * -- a real, reachable bug for any multi-threaded caller, not just a race between two
-     * FindSystemTimeZoneById() calls (which alone would already need this). A function-local
-     * static avoids static-initialization-order concerns between translation units.
-     */
-    inline std::mutex& tzMutex() {
-        static std::mutex m;
-        return m;
-    }
 
     /**
      * @brief Saves TZ on construction and restores it on destruction, on every path.
@@ -44,8 +29,8 @@ namespace System::detail {
      * default -- and the previous restore branched on `savedStr.empty()`, so an empty-but-set
      * TZ was unsetenv()d rather than restored.
      *
-     * The caller must already hold tzMutex(); the guard does not lock, because the same lock
-     * has to cover the localtime_r() reads that follow the setenv().
+     * The caller must already hold processTimeZoneMutex(); the guard does not lock, because the
+     * same lock has to cover the localtime_r() reads that follow the setenv().
      */
     class ScopedTz {
         std::string saved_;
@@ -89,8 +74,8 @@ namespace System::detail {
      * @brief Samples the currently selected zone at the UTC instant @p year-@p month-15 12:00.
      *
      * Midday on the 15th is used rather than midnight on the 1st so that no sample can land on
-     * a transition instant in any installed zone. Callers must already hold tzMutex() and have
-     * selected the zone they mean to sample.
+     * a transition instant in any installed zone. Callers must already hold
+     * processTimeZoneMutex() and have selected the zone they mean to sample.
      */
     inline ZoneSample sampleZoneAtMonth(int year, int month) {
         struct tm utc {};
@@ -140,7 +125,8 @@ namespace System::detail {
      * across the year" agrees with "first tm_isdst == 0 sample" for all 499 installed zones,
      * so it cannot disagree with the primary rule on any zone that exists here.
      *
-     * Callers must already hold tzMutex() and have selected the zone they mean to describe.
+     * Callers must already hold processTimeZoneMutex() and have selected the zone they mean to
+     * describe.
      */
     inline ZoneMetadata describeSelectedZone(int year) {
         ZoneMetadata meta;
@@ -259,6 +245,46 @@ namespace System::detail {
             }
         }
 
+        out.utcOffsetSeconds = local.tm_gmtoff;
+        out.isDaylight       = local.tm_isdst > 0;
+        out.abbreviation     = local.tm_zone ? local.tm_zone : "";
+        return true;
+    }
+
+    /**
+     * @brief Resolves the selected zone's offset at an exact UTC instant.
+     *
+     * This is intentionally separate from resolveLocalWallClock(). Around a DST transition the
+     * same calendar fields denote different questions: `2025-03-09 07:30` as a New York wall
+     * clock is already daylight time, while `07:30Z` maps to `03:30` after the spring jump. A
+     * UTC-to-local conversion must choose by the instant and must not feed UTC fields to
+     * mktime(), which interprets them as local.
+     *
+     * The `time_t(-1)` value is not rejected on its own: it is also the valid instant
+     * 1969-12-31T23:59:59Z. A gmtime round trip is the representability check. The caller must
+     * already hold processTimeZoneMutex().
+     */
+    inline bool resolveUtcInstant(int year, int month, int day, int hour, int minute,
+                                  int second, ZoneSample& out) {
+        struct tm utc {};
+        utc.tm_year = year - 1900;
+        utc.tm_mon  = month - 1;
+        utc.tm_mday = day;
+        utc.tm_hour = hour;
+        utc.tm_min  = minute;
+        utc.tm_sec  = second;
+
+        const time_t instant = timegm(&utc);
+        struct tm roundTrip {};
+        if (gmtime_r(&instant, &roundTrip) == nullptr ||
+            roundTrip.tm_year != year - 1900 || roundTrip.tm_mon != month - 1 ||
+            roundTrip.tm_mday != day || roundTrip.tm_hour != hour ||
+            roundTrip.tm_min != minute || roundTrip.tm_sec != second) {
+            return false;
+        }
+
+        struct tm local {};
+        if (localtime_r(&instant, &local) == nullptr) return false;
         out.utcOffsetSeconds = local.tm_gmtoff;
         out.isDaylight       = local.tm_isdst > 0;
         out.abbreviation     = local.tm_zone ? local.tm_zone : "";

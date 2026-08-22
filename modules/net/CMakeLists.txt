@@ -12,5 +12,6 @@ sharp_runtime_register_module(
     TARGET sharp_runtime_net
     TYPE STATIC
     PUBLIC_DEPENDENCIES Collections.Core ComponentModel Core.Base Uri
+    PRIVATE_DEPENDENCIES TimeZone
     SETUP _sharp_runtime_setup_net
 )

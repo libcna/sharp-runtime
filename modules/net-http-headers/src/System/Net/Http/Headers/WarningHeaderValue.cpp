@@ -2,7 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Http/Headers/WarningHeaderValue.hpp"
-#include "HttpDateParser.hpp"
+#include "System/Net/detail/HttpDateParser.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"

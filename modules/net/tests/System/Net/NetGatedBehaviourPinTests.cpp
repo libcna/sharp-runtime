@@ -29,16 +29,54 @@
 #include "System/Net/CookieException.hpp"
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <thread>
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/DateTimeOffset.hpp"
 #include "System/Net/WebUtility.hpp"
 #include "System/Uri.hpp"
+#include "System/detail/ProcessTimeZoneState.hpp"
 
 using System::Net::Cookie;
 using System::Net::CookieCollection;
 using System::Net::CookieContainer;
 using System::Net::WebUtility;
 using System::Uri;
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+namespace {
+
+// POSIX exposes one TZ selection for the whole process. Tests use the same lock as the runtime
+// readers and the TimeZone component's temporary selectors, so this deterministic non-UTC probe
+// cannot observe (or expose to another thread) a half-switched C-library timezone.
+class ScopedProcessTimeZone final {
+public:
+    explicit ScopedProcessTimeZone(const char* zone) {
+        std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
+        const char* current = std::getenv("TZ");
+        wasSet_ = current != nullptr;
+        if (wasSet_) saved_ = current;
+        (void)::setenv("TZ", zone, 1);
+        ::tzset();
+    }
+
+    ~ScopedProcessTimeZone() {
+        std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
+        if (wasSet_) (void)::setenv("TZ", saved_.c_str(), 1);
+        else         (void)::unsetenv("TZ");
+        ::tzset();
+    }
+
+    ScopedProcessTimeZone(const ScopedProcessTimeZone&) = delete;
+    ScopedProcessTimeZone& operator=(const ScopedProcessTimeZone&) = delete;
+
+private:
+    std::string saved_;
+    bool wasSet_ = false;
+};
+
+} // namespace
+#endif
 
 // ===========================================================================
 // #2040 -- the cookie origin policy. Approval sentence: plan §14.1.
@@ -238,6 +276,138 @@ TEST(NetGatedBehaviourPinTests, Fix2042_ExpiredCookiesArePurgedNotRetained) {
 
     EXPECT_EQ(container.getCountProperty(), 1);
     EXPECT_EQ(container.GetCookieHeader(origin), "kept=v");
+}
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+TEST(NetGatedBehaviourPinTests, KindRipple_UtcExpiryIsComparedOnTheUtcTimeline) {
+    // UTC-14 is POSIX spelling for UTC+14. Before #2418, Cookie compared an Expires value's
+    // raw ticks with DateTime::Now. Once Now correctly became a local wall clock this made a
+    // UTC expiry thirty minutes in the future look almost fourteen hours old.
+    const ScopedProcessTimeZone zone("UTC-14");
+    const System::DateTime utcNow =
+        System::DateTimeOffset::getUtcNowProperty().getUtcDateTimeProperty();
+
+    Cookie future("future", "v");
+    future.setExpiresProperty(utcNow.AddMinutes(30));
+    EXPECT_FALSE(future.getExpiredProperty());
+
+    Cookie past("past", "v");
+    past.setExpiresProperty(utcNow.AddMinutes(-30));
+    EXPECT_TRUE(past.getExpiredProperty());
+}
+#endif
+
+TEST(NetGatedBehaviourPinTests, KindRipple_MaxAgeCreatesAUtcExpiry) {
+    // Max-Age is an interval from the current instant, independent of the local wall clock.
+    // Pin both that scale and the Kind: losing either lets a later expiry comparison silently
+    // reinterpret the stored value as local time.
+    CookieContainer container;
+    const Uri origin("http://origin.invalid/");
+    const System::DateTime before =
+        System::DateTimeOffset::getUtcNowProperty().getUtcDateTimeProperty();
+    container.SetCookies(origin, "maxage=v; Max-Age=3600; Path=/");
+    const System::DateTime after =
+        System::DateTimeOffset::getUtcNowProperty().getUtcDateTimeProperty();
+
+    const CookieCollection stored = container.GetCookies(origin);
+    ASSERT_EQ(stored.getCountProperty(), 1);
+    const System::DateTime expires = stored[0].getExpiresProperty();
+    EXPECT_EQ(expires.getKindProperty(), System::DateTimeKind::Utc);
+    EXPECT_GE(expires.getTicksProperty(), before.AddSeconds(3600).getTicksProperty());
+    EXPECT_LE(expires.getTicksProperty(), after.AddSeconds(3600).getTicksProperty());
+}
+
+TEST(NetGatedBehaviourPinTests, KindRipple_ExpiresParsesAllThreeHttpDateFormsAsUtc) {
+    const Uri origin("http://origin.invalid/");
+    const auto verifyFuture = [&origin](const std::string& name, const std::string& expires) {
+        CookieContainer container;
+        container.SetCookies(origin, name + "=v; Expires=" + expires + "; Path=/");
+        const CookieCollection stored = container.GetCookies(origin);
+        ASSERT_EQ(stored.getCountProperty(), 1) << expires;
+        EXPECT_EQ(stored[0].getExpiresProperty().getKindProperty(),
+                  System::DateTimeKind::Utc) << expires;
+        EXPECT_FALSE(stored[0].getExpiredProperty()) << expires;
+    };
+
+    verifyFuture("imf", "Sat, 06 Nov 2094 08:49:37 GMT");
+    verifyFuture("rfc850", "Tuesday, 06-Nov-29 08:49:37 GMT");
+    verifyFuture("asctime", "Sat Nov  6 08:49:37 2094");
+
+    CookieContainer past;
+    past.SetCookies(origin, "gone=v; Expires=Wed, 21 Oct 2015 07:28:00 GMT; Path=/");
+    EXPECT_EQ(past.getCountProperty(), 0);
+}
+
+TEST(NetGatedBehaviourPinTests, KindRipple_CookieDateHasItsOwnBoundedInvariantGrammar) {
+    const Uri origin("http://origin.invalid/");
+
+    CookieContainer mixedCase;
+    mixedCase.SetCookies(
+        origin, "mixed=v; Expires=sAt, 06 nOv 2094 08:49:37 GMT; Path=/");
+    EXPECT_EQ(mixedCase.getCountProperty(), 1);
+
+    CookieContainer noWeekday;
+    noWeekday.SetCookies(
+        origin, "cookie=v; Expires=06-Nov-2094 08:49:37 GMT; Path=/");
+    EXPECT_EQ(noWeekday.getCountProperty(), 1)
+        << "Cookie ParseCookieDate accepts this common form; HTTP header dates do not";
+
+    // The shared invariant two-digit-year policy ends at 2049. Both inputs use the matching
+    // weekday, so storage versus expiry distinguishes the window rather than weekday validation.
+    CookieContainer window;
+    window.SetCookies(origin, "future=v; Expires=Saturday, 06-Nov-49 08:49:37 GMT; Path=/");
+    EXPECT_EQ(window.getCountProperty(), 1);
+    window.SetCookies(origin, "past=v; Expires=Monday, 06-Nov-50 08:49:37 GMT; Path=/");
+    EXPECT_EQ(window.getCountProperty(), 1) << "the 1950 cookie is discarded";
+
+    CookieContainer invalid;
+    EXPECT_THROW(invalid.SetCookies(
+                     origin, "bad=v; Expires=Mon, 06 Nov 2094 08:49:37 GMT; Path=/"),
+                 System::Net::CookieException)
+        << "a real weekday name must still agree with the calendar date";
+    EXPECT_THROW(invalid.SetCookies(
+                     origin, "bad=v; Expires=Sat, +06 Nov 2094 08:49:37 GMT; Path=/"),
+                 System::Net::CookieException)
+        << "numeric format tokens do not admit signs";
+}
+
+TEST(NetGatedBehaviourPinTests, KindRipple_FirstExpiresOrMaxAgeAttributeWins) {
+    const Uri origin("http://origin.invalid/");
+    constexpr const char* future = "Sat, 06 Nov 2094 08:49:37 GMT";
+    constexpr const char* past = "Wed, 21 Oct 2015 07:28:00 GMT";
+
+    CookieContainer maxAgeFirst;
+    maxAgeFirst.SetCookies(
+        origin, std::string("kept=v; Max-Age=3600; Expires=") + past + "; Path=/");
+    EXPECT_EQ(maxAgeFirst.getCountProperty(), 1);
+
+    CookieContainer expiresFirst;
+    expiresFirst.SetCookies(
+        origin, std::string("kept=v; Expires=") + future + "; Max-Age=0; Path=/");
+    EXPECT_EQ(expiresFirst.getCountProperty(), 1);
+
+    CookieContainer expiredFirst;
+    expiredFirst.SetCookies(
+        origin, std::string("gone=v; Expires=") + past + "; Max-Age=3600; Path=/");
+    EXPECT_EQ(expiredFirst.getCountProperty(), 0);
+
+    CookieContainer zeroFirst;
+    zeroFirst.SetCookies(
+        origin, std::string("gone=v; Max-Age=0; Expires=") + future + "; Path=/");
+    EXPECT_EQ(zeroFirst.getCountProperty(), 0);
+}
+
+TEST(NetGatedBehaviourPinTests, KindRipple_MalformedMaxAgeIsFullyRejected) {
+    const Uri origin("http://origin.invalid/");
+    CookieContainer container;
+
+    EXPECT_THROW(container.SetCookies(origin, "bad=v; Max-Age=3600junk; Path=/"),
+                 System::Net::CookieException);
+    EXPECT_THROW(container.SetCookies(origin, "huge=v; Max-Age=999999999999999; Path=/"),
+                 System::Net::CookieException);
+    EXPECT_THROW(container.SetCookies(origin, "bad=v; Expires=not-an-http-date; Path=/"),
+                 System::Net::CookieException);
+    EXPECT_EQ(container.getCountProperty(), 0);
 }
 
 TEST(NetGatedBehaviourPinTests, Fix2042_MaxCookieSizeReportsRatherThanEvicting) {

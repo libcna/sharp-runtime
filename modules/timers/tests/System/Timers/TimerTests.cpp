@@ -90,4 +90,7 @@ TEST(ElapsedEventArgsTests, StoresSignalTime) {
     auto now = System::DateTime::getNowProperty();
     ElapsedEventArgs args(now);
     EXPECT_EQ(args.getSignalTimeProperty(), now);
+    // DateTime equality intentionally ignores Kind, so the value assertion above cannot prove
+    // that Timer's DateTime::Now signal remains a Local clock after the #1941 ripple.
+    EXPECT_EQ(args.getSignalTimeProperty().getKindProperty(), System::DateTimeKind::Local);
 }

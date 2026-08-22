@@ -518,7 +518,8 @@ public:
         if (totalDays < std::numeric_limits<intcs>::min() || totalDays > std::numeric_limits<intcs>::max())
             throw System::ArgumentOutOfRangeException("weeks", std::to_string(weeks),
                 "Value was either too large or too small for an Int32.");
-        return time.AddDays(static_cast<intcs>(totalDays));
+        return System::DateTime::SpecifyKind(
+            time.AddDays(static_cast<intcs>(totalDays)), System::DateTimeKind::Unspecified);
     }
 
     /**
@@ -530,7 +531,10 @@ public:
      * @return A new DateTime offset by @p days.
      */
     virtual System::DateTime AddDays(const System::DateTime& time, intcs days) const {
-        return time.AddDays(days);
+        // Calendar arithmetic deliberately differs from DateTime arithmetic: .NET's Calendar
+        // members always return Unspecified even when the source DateTime has a Kind.
+        return System::DateTime::SpecifyKind(time.AddDays(days),
+                                             System::DateTimeKind::Unspecified);
     }
 
     /**
@@ -542,7 +546,8 @@ public:
      * @return A new DateTime offset by @p hours.
      */
     virtual System::DateTime AddHours(const System::DateTime& time, intcs hours) const {
-        return time.AddHours(hours);
+        return System::DateTime::SpecifyKind(time.AddHours(hours),
+                                             System::DateTimeKind::Unspecified);
     }
 
     /**
@@ -554,7 +559,8 @@ public:
      * @return A new DateTime offset by @p minutes.
      */
     virtual System::DateTime AddMinutes(const System::DateTime& time, intcs minutes) const {
-        return time.AddMinutes(minutes);
+        return System::DateTime::SpecifyKind(time.AddMinutes(minutes),
+                                             System::DateTimeKind::Unspecified);
     }
 
     /**
@@ -566,7 +572,8 @@ public:
      * @return A new DateTime offset by @p seconds.
      */
     virtual System::DateTime AddSeconds(const System::DateTime& time, intcs seconds) const {
-        return time.AddSeconds(seconds);
+        return System::DateTime::SpecifyKind(time.AddSeconds(seconds),
+                                             System::DateTimeKind::Unspecified);
     }
 
     /**
@@ -598,8 +605,10 @@ public:
         // which compares false against both bounds -- is rejected rather than passed through.
         if (!(rounded > -static_cast<double>(maxMillis) && rounded < static_cast<double>(maxMillis)))
             throw System::ArgumentOutOfRangeException("value", "Value to add was out of range.");
-        return time.AddTicks(static_cast<SharpRuntime::longcs>(rounded) *
-                             System::DateTime::TicksPerMillisecond);
+        return System::DateTime::SpecifyKind(
+            time.AddTicks(static_cast<SharpRuntime::longcs>(rounded) *
+                          System::DateTime::TicksPerMillisecond),
+            System::DateTimeKind::Unspecified);
     }
 
     /**

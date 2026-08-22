@@ -4,7 +4,10 @@
 //
 // Coverage for XmlQualifiedName, XmlConvert, NameTable, and the small XML interfaces.
 #include <gtest/gtest.h>
+#include <cstdlib>
+#include <ctime>
 #include <limits>
+#include <mutex>
 #include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
@@ -18,12 +21,44 @@
 #include "System/DateTimeKind.hpp"
 #include "System/DateTimeOffset.hpp"
 #include "System/TimeZone.hpp"
+#include "System/detail/ProcessTimeZoneState.hpp"
 #include "System/Xml/XmlDateTimeSerializationMode.hpp"
 #include "System/Xml/XmlException.hpp"
 #include "System/Xml/XmlNodeChangedEventArgs.hpp"
 #include "System/Xml/XmlQualifiedName.hpp"
 
 using namespace System::Xml;
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+namespace {
+
+class ScopedXmlTimeZone final {
+    std::string saved_;
+    bool wasSet_;
+
+public:
+    explicit ScopedXmlTimeZone(const char* zone) {
+        std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
+        const char* current = ::getenv("TZ");
+        wasSet_ = current != nullptr;
+        if (wasSet_) saved_ = current;
+        ::setenv("TZ", zone, 1);
+        ::tzset();
+    }
+
+    ScopedXmlTimeZone(const ScopedXmlTimeZone&) = delete;
+    ScopedXmlTimeZone& operator=(const ScopedXmlTimeZone&) = delete;
+
+    ~ScopedXmlTimeZone() {
+        std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
+        if (wasSet_) ::setenv("TZ", saved_.c_str(), 1);
+        else         ::unsetenv("TZ");
+        ::tzset();
+    }
+};
+
+} // namespace
+#endif
 
 // ===========================================================================
 // XmlQualifiedName
@@ -343,6 +378,12 @@ TEST(XmlConvertDateTimeMode1945Tests, TheFormatIsHonouredRatherThanDiscarded) {
     EXPECT_THROW(XmlConvert::ToDateTime("2024-06-15", "HH:mm:ss"), System::FormatException);
     EXPECT_THROW(XmlConvert::ToDateTime("2024-06-15T13:45:30", "yyyy-MM-dd"),
                  System::FormatException);
+
+    // XmlConvert's exact door deliberately permits OUTER whitespace. Calling the convenient
+    // zone-less DateTime::ParseExact overload loses that XmlConvert-specific style contract.
+    const auto surrounded = XmlConvert::ToDateTime(
+        " \t2024-06-15 13:45:30\r\n", "yyyy-MM-dd HH:mm:ss");
+    EXPECT_EQ(surrounded, System::DateTime(2024, 6, 15, 13, 45, 30));
 }
 
 TEST(XmlConvertDateTimeMode1945Tests, TheModeMatrixStampsTwiceAndConvertsTwice) {
@@ -527,4 +568,103 @@ TEST(XmlConvertDateTimeMode1945Tests, ToDateTimeOffsetHonoursItsFormatToo) {
               System::TimeZone::CurrentTimeZone().GetUtcOffset(parsed.getDateTimeProperty()));
 
     EXPECT_THROW(XmlConvert::ToDateTimeOffset("2024-06-15", "HH:mm:ss"), System::FormatException);
+
+    // The real DateTimeOffset exact parser must see the zone token. The obsolete composition via
+    // DateTime::ParseExact could neither capture +05:30 nor preserve the visible wall clock, and
+    // also rejected XmlConvert's documented outer whitespace.
+    const auto explicitOffset = XmlConvert::ToDateTimeOffset(
+        " \t2024-06-15T13:45:30+05:30\r\n", "yyyy-MM-dd'T'HH:mm:sszzz");
+    EXPECT_EQ(explicitOffset.getDateTimeProperty(),
+              System::DateTime(2024, 6, 15, 13, 45, 30));
+    EXPECT_EQ(explicitOffset.getOffsetProperty(), System::TimeSpan::FromMinutes(330));
 }
+
+TEST(XmlConvertDateTimeMode1945Tests, DateTimeOffsetUsesTheXsdRoundTripShape) {
+    using System::Xml::XmlConvert;
+
+    const System::DateTimeOffset value(
+        System::DateTime(2024, 6, 15, 13, 45, 30).AddTicks(5'000'000),
+        System::TimeSpan::FromMinutes(330));
+    const std::string written = XmlConvert::ToString(value);
+    EXPECT_EQ(written, "2024-06-15T13:45:30.5+05:30");
+
+    const auto roundtrip = XmlConvert::ToDateTimeOffset(written);
+    EXPECT_TRUE(roundtrip.EqualsExact(value));
+
+    const System::DateTimeOffset wholeSecond(
+        System::DateTime(2024, 6, 15, 13, 45, 30), System::TimeSpan::FromHours(-4));
+    EXPECT_EQ(XmlConvert::ToString(wholeSecond), "2024-06-15T13:45:30-04:00");
+
+    const System::DateTimeOffset zulu(
+        System::DateTime(2024, 6, 15, 13, 45, 30), System::TimeSpan::Zero);
+    const std::string zuluText = XmlConvert::ToString(zulu);
+    EXPECT_EQ(zuluText, "2024-06-15T13:45:30Z");
+    EXPECT_TRUE(XmlConvert::ToDateTimeOffset(zuluText).EqualsExact(zulu));
+}
+
+TEST(XmlConvertDateTimeMode1945Tests, XsdNumericZoneIsBoundedAtExactlyFourteenHours) {
+    using System::Xml::XmlConvert;
+
+    EXPECT_NO_THROW((void)XmlConvert::ToDateTime("2024-06-15T12:00:00+14:00"));
+    EXPECT_NO_THROW((void)XmlConvert::ToDateTime("2024-06-15T12:00:00-14:00"));
+    EXPECT_THROW((void)XmlConvert::ToDateTime("2024-06-15T12:00:00+14:01"),
+                 System::FormatException);
+    EXPECT_THROW((void)XmlConvert::ToDateTime("2024-06-15T12:00:00-14:01"),
+                 System::FormatException);
+    EXPECT_THROW((void)XmlConvert::ToDateTime("2024-06-15T12:00:00+14:59"),
+                 System::FormatException);
+
+    // XML outer whitespace is collapsed before the marker is classified. It must neither erase
+    // a valid kind/offset nor hide an invalid offset from the XSD-specific bound.
+    const auto zulu = XmlConvert::ToDateTime(
+        " \t2024-06-15T12:00:00Z \r\n",
+        System::Xml::XmlDateTimeSerializationMode::RoundtripKind);
+    EXPECT_EQ(zulu.getKindProperty(), System::DateTimeKind::Utc);
+    EXPECT_EQ(zulu.getTicksProperty(), System::DateTime(2024, 6, 15, 12, 0, 0).getTicksProperty());
+
+    EXPECT_EQ(XmlConvert::ToDateTimeOffset(" 2024-06-15T12:00:00Z \t")
+                  .getOffsetProperty(),
+              System::TimeSpan::Zero);
+    EXPECT_EQ(XmlConvert::ToDateTimeOffset(" 2024-06-15T12:00:00+05:30 \r\n")
+                  .getOffsetProperty(),
+              System::TimeSpan::FromMinutes(330));
+    EXPECT_THROW((void)XmlConvert::ToDateTime(" 2024-06-15T12:00:00+14:01 "),
+                 System::FormatException);
+    EXPECT_THROW((void)XmlConvert::ToDateTimeOffset(" 2024-06-15T12:00:00+14:01 "),
+                 System::FormatException);
+}
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+TEST(XmlConvertDateTimeMode1945Tests, NumericOffsetRangeEdgesUseXsdCompatibilityClamping) {
+    using System::Xml::XmlConvert;
+    ScopedXmlTimeZone tz("UTC-02"); // fixed process-local UTC+02:00
+
+    const auto rescued = XmlConvert::ToDateTime("0001-01-01T00:00:00+01:00");
+    EXPECT_EQ(rescued.getKindProperty(), System::DateTimeKind::Local);
+    EXPECT_EQ(rescued.getTicksProperty(), System::TimeSpan::TicksPerHour);
+
+    const auto belowMin = XmlConvert::ToDateTime("0001-01-01T00:00:00+05:00");
+    EXPECT_EQ(belowMin.getKindProperty(), System::DateTimeKind::Local);
+    EXPECT_EQ(belowMin.getTicksProperty(), System::DateTime::MinValue.getTicksProperty());
+
+    const auto aboveMax = XmlConvert::ToDateTime("9999-12-31T23:59:59-05:00");
+    EXPECT_EQ(aboveMax.getKindProperty(), System::DateTimeKind::Local);
+    EXPECT_EQ(aboveMax.getTicksProperty(), System::DateTime::MaxValue.getTicksProperty());
+}
+
+TEST(XmlConvertDateTimeMode1945Tests, OffsetlessDateTimeOffsetUsesTheParsedDatesDstOffset) {
+    using System::Xml::XmlConvert;
+    ScopedXmlTimeZone tz("EST5EDT,M3.2.0/2,M11.1.0/2");
+
+    const auto winter = XmlConvert::ToDateTimeOffset("2025-01-15T12:00:00");
+    const auto summer = XmlConvert::ToDateTimeOffset("2025-07-15T12:00:00");
+    EXPECT_EQ(winter.getOffsetProperty(), System::TimeSpan::FromHours(-5));
+    EXPECT_EQ(summer.getOffsetProperty(), System::TimeSpan::FromHours(-4));
+
+    EXPECT_EQ(XmlConvert::ToDateTimeOffset("2025-07-15T12:00:00Z").getOffsetProperty(),
+              System::TimeSpan::Zero);
+    EXPECT_EQ(XmlConvert::ToDateTimeOffset("2025-07-15T12:00:00+05:30")
+                  .getOffsetProperty(),
+              System::TimeSpan::FromMinutes(330));
+}
+#endif

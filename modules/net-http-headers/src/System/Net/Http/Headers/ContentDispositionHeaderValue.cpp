@@ -4,7 +4,7 @@
 #include "System/Net/Http/Headers/ContentDispositionHeaderValue.hpp"
 #include "HeaderFieldSplitter.hpp"
 #include "System/Net/detail/ProtocolFieldValidation.hpp"
-#include "HttpDateParser.hpp"
+#include "System/Net/detail/HttpDateParser.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"

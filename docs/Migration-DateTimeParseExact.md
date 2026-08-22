@@ -8,6 +8,13 @@ input changed, and no consumer needs to be edited or rebuilt for this.** It is r
 the ticket it came out of, #1942, is *not* closed by it, and because two of .NET's standard
 patterns are transcribed with a named loss.
 
+> **Current-state note (post-#1942).** The body of this document records the deliberately narrow
+> #2414 checkpoint. #1942 subsequently added the `DateTimeStyles` overloads, admitted `z`/`K` for
+> DateTime, restored `K` to the `o`/`O` pattern, and takes an explicit `ILocalTimeZone` whenever a
+> style must convert. The providerless, zone-free shapes below still return Unspecified when their
+> input carries no zone; the historical claims that *every* format has no zone token and *every*
+> result is Unspecified are not the current full API contract.
+
 ## What was there before
 
 `System::DateTime`'s entire parse surface was:
@@ -65,16 +72,17 @@ separator where `u` uses a space, and `R` ends in a literal `GMT` the date-only 
 | `s` | `yyyy-MM-ddTHH:mm:ss` | .NET's, in full. |
 | `u` | `yyyy-MM-dd HH:mm:ss'Z'` | .NET's, in full. The `Z` is a **literal**, not a zone token, so it is required and sets no kind. |
 | `R`/`r` | `ddd, dd MMM yyyy HH:mm:ss 'GMT'` | .NET's, in full. Validates the weekday. |
-| `o`/`O` | `yyyy-MM-ddTHH:mm:ss.fffffff` | **.NET's is `…fffffffK`.** `K` renders as the empty string for a `DateTimeKind::Unspecified` value, so this is exactly .NET's `o` for that kind and **refuses** the `Z` and `+hh:mm` forms .NET accepts. |
+| `o`/`O` | `yyyy-MM-ddTHH:mm:ss.fffffff` | **At the #2414 checkpoint**, .NET's trailing `K` was absent. #1942 restored it and admitted the corresponding zone token. |
 
-**This port's exact grammar carries no zone token at all** — `z`, `K` and `g` are rejected in every
-mode — which is the boundary the `o` row runs into. A later ticket adding a zone token has to
-revisit that row by name; the test pins both halves so it cannot be changed silently.
+**At the #2414 checkpoint the exact grammar carried no zone token at all** — `z`, `K` and `g` were
+rejected in every mode — which was the boundary the `o` row ran into. #1942 moved that boundary by
+admitting `z`/`K` for DateTime and DateTimeOffset while retaining `g` as the separate unsupported
+era token. The old declaration pin was inverted rather than deleted.
 
-## What this deliberately does not do, and why it is a decision rather than an omission
+## What #2414 deliberately did not do, and how #1942 closed it
 
-**The `DateTimeStyles`-taking overloads are absent and are pinned as absent.** They need a local
-time zone that this signature has nowhere to get:
+**The `DateTimeStyles`-taking overloads were absent and pinned as absent at this checkpoint.** They
+needed a local time zone that the original signature had nowhere to get:
 
 * `AssumeLocal` and `AssumeUniversal` only **stamp** a kind — those would be fine.
 * `AdjustToUniversal` must **convert**, and conversion needs a zone. .NET reaches
@@ -84,10 +92,9 @@ time zone that this signature has nowhere to get:
 * `RoundtripKind` has **nothing to preserve**, because the grammar carries no zone token, so an
   input can never state its own kind.
 
-That is a user decision of the same shape as SA-15.1's and was not taken here. .NET's validation
-contract is transcribed in #2414's ticket record for whoever takes it
-(`DateTimeFormatInfo.cs:1720-1743`: three rules, three different messages, and a parameter name
-that varies by overload).
+That was a user decision of the same shape as SA-15.1's and was not taken in #2414. #1942 later
+took it consistently: the new overloads accept `ILocalTimeZone*`, require it only on a converting
+path, and retain the no-zone call for every style/input combination that does not convert.
 
 ## Behaviour worth knowing
 
@@ -96,8 +103,9 @@ that varies by overload).
   a format binding only a time is **refused**, because `NoCurrentDateDefault` — the style that
   decides what happens then — is #1942's, and inventing a default under a ticket that has not been
   asked about it is what this refusal prevents.
-* **The kind is always `Unspecified`**, for every input and every format. A caller must not read
-  that as "the parser decided it was local".
+* **At #2414 the kind was always `Unspecified`**, for every input and format then supported. The
+  post-#1942 style-taking surface can now return Local or Utc; an unqualified, zone-free input with
+  no kind-affecting style remains Unspecified.
 * **The twelve-hour clock is neither `+12` nor a no-op**: 12 AM is hour 0 and 12 PM is hour 12, so
   both ends are special cases. Mutation M5 writes it as a plain `+ 12` and is caught.
 

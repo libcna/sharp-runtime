@@ -4,7 +4,9 @@
 #include <gtest/gtest.h>
 #include "System/TimeZone.hpp"
 #include "System/DateTime.hpp"
+#include "System/DateTimeOffset.hpp"
 #include "System/TimeSpan.hpp"
+#include "System/detail/ProcessTimeZoneState.hpp"
 
 using System::TimeZone;
 using System::DateTime;
@@ -93,8 +95,13 @@ TEST(TimeZoneTest, PolymorphicRef) {
 // whatever zone is selected when the call happens, which is what makes it testable.
 // ---------------------------------------------------------------------------
 
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+
 #include <cstdlib>
+#include <chrono>
+#include <future>
 #include <memory>
+#include <mutex>
 #include <string>
 #include "System/TimeZoneInfo.hpp"
 
@@ -107,6 +114,7 @@ class ScopedTestTz {
 
 public:
     explicit ScopedTestTz(const char* zone) {
+        std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
         const char* current = getenv("TZ");
         wasSet_ = current != nullptr;
         if (wasSet_) saved_ = current;
@@ -116,6 +124,7 @@ public:
     ScopedTestTz(const ScopedTestTz&)            = delete;
     ScopedTestTz& operator=(const ScopedTestTz&) = delete;
     ~ScopedTestTz() {
+        std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
         if (wasSet_) setenv("TZ", saved_.c_str(), 1);
         else         unsetenv("TZ");
         tzset();
@@ -305,6 +314,110 @@ TEST(TimeZoneTest, CurrentTimeZone_RepeatedCallsForOneDateAgree) {
               TimeZone::CurrentTimeZone().IsDaylightSavingTime(when));
 }
 
+TEST(TimeZoneTest, CurrentTimeZone_UtcKindUsesThePublicUtcSemantics) {
+    if (!zoneInstalled("America/New_York")) GTEST_SKIP() << "America/New_York is not installed";
+    ScopedTestTz tz("America/New_York");
+    const TimeZone& ctz = TimeZone::CurrentTimeZone();
+
+    const DateTime utc = DateTime::SpecifyKind(
+        DateTime(2025, 7, 15, 12, 0, 0), System::DateTimeKind::Utc);
+    EXPECT_EQ(ctz.GetUtcOffset(utc), TimeSpan::Zero);
+    EXPECT_FALSE(ctz.IsDaylightSavingTime(utc));
+
+    // Identical calendar fields with Local or Unspecified Kind are local wall-clock questions.
+    const DateTime unspecified(2025, 7, 15, 12, 0, 0);
+    const DateTime local = DateTime::SpecifyKind(unspecified, System::DateTimeKind::Local);
+    EXPECT_EQ(offsetMinutesFor(unspecified), -240);
+    EXPECT_EQ(offsetMinutesFor(local), -240);
+    EXPECT_TRUE(ctz.IsDaylightSavingTime(unspecified));
+    EXPECT_TRUE(ctz.IsDaylightSavingTime(local));
+}
+
+TEST(TimeZoneTest, ToLocalTime_SelectsOffsetByUtcInstantAcrossDstBoundaries) {
+    if (!zoneInstalled("America/New_York")) GTEST_SKIP() << "America/New_York is not installed";
+    ScopedTestTz tz("America/New_York");
+    const TimeZone& ctz = TimeZone::CurrentTimeZone();
+
+    const DateTime beforeSpring = DateTime::SpecifyKind(
+        DateTime(2025, 3, 9, 6, 30, 0), System::DateTimeKind::Utc);
+    const DateTime afterSpring = DateTime::SpecifyKind(
+        DateTime(2025, 3, 9, 7, 30, 0), System::DateTimeKind::Utc);
+    const DateTime beforeFall = DateTime::SpecifyKind(
+        DateTime(2025, 11, 2, 5, 30, 0), System::DateTimeKind::Utc);
+    const DateTime afterFall = DateTime::SpecifyKind(
+        DateTime(2025, 11, 2, 6, 30, 0), System::DateTimeKind::Utc);
+
+    const DateTime springStandard = beforeSpring.ToLocalTime(ctz);
+    const DateTime springDaylight = afterSpring.ToLocalTime(ctz);
+    const DateTime fallDaylight = beforeFall.ToLocalTime(ctz);
+    const DateTime fallStandard = afterFall.ToLocalTime(ctz);
+
+    EXPECT_EQ(ctz.GetUtcOffsetFromUniversalTime(beforeSpring).getTotalMinutesProperty(), -300);
+    EXPECT_EQ(ctz.GetUtcOffsetFromUniversalTime(afterSpring).getTotalMinutesProperty(), -240);
+    EXPECT_EQ(ctz.GetUtcOffsetFromUniversalTime(beforeFall).getTotalMinutesProperty(), -240);
+    EXPECT_EQ(ctz.GetUtcOffsetFromUniversalTime(afterFall).getTotalMinutesProperty(), -300);
+
+    EXPECT_EQ(springStandard, DateTime(2025, 3, 9, 1, 30, 0));
+    EXPECT_EQ(springDaylight, DateTime(2025, 3, 9, 3, 30, 0));
+    EXPECT_EQ(fallDaylight, DateTime(2025, 11, 2, 1, 30, 0));
+    EXPECT_EQ(fallStandard, DateTime(2025, 11, 2, 1, 30, 0));
+    EXPECT_EQ(springStandard.getKindProperty(), System::DateTimeKind::Local);
+    EXPECT_EQ(springDaylight.getKindProperty(), System::DateTimeKind::Local);
+    EXPECT_EQ(fallDaylight.getKindProperty(), System::DateTimeKind::Local);
+    EXPECT_EQ(fallStandard.getKindProperty(), System::DateTimeKind::Local);
+
+    // Neither spring value is ambiguous, so both directions must be exact. The second fall
+    // occurrence is the standard reading selected for a field-only Local DateTime and is exact
+    // too. The first fall occurrence needs .NET's hidden LocalAmbiguousDst marker, which this
+    // practical subset still does not produce, so no false round-trip promise is made for it.
+    EXPECT_EQ(springStandard.ToUniversalTime(ctz), beforeSpring);
+    EXPECT_EQ(springDaylight.ToUniversalTime(ctz), afterSpring);
+    EXPECT_EQ(fallStandard.ToUniversalTime(ctz), afterFall);
+}
+
+TEST(TimeZoneTest, ProcessTimeZoneMutexSerializesCoreReadersAndZoneSelection) {
+    if (!zoneInstalled("Asia/Tokyo")) GTEST_SKIP() << "Asia/Tokyo is not installed";
+    using namespace std::chrono_literals;
+
+    std::promise<void> dateTimeStarted;
+    std::promise<void> offsetStarted;
+    std::promise<void> lookupStarted;
+    auto dateTimeReady = dateTimeStarted.get_future();
+    auto offsetReady = offsetStarted.get_future();
+    auto lookupReady = lookupStarted.get_future();
+
+    std::unique_lock<std::mutex> lock(System::detail::processTimeZoneMutex());
+    auto dateTimeFuture = std::async(std::launch::async, [&dateTimeStarted] {
+        dateTimeStarted.set_value();
+        return DateTime::getNowProperty();
+    });
+    auto offsetFuture = std::async(std::launch::async, [&offsetStarted] {
+        offsetStarted.set_value();
+        return System::DateTimeOffset::getNowProperty();
+    });
+    auto lookupFuture = std::async(std::launch::async, [&lookupStarted] {
+        lookupStarted.set_value();
+        std::shared_ptr<System::TimeZoneInfo> zone;
+        return System::TimeZoneInfo::TryFindSystemTimeZoneById("Asia/Tokyo", zone);
+    });
+
+    dateTimeReady.wait();
+    offsetReady.wait();
+    lookupReady.wait();
+    EXPECT_EQ(dateTimeFuture.wait_for(100ms), std::future_status::timeout);
+    EXPECT_EQ(offsetFuture.wait_for(100ms), std::future_status::timeout);
+    EXPECT_EQ(lookupFuture.wait_for(100ms), std::future_status::timeout);
+
+    lock.unlock();
+    EXPECT_EQ(dateTimeFuture.wait_for(2s), std::future_status::ready);
+    EXPECT_EQ(offsetFuture.wait_for(2s), std::future_status::ready);
+    EXPECT_EQ(lookupFuture.wait_for(2s), std::future_status::ready);
+    EXPECT_EQ(dateTimeFuture.get().getKindProperty(), System::DateTimeKind::Local);
+    EXPECT_EQ(offsetFuture.get().getDateTimeProperty().getKindProperty(),
+              System::DateTimeKind::Unspecified);
+    EXPECT_TRUE(lookupFuture.get());
+}
+
 TEST(TimeZoneTest, FindSystemTimeZoneById_RestoresAPreviouslySetTz) {
     ScopedTestTz tz("Europe/Prague");
     std::shared_ptr<System::TimeZoneInfo> found;
@@ -340,16 +453,26 @@ TEST(TimeZoneTest, FindSystemTimeZoneById_RestoresTzAfterAFailedLookup) {
 }
 
 TEST(TimeZoneTest, FindSystemTimeZoneById_LeavesTzUnsetWhenItWasUnset) {
-    const char* original = getenv("TZ");
-    std::string saved = original ? original : "";
-    bool wasSet = original != nullptr;
-    unsetenv("TZ");
-    tzset();
+    std::string saved;
+    bool wasSet = false;
+    {
+        std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
+        const char* original = getenv("TZ");
+        saved = original ? original : "";
+        wasSet = original != nullptr;
+        unsetenv("TZ");
+        tzset();
+    }
     std::shared_ptr<System::TimeZoneInfo> found;
     (void)System::TimeZoneInfo::TryFindSystemTimeZoneById("Asia/Tokyo", found);
-    const char* after = getenv("TZ");
-    const bool stillUnset = after == nullptr;
-    if (wasSet) setenv("TZ", saved.c_str(), 1);
-    tzset();
+    bool stillUnset = false;
+    {
+        std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
+        stillUnset = getenv("TZ") == nullptr;
+        if (wasSet) setenv("TZ", saved.c_str(), 1);
+        tzset();
+    }
     EXPECT_TRUE(stillUnset);
 }
+
+#endif // !defined(_WIN32) && !defined(__EMSCRIPTEN__)

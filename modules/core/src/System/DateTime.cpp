@@ -15,9 +15,11 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <string_view>
 #include "System/detail/InvariantExactDateTimeParser.hpp"
 #include "System/Globalization/DateTimeStyles.hpp"
 #include "System/ArgumentNullException.hpp"
+#include "System/detail/ProcessTimeZoneState.hpp"
 
 namespace System {
 
@@ -25,23 +27,54 @@ namespace System {
     // Private helpers
     // -------------------------------------------------------------------------
 
-    // Converts ticks() to a UTC std::tm via the C library.
-    // Uses int64 time_t so pre-1970 dates (negative Unix timestamp) work on
-    // 64-bit Linux/MSVC builds.
+    // Decomposes the full DateTime range arithmetically. MSVC's `_gmtime64_s` accepts only
+    // 1970-01-01 through 3000-12-31, while DateTime promises years 1 through 9999; feeding a
+    // failed CRT result into the public component properties also broke the Windows timezone
+    // adapter for historical/future values. The Gregorian cycle below is .NET's GetDatePart
+    // decomposition and has no platform timestamp range.
     std::tm DateTime::toTm() const {
-        const longcs unixTicks = ticks() - UnixEpochTicks;
-        // Floor division toward -inf (C++ truncates toward 0, which is wrong
-        // for negative values — e.g. pre-1970 dates lose 1 second).
-        longcs q = unixTicks / TicksPerSecond;
-        const longcs r = unixTicks % TicksPerSecond;
-        if (r < 0) --q;
-        const time_t unixSec = static_cast<time_t>(q);
+        static constexpr int daysPerYear = 365;
+        static constexpr int daysPer4Years = daysPerYear * 4 + 1;
+        static constexpr int daysPer100Years = daysPer4Years * 25 - 1;
+        static constexpr int daysPer400Years = daysPer100Years * 4 + 1;
+        static constexpr int daysToMonth365[] =
+            {0,31,59,90,120,151,181,212,243,273,304,334,365};
+        static constexpr int daysToMonth366[] =
+            {0,31,60,91,121,152,182,213,244,274,305,335,366};
+
+        const longcs rawTicks = ticks();
+        int remainingDays = static_cast<int>(rawTicks / TicksPerDay);
+        const int absoluteDays = remainingDays;
+
+        const int years400 = remainingDays / daysPer400Years;
+        remainingDays -= years400 * daysPer400Years;
+        int years100 = remainingDays / daysPer100Years;
+        if (years100 == 4) years100 = 3;
+        remainingDays -= years100 * daysPer100Years;
+        const int years4 = remainingDays / daysPer4Years;
+        remainingDays -= years4 * daysPer4Years;
+        int years1 = remainingDays / daysPerYear;
+        if (years1 == 4) years1 = 3;
+
+        const int year = years400 * 400 + years100 * 100 + years4 * 4 + years1 + 1;
+        remainingDays -= years1 * daysPerYear;
+        const bool leap = years1 == 3 && (years4 != 24 || years100 == 3);
+        const int* daysToMonth = leap ? daysToMonth366 : daysToMonth365;
+        int month = (remainingDays >> 5) + 1;
+        while (remainingDays >= daysToMonth[month]) ++month;
+
+        longcs timeTicks = rawTicks % TicksPerDay;
         std::tm result{};
-#ifdef _WIN32
-        gmtime_s(&result, &unixSec);
-#else
-        gmtime_r(&unixSec, &result);
-#endif
+        result.tm_year = year - 1900;
+        result.tm_mon = month - 1;
+        result.tm_mday = remainingDays - daysToMonth[month - 1] + 1;
+        result.tm_yday = remainingDays;
+        result.tm_wday = (absoluteDays + 1) % 7; // 0001-01-01 was Monday; tm Sunday is zero.
+        result.tm_hour = static_cast<int>(timeTicks / TicksPerHour);
+        timeTicks %= TicksPerHour;
+        result.tm_min = static_cast<int>(timeTicks / TicksPerMinute);
+        timeTicks %= TicksPerMinute;
+        result.tm_sec = static_cast<int>(timeTicks / TicksPerSecond);
         return result;
     }
 
@@ -129,6 +162,21 @@ namespace System {
             if (raw > static_cast<unsigned int>(DateTimeKind::Local))
                 throw System::ArgumentException("Invalid DateTimeKind value.", "kind");
         }
+
+        // DateTimeOffset's Core-local current-time path established this platform policy:
+        // reentrant C-library conversion on hosted platforms, and UTC-as-local on Emscripten.
+        // Keep DateTime in Core.Base rather than reaching up into the TimeZone component (which
+        // depends on Core.Base), while still avoiding std::localtime's shared result buffer.
+        bool tryGetCurrentLocalTime(std::time_t unixSeconds, std::tm& result) {
+#if defined(_WIN32)
+            return ::localtime_s(&result, &unixSeconds) == 0;
+#elif defined(__EMSCRIPTEN__)
+            return ::gmtime_r(&unixSeconds, &result) != nullptr;
+#else
+            std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
+            return ::localtime_r(&unixSeconds, &result) != nullptr;
+#endif
+        }
     }
 
     DateTime::DateTime(longcs ticks)
@@ -151,8 +199,9 @@ namespace System {
     DateTimeKind DateTime::getKindProperty() const {
         // .NET's bit trick, transcribed with its own comment: "values 0-2 map directly to
         // DateTimeKind, 3 (LocalAmbiguousDst) needs to be mapped to 2 (Local) using bit0 NAND
-        // bit1" (DateTime.cs:1463-1465). Nothing in phase 1 sets the fourth encoding; the fold is
-        // reproduced so that phase 2 can start setting it without touching this accessor.
+        // bit1" (DateTime.cs:1463-1465). Current conversion paths still do not set the fourth
+        // encoding; keeping the fold lets a future ambiguity-capable path do so without changing
+        // this accessor or the arithmetic that now preserves the raw InternalKind bits.
         const auto kind = static_cast<unsigned int>(dateData_ >> kKindShift);
         return static_cast<DateTimeKind>(kind & ~(kind >> 1));
     }
@@ -177,6 +226,15 @@ namespace System {
     // -------------------------------------------------------------------------
 
     longcs DateTime::getTicksProperty() const { return ticks(); }
+
+    DateTime DateTime::withTicksPreservingKind(longcs replacementTicks) const {
+        DateTime result(replacementTicks);
+        // Preserve InternalKind, not merely the public Kind. The fourth packed state reports as
+        // Local through getKindProperty(), so reconstructing via that accessor would silently
+        // erase the ambiguous-DST marker. .NET's AddTicks/AddMonths/Subtract do the same raw OR.
+        result.dateData_ |= dateData_ & FlagsMask;
+        return result;
+    }
 
     int DateTime::getYearProperty()        const { return toTm().tm_year + 1900; }
     int DateTime::getMonthProperty()       const { return toTm().tm_mon  + 1;    }
@@ -241,7 +299,7 @@ namespace System {
         const auto diff = static_cast<SharpRuntime::ulongcs>(ticks()) - static_cast<SharpRuntime::ulongcs>(value.getTicksProperty());
         if (diff > static_cast<SharpRuntime::ulongcs>(MaxTicks))
             throw System::ArgumentOutOfRangeException("value", "Value to add was out of range.");
-        return DateTime(static_cast<longcs>(diff));
+        return withTicksPreservingKind(static_cast<longcs>(diff));
     }
 
     TimeSpan DateTime::Subtract(const DateTime& value) const {
@@ -258,7 +316,7 @@ namespace System {
         const auto newTicks = static_cast<SharpRuntime::ulongcs>(ticks()) + static_cast<SharpRuntime::ulongcs>(value);
         if (newTicks > static_cast<SharpRuntime::ulongcs>(MaxTicks))
             throw System::ArgumentOutOfRangeException("value", "Value to add was out of range.");
-        return DateTime(static_cast<longcs>(newTicks));
+        return withTicksPreservingKind(static_cast<longcs>(newTicks));
     }
 
     DateTime DateTime::AddMonths(int months) const {
@@ -279,7 +337,7 @@ namespace System {
 
         const int d = std::min(day, DaysInMonth(y, m));
         const longcs timeOfDay = ticks() % TicksPerDay;
-        return DateTime(dateToTicks(y, m, d) + timeOfDay);
+        return withTicksPreservingKind(dateToTicks(y, m, d) + timeOfDay);
     }
 
     DateTime DateTime::AddYears(int value) const {
@@ -308,24 +366,45 @@ namespace System {
 
     const DateTime DateTime::MinValue{0LL};
     const DateTime DateTime::MaxValue{DateTime::MaxTicks};
-    const DateTime DateTime::UnixEpoch{DateTime::UnixEpochTicks};
+    const DateTime DateTime::UnixEpoch{DateTime::UnixEpochTicks, DateTimeKind::Utc};
 
     DateTime DateTime::getNowProperty() {
         using namespace std::chrono;
-        const auto now      = system_clock::now();
-        const auto duration = now.time_since_epoch();
-        const auto secs     = duration_cast<seconds>(duration);
-        const auto sub      = duration - secs;
-        const longcs ticks  = UnixEpochTicks
-            + static_cast<longcs>(secs.count()) * TicksPerSecond
-            + static_cast<longcs>(duration_cast<nanoseconds>(sub).count() / 100);
-        return DateTime(ticks);
+        const auto now = system_clock::now();
+        const auto sinceUnixEpoch = now.time_since_epoch();
+        // floor() rather than duration_cast() keeps the sub-second remainder non-negative even
+        // for a clock before 1970. The current clock is ordinarily positive, but this costs
+        // nothing and makes the UTC fallback's arithmetic correct over the whole time_t domain.
+        const auto wholeSeconds = floor<seconds>(sinceUnixEpoch);
+        const auto subSecond = sinceUnixEpoch - wholeSeconds;
+        const longcs subSecondTicks = static_cast<longcs>(
+            duration_cast<nanoseconds>(subSecond).count() / 100);
+        const std::time_t unixSeconds = static_cast<std::time_t>(wholeSeconds.count());
+
+        std::tm local{};
+        if (!tryGetCurrentLocalTime(unixSeconds, local)) {
+            // There is no useful exception contract for a failed platform clock conversion.
+            // Preserve the instant and the required Local kind with a zero-offset fallback,
+            // matching Core's Emscripten policy rather than returning an invalid DateTime.
+            const longcs utcTicks = UnixEpochTicks
+                + static_cast<longcs>(wholeSeconds.count()) * TicksPerSecond + subSecondTicks;
+            return DateTime(utcTicks, DateTimeKind::Local);
+        }
+
+        // The DateTime tick payload of a Local value is the local WALL CLOCK, not the UTC
+        // instant. Building from local calendar fields handles fractional-hour offsets and DST
+        // without asking Core.Base to name a TimeZone type; retain the original sub-second ticks.
+        const longcs localTicks = dateToTicks(
+            local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
+            local.tm_hour, local.tm_min, local.tm_sec) + subSecondTicks;
+        return DateTime(localTicks, DateTimeKind::Local);
     }
 
     DateTime DateTime::getTodayProperty() {
         const DateTime now = getNowProperty();
-        // Truncate to midnight
-        return DateTime(now.ticks() - (now.ticks() % TicksPerDay));
+        // Today is Now.Date in .NET. Going through the same kind-preserving arithmetic primitive
+        // pins both parts of that contract: local wall-clock midnight and Kind Local.
+        return now.AddTicks(-(now.ticks() % TicksPerDay));
     }
 
     TimeSpan DateTime::getTimeOfDayProperty() const {
@@ -341,22 +420,30 @@ namespace System {
     // while ToUniversalTime returns early only for Utc (:1772) so Unspecified converts as local.
     DateTime DateTime::ToLocalTime(const ILocalTimeZone& zone) const {
         if (getKindProperty() == DateTimeKind::Local) return *this;
-        const longcs offset = zone.GetUtcOffset(*this).getTicksProperty();
-        const longcs shifted = ticks() + offset;
+        const longcs offset = zone.GetUtcOffsetFromUniversalTime(*this).getTicksProperty();
         // :1718-1721 -- clamp rather than throw. A conversion at the very edge of the range is a
-        // representable answer in .NET and must not become an exception here.
-        if (shifted < 0) return DateTime(0LL, DateTimeKind::Local);
-        if (shifted > MaxTicks) return DateTime(MaxTicks, DateTimeKind::Local);
-        return DateTime(shifted, DateTimeKind::Local);
+        // representable answer in .NET and must not become an exception here. Test the bounds
+        // BEFORE adding: ILocalTimeZone is public and may return TimeSpan::MinValue/MaxValue, so
+        // computing `ticks() + offset` first would itself be signed-overflow UB.
+        const longcs currentTicks = ticks();
+        if (offset > MaxTicks - currentTicks)
+            return DateTime(MaxTicks, DateTimeKind::Local);
+        if (offset < -currentTicks)
+            return DateTime(0LL, DateTimeKind::Local);
+        return DateTime(currentTicks + offset, DateTimeKind::Local);
     }
 
     DateTime DateTime::ToUniversalTime(const ILocalTimeZone& zone) const {
         if (getKindProperty() == DateTimeKind::Utc) return *this;
         const longcs offset = zone.GetUtcOffset(*this).getTicksProperty();
-        const longcs shifted = ticks() - offset;
-        if (shifted < 0) return DateTime(0LL, DateTimeKind::Utc);
-        if (shifted > MaxTicks) return DateTime(MaxTicks, DateTimeKind::Utc);
-        return DateTime(shifted, DateTimeKind::Utc);
+        const longcs currentTicks = ticks();
+        // Likewise, never negate offset: `-TimeSpan::MinValue` is not representable. The two
+        // rearranged comparisons use only values already inside DateTime's [0, MaxTicks] range.
+        if (offset > currentTicks)
+            return DateTime(0LL, DateTimeKind::Utc);
+        if (offset < currentTicks - MaxTicks)
+            return DateTime(MaxTicks, DateTimeKind::Utc);
+        return DateTime(currentTicks - offset, DateTimeKind::Utc);
     }
 
     std::string DateTime::ToString() const {
@@ -384,10 +471,6 @@ namespace System {
         // anything else is asked through GetFormat.
         const System::Globalization::DateTimeFormatInfo& info =
             System::Globalization::DateTimeFormatInfo::GetInstance(provider);
-        const std::array<std::string, 13> abbreviatedMonths = info.getAbbreviatedMonthNamesProperty();
-        const std::array<std::string, 13> fullMonths = info.getMonthNamesProperty();
-        const std::array<std::string, 7> abbreviatedDays = info.getAbbreviatedDayNamesProperty();
-        const std::array<std::string, 7> fullDays = info.getDayNamesProperty();
 
         // ---------------------------------------------------------------------------------
         // #2416: THE STANDARD-FORMAT TABLE, WHICH THIS MEMBER NEVER CONSULTED.
@@ -405,7 +488,15 @@ namespace System {
         // letter.
         std::string expanded = format;
         if (format.size() == 1) {
-            static constexpr std::string_view kStandard = "dDfFgGmMoOrRstTuUyY";
+            // `U` requires conversion through the process-local zone before formatting. This
+            // signature cannot carry one, and Core.Base cannot reach one implicitly, so reject
+            // it rather than emit the unconverted wall clock that the pattern alone produces.
+            if (format[0] == 'U') {
+                throw FormatException(
+                    "The universal full-date format requires a local time zone and is not "
+                    "supported by this overload.");
+            }
+            static constexpr std::string_view kStandard = "dDfFgGmMoOrRstTuyY";
             if (kStandard.find(format[0]) == std::string_view::npos) {
                 // .NET raises FormatException here, NOT the ArgumentException
                 // `GetAllDateTimePatterns` raises -- two members, two contracts, and emitting the
@@ -413,14 +504,23 @@ namespace System {
                 throw FormatException("Format specifier was invalid.");
             }
             expanded = info.GetAllDateTimePatterns(format[0]).front();
-        } else if (format.size() == 2 && format[0] == '%') {
-            // `%d` is .NET's spelling for a SINGLE custom specifier, and it exists precisely
-            // because a bare `d` is the short-date pattern. Without it there is no way to ask for
-            // an unpadded day at all.
-            if (format[1] == '%') throw FormatException("Format specifier was invalid.");
-            expanded = format.substr(1);
         }
-        const std::string& fmt = expanded;
+        return formatCustom(expanded, info, nullptr);
+    }
+
+    std::string DateTime::formatCustom(const std::string& format,
+                                       const System::Globalization::DateTimeFormatInfo& info,
+                                       const TimeSpan* offset) const
+    {
+        const std::array<std::string, 13> abbreviatedMonths = info.getAbbreviatedMonthNamesProperty();
+        const std::array<std::string, 13> fullMonths = info.getMonthNamesProperty();
+        const std::array<std::string, 7> abbreviatedDays = info.getAbbreviatedDayNamesProperty();
+        const std::array<std::string, 7> fullDays = info.getDayNamesProperty();
+
+        // `%d` is .NET's spelling for a SINGLE custom specifier, and it may occur anywhere in a
+        // custom pattern. DateTimeOffset reaches this same helper, so `%z` and `%K` select its
+        // one-character custom offset tokens without duplicating the rule.
+        const std::string& fmt = format;
 
         std::string result;
         result.reserve(fmt.size() + 8);
@@ -434,10 +534,43 @@ namespace System {
             return s;
         };
 
+        auto appendOffset = [&](int width) {
+            // DateTimeOffset validates offsets as whole minutes within +/-14 hours before this
+            // private helper can see them. Work in minutes so a negative sub-hour value keeps its
+            // sign (`-00:30`), then apply the three distinct .NET custom-token widths.
+            longcs totalMinutes = offset->getTicksProperty() / TimeSpan::TicksPerMinute;
+            const char sign = totalMinutes < 0 ? '-' : '+';
+            if (totalMinutes < 0) totalMinutes = -totalMinutes;
+            const int hours = static_cast<int>(totalMinutes / 60);
+            const int minutes = static_cast<int>(totalMinutes % 60);
+
+            result += sign;
+            if (width == 1) {
+                result += std::to_string(hours);
+            } else if (width == 2) {
+                result += pad(hours, 2);
+            } else if (width == 3) {
+                result += pad(hours, 2);
+                result += ':';
+                result += pad(minutes, 2);
+            } else {
+                throw FormatException("Format specifier was invalid.");
+            }
+        };
+
         size_t i = 0;
         while (i < fmt.size()) {
             char c = fmt[i];
+            bool forceSingleToken = false;
+            if (c == '%') {
+                if (i + 1 >= fmt.size() || fmt[i + 1] == '%')
+                    throw FormatException("Format specifier was invalid.");
+                ++i;
+                c = fmt[i];
+                forceSingleToken = true;
+            }
             auto run = [&](char ch) {
+                if (forceSingleToken) return 1;
                 size_t k = i + 1;
                 while (k < fmt.size() && fmt[k] == ch) ++k;
                 return static_cast<int>(k - i);
@@ -483,11 +616,23 @@ namespace System {
                 i += n;
             } else if (c == 'f') {
                 int n = run('f');
+                if (n > 7) throw FormatException("Format specifier was invalid.");
                 std::string fraction = pad(fractionTicks, 7);
-                // Approval covers f through fffffff. Preserve the old three-digit
-                // fallback for a longer unsupported run rather than widening it too.
-                const int width = (n <= 7) ? n : 3;
-                result += fraction.substr(0, static_cast<size_t>(width));
+                result += fraction.substr(0, static_cast<size_t>(n));
+                i += n;
+            } else if (c == 'F') {
+                const int n = run('F');
+                if (n > 7) throw FormatException("Format specifier was invalid.");
+                std::string fraction = pad(fractionTicks, 7).substr(0, static_cast<size_t>(n));
+                while (!fraction.empty() && fraction.back() == '0') fraction.pop_back();
+                if (fraction.empty() && !result.empty() && result.back() == '.') {
+                    // .NET removes the decimal point immediately preceding an all-optional
+                    // fraction. This is what makes `ss.FFFFFFF` valid XSD output at whole seconds
+                    // instead of leaving a dangling dot.
+                    result.pop_back();
+                } else {
+                    result += fraction;
+                }
                 i += n;
             } else if (c == 't') {
                 // AM/PM, which the formatter did not have -- so `hh:mm tt` emitted a literal `tt`
@@ -499,21 +644,38 @@ namespace System {
                 if (n == 1) result += designator.empty() ? std::string() : designator.substr(0, 1);
                 else result += designator;
                 i += n;
+            } else if (c == 'z') {
+                if (offset == nullptr) {
+                    // DateTime's `z` token needs the process-local offset for this value. The
+                    // Core.Base signature carries no zone; emitting literal `zzz` was a
+                    // plausible wrong result, so this named subset boundary fails visibly.
+                    throw FormatException(
+                        "The custom time-zone offset format requires a local time zone and is "
+                        "not supported by DateTime.ToString in Core.Base.");
+                }
+                const int n = run(c);
+                appendOffset(n >= 3 ? 3 : n);
+                i += static_cast<std::size_t>(n);
             } else if (c == 'K') {
                 // The kind marker, needed for `o` to be .NET's roundtrip pattern rather than a
                 // shape. `Unspecified` emits NOTHING, which is why `K` can also match the empty
                 // string on the parse side (#1942) -- the two rules are one rule.
-                const std::size_t n = static_cast<std::size_t>(run(c));
-                if (getKindProperty() == DateTimeKind::Utc) result += 'Z';
-                // A LOCAL value would need this process's zone, which `Core.Base` cannot name --
-                // the same boundary #1941 phase 2 and SA-16.1 recorded, here with no parameter to
-                // carry one. It is emitted as empty rather than guessed, and that is stated in
-                // the header rather than left to be discovered.
-                i += n;
-            } else if (c == '\'') {
+                if (offset != nullptr) {
+                    appendOffset(3);
+                } else {
+                    if (getKindProperty() == DateTimeKind::Utc) result += 'Z';
+                    // A LOCAL value would need this process's zone, which `Core.Base` cannot name
+                    // -- the same boundary #1941 phase 2 and SA-16.1 recorded, here with no
+                    // parameter to carry one. It is emitted as empty rather than guessed, and
+                    // that is stated in the header rather than left to be discovered.
+                }
                 ++i;
-                while (i < fmt.size() && fmt[i] != '\'') result += fmt[i++];
-                if (i < fmt.size()) ++i;
+            } else if (c == '\'' || c == '"') {
+                const char quote = c;
+                ++i;
+                while (i < fmt.size() && fmt[i] != quote) result += fmt[i++];
+                if (i >= fmt.size()) throw FormatException("Format specifier was invalid.");
+                ++i;
             } else {
                 result += c;
                 ++i;
@@ -565,9 +727,12 @@ namespace System {
         detail::DateTimeParts        parts;
         if (!detail::takeDateTimeParts(scanner, parts)) return fail();
 
-        // A trailing time-zone designator stays accepted, and stays ignored: this
-        // port has no DateTimeKind (§16.4), so "…T10:20:30Z" and
-        // "…T10:20:30.123+02:00" keep the exact values they have always had.
+        // A trailing time-zone designator stays accepted, and general Parse deliberately leaves
+        // the result Unspecified. DateTime now carries Kind, but Core.Base cannot obtain an
+        // implicit current-zone service without reversing the TimeZone -> Core.Base dependency.
+        // The explicit-zone ParseExact surface is the kind-aware conversion door; this older
+        // grammar therefore keeps "…T10:20:30Z" and "…T10:20:30.123+02:00" at their historical
+        // wall-clock values rather than pretending to perform the missing conversion.
         // §20.1's "unchanged in every option" list names both spellings, and
         // three DateTimeTests pin the offset one.
         //
@@ -756,9 +921,17 @@ namespace System {
             if (has(DateTimeStyles::RoundtripKind) && fields.zoneIsUtc) {
                 candidate = SpecifyKind(candidate, DateTimeKind::Utc);
             } else {
-                const DateTime asUtc = SpecifyKind(
-                    candidate.AddMinutes(-static_cast<double>(fields.offsetMinutes)),
-                    DateTimeKind::Utc);
+                // A Try* parse must report an offset that moves the value outside DateTime's
+                // range as `false`, not leak AddMinutes' ArgumentOutOfRangeException. Unsigned
+                // subtraction makes both the below-Min and above-Max cases well-defined and
+                // lets one comparison reject them before construction.
+                const longcs offsetTicks =
+                    static_cast<longcs>(fields.offsetMinutes) * TimeSpan::TicksPerMinute;
+                const auto utcTicks = static_cast<SharpRuntime::ulongcs>(
+                                          candidate.getTicksProperty()) -
+                                      static_cast<SharpRuntime::ulongcs>(offsetTicks);
+                if (utcTicks > static_cast<SharpRuntime::ulongcs>(MaxTicks)) return false;
+                const DateTime asUtc(static_cast<longcs>(utcTicks), DateTimeKind::Utc);
                 candidate = has(DateTimeStyles::AdjustToUniversal)
                                 ? asUtc
                                 : asUtc.ToLocalTime(requireZone(
@@ -803,6 +976,7 @@ namespace System {
                                         const System::IFormatProvider* provider,
                                         System::Globalization::DateTimeStyles styles,
                                         const System::ILocalTimeZone* zone) {
+        detail::ValidateDateTimeStyles(styles, "styles");
         DateTime result = DateTime::MinValue;
         DateTime candidate = DateTime::MinValue;
         const auto outcome = detail::MatchFirstOfManyFormats(

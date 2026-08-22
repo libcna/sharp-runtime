@@ -837,11 +837,12 @@ TEST(DateTimeOffsetTests, ToString_WithFormat_u_NonZeroOffset_ConvertsToUtc) {
 }
 
 // Regression for ticket 354: the "O" round-trip format previously omitted the fractional-second
-// component entirely, losing millisecond precision on round-trip.
+// component entirely. The post-#1941 formatter ripple now carries .NET's complete seven-digit
+// round-trip fraction rather than stopping at milliseconds.
 TEST(DateTimeOffsetTests, ToString_WithFormat_O_IncludesMilliseconds) {
     DateTime dt(2024, 6, 15, 10, 30, 0, 123);
     DateTimeOffset dto(dt, TimeSpan::FromHours(2));
-    EXPECT_EQ(dto.ToString("O"), "2024-06-15T10:30:00.123+02:00");
+    EXPECT_EQ(dto.ToString("O"), "2024-06-15T10:30:00.1230000+02:00");
 }
 
 // Regression for ticket 354: TryParse's contract is to never throw, only report failure via its

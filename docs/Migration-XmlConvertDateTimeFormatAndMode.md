@@ -55,48 +55,60 @@ reachable only by casting in from outside the enumeration.
 The switch is written **once** and shared by both doors, because .NET writes it twice and two copies
 of one matrix is how two doors come to disagree.
 
-## A limitation found by a test failing, and declared rather than hidden
+## RoundtripKind follow-up
 
-`RoundtripKind` exists to carry a kind **through a string**, and in this port **it cannot**: this
-runtime's `DateTime::ToString()` emits no kind marker — no trailing `Z`, no offset — where .NET's
-`XsdDateTime` does, and `DateTime::Parse` sets no kind from one either.
+The first #1945 implementation recorded a real limitation: `RoundtripKind` and `Unspecified` were
+then observationally identical because no XSD kind marker crossed the string boundary. That is
+historical evidence, not the current contract. The later SA-16.3/SA-16.5 follow-up closed both
+halves in the correct XML layer:
 
-Two consequences, both pinned:
+* `renderXsdDateTime` writes `Z` for Utc, a numeric local offset for Local, and no marker for
+  Unspecified;
+* `splitXsdKindMarker` reads the same three shapes and converts a numeric offset to the represented
+  instant;
+* both `ToDateTime` doors share that reader, and the permanent regression
+  `RoundtripKindNowRoundtripsThroughAString` distinguishes RoundtripKind from Unspecified.
 
-* **Through the parse door, `Local` and `Utc` always stamp and never convert**, because a parsed
-  value is always `Unspecified`. Through the format door — where the caller hands over a `DateTime`
-  that still has its kind — they convert.
-* **`RoundtripKind` and `Unspecified` are observationally identical**, measured over every input
-  kind and both doors.
-
-This is the same no-zone-token boundary #2414 recorded one level down. Closing it means teaching
-`DateTime::Parse` to set a kind from a `Z`, which is **#1942's `RoundtripKind` work** and needs the
-zone decision that ticket is waiting on. The pin fails the day it lands.
+This deliberately does not route through general `DateTime::Parse`. Core.Base cannot obtain an
+implicit local timezone without reversing the TimeZone -> Core.Base dependency; its general parser
+therefore retains the documented subset rule of consuming a zone suffix without applying it.
+`XmlConvert` can reach `TimeZone::CurrentTimeZone()` and is the layer that promises the complete
+XSD round trip.
 
 ## `ToDateTimeOffset(s, format)`
 
-.NET is `DateTimeOffset.ParseExact(s, format, InvariantCulture, DateTimeStyles.None)`, and **this
-port has no `DateTimeOffset::ParseExact`** — an exact `DateTimeOffset` needs a zone and `Core.Base`
-cannot name one, which is #1943's remaining half.
+.NET routes both format-taking doors through invariant `ParseExact` with
+`AllowLeadingWhite | AllowTrailingWhite`. #1943 later added the real
+`DateTimeOffset::ParseExact`, including explicit `zzz`/`K` capture, but the #1945 composition was
+not revisited: it still parsed a `DateTime` and attached the process-local offset. That stale body
+could not parse an explicit offset at all and rejected the outer whitespace `XmlConvert` promises.
 
-**Composing it here is not a second grammar.** With no zone token in the format — and this port's
-exact grammar has none at all — .NET's `DateTimeStyles.None` gives the result the **local** offset,
-so parsing with the one exact grammar and attaching the local zone's offset is what .NET computes,
-not an approximation of it. A later `DateTimeOffset::ParseExact` should **absorb** this body rather
-than sit beside it, and the site says so.
+#2418 closes that post-#1941 ripple. Both format-taking doors now call their own style-aware exact
+parser with `TimeZone::CurrentTimeZone()` supplied at the C++ dependency boundary:
+
+* `ToDateTime` can apply `z`/`K` semantics and accepts leading/trailing XML input whitespace;
+* `ToDateTimeOffset` captures an explicit offset (including non-hour offsets such as `+05:30`),
+  while an input without an offset still receives the process-local offset.
+
+The format grammar therefore has one owner per result type; the obsolete DateTime-plus-offset
+composition and its false claim that `DateTimeOffset::ParseExact` was absent are gone.
+
+The same consumer pass also corrected the argument-free DateTimeOffset writer. `XmlConvert` is an
+XSD conversion surface, so it now emits `yyyy-MM-ddTHH:mm:ss[.fffffff]zzz`, trims trailing
+fractional zeroes, and preserves the explicit offset. Delegating to DateTimeOffset's ordinary
+general `ToString()` had emitted a space-separated display string instead of an XSD `dateTime`.
 
 ## Evidence
 
-Seven mutations, **five caught, two proven equivalences**:
+The original seven-mutation reading was **five caught and two proven equivalences**:
 
 * M1 (discard the format again), M2 (`Unspecified` converts instead of stamping), M3 (`Utc` stamps
   instead of converting), M5 (an undefined mode passes through), M7 (a zero offset instead of the
   local one) — **caught**.
-* **M4 and M6 are equivalences, and the proof is the limitation above**: they swap the
-  `RoundtripKind` and `Unspecified` arms' bodies, and those two modes are indistinguishable through
-  the public surface. An assertion that could catch them would have to distinguish two modes this
-  port cannot distinguish, and both mutations preserve the equality the declaration test asserts.
-  The arms are kept apart because they are .NET's and because they separate when #1942 lands.
+* M4 and M6 were equivalences **at that checkpoint** because they swapped RoundtripKind and
+  Unspecified while the public surface could not distinguish them. The later marker write/read
+  implementation invalidated that equivalence and replaced its declaration pin with positive
+  round-trip coverage. They are no longer equivalent mutations against current HEAD.
 
 **Two mutations were invalid as first written and were reformulated rather than counted.** M2's
 first spelling stamped `Utc` and *then* called `ToUniversalTime`, which is a **no-op** on a `Utc`

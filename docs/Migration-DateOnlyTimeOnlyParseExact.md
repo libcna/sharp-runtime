@@ -37,7 +37,7 @@ an input mismatch and a malformed format — the approval says so, and .NET agre
 accepts only the padded form. A scanner written as *"count the specifiers, read that many digits"*
 gets the single-specifier case wrong in both directions, and a mutation to that effect is caught.
 
-`yy` uses the invariant calendar's fixed `TwoDigitYearMax` of 2029. That is a property of the
+`yy` uses the invariant calendar's fixed `TwoDigitYearMax` of 2049. That is a property of the
 **invariant culture**, not culture state, which is why it is available here even though #1929
 declined a two-digit year in the *general* parser — there the width is the discriminator and
 nothing says what was meant; here the format says it.

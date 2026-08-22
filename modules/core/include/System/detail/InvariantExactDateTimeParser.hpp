@@ -480,11 +480,11 @@ namespace System::detail {
                     if (n > 4 || fields.year >= 0) return false;
                     int value = 0;
                     if (!cursor.takeNumber(n, value)) return false;
-                    // The invariant calendar's TwoDigitYearMax is 2029, which is a FIXED value of
+                    // The invariant calendar's TwoDigitYearMax is 2049, which is a FIXED value of
                     // the invariant culture rather than culture state -- so `yy` may use it here
                     // even though #1929 declined a two-digit year in the GENERAL parser, where the
                     // width is the discriminator and no format says what was meant.
-                    fields.year = (n <= 2 && value <= 99) ? (value <= 29 ? 2000 + value : 1900 + value)
+                    fields.year = (n <= 2 && value <= 99) ? (value <= 49 ? 2000 + value : 1900 + value)
                                                           : value;
                     i += run;
                     continue;

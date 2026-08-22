@@ -110,12 +110,16 @@ TEST(DigitShapesBatch28Test, Values) {
 // ===========================================================================
 
 TEST(DaylightTimeBatch28Test, Constructor) {
-    System::DateTime start(2024, 3, 31);
-    System::DateTime end(2024, 10, 27);
+    const System::DateTime start = System::DateTime::SpecifyKind(
+        System::DateTime(2024, 3, 31), System::DateTimeKind::Local);
+    const System::DateTime end = System::DateTime::SpecifyKind(
+        System::DateTime(2024, 10, 27), System::DateTimeKind::Utc);
     System::TimeSpan delta = System::TimeSpan::FromHours(1);
     DaylightTime dt(start, end, delta);
     EXPECT_EQ(dt.getStartProperty(), start);
     EXPECT_EQ(dt.getEndProperty(),   end);
+    EXPECT_EQ(dt.getStartProperty().getKindProperty(), System::DateTimeKind::Local);
+    EXPECT_EQ(dt.getEndProperty().getKindProperty(), System::DateTimeKind::Utc);
     EXPECT_EQ(dt.getDeltaProperty(), delta);
 }
 

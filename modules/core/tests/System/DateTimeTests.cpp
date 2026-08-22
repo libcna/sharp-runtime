@@ -23,7 +23,11 @@
 #include "System/Globalization/CultureInfo.hpp"
 #include "System/FormatException.hpp"
 #include "System/TimeSpan.hpp"
+#include "System/detail/ProcessTimeZoneState.hpp"
 
+#include <chrono>
+#include <cstdlib>
+#include <ctime>
 #include <string>
 
 using System::DateTime;
@@ -233,12 +237,90 @@ TEST(DateTimeTests, NowIsAfterUnixEpoch) {
     EXPECT_GT(now.getTicksProperty(), kUnixEpochTicks);
 }
 
-TEST(DateTimeTests, NowMonotonicallyIncreases) {
-    // Two consecutive Now() calls: second >= first
+TEST(DateTimeTests, ConsecutiveNowReadsRemainOnTheSameLocalClockScale) {
+    // Local wall-clock time is deliberately NOT monotonic across a daylight-saving fall-back.
+    // Two immediate reads must nevertheless remain close; allow a full transition-sized jump.
     DateTime t1 = DateTime::getNowProperty();
     DateTime t2 = DateTime::getNowProperty();
-    EXPECT_GE(t2.getTicksProperty(), t1.getTicksProperty());
+    const auto delta = t2.getTicksProperty() - t1.getTicksProperty();
+    EXPECT_GT(delta, -2 * kTicksPerHour);
+    EXPECT_LT(delta,  2 * kTicksPerHour);
+    EXPECT_EQ(t1.getKindProperty(), System::DateTimeKind::Local);
+    EXPECT_EQ(t2.getKindProperty(), System::DateTimeKind::Local);
 }
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+namespace {
+
+// The TimeZone component uses this same save/set/tzset/restore shape for deterministic POSIX
+// zone tests. EST5 is a POSIX fixed-offset rule, so this regression needs no installed tzdata and
+// cannot accidentally move with daylight-saving rules.
+class ScopedDateTimeTestZone {
+public:
+    explicit ScopedDateTimeTestZone(const char* zone) {
+        std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
+        const char* current = std::getenv("TZ");
+        hadValue_ = current != nullptr;
+        if (hadValue_) saved_ = current;
+        (void)::setenv("TZ", zone, 1);
+        ::tzset();
+    }
+
+    ScopedDateTimeTestZone(const ScopedDateTimeTestZone&) = delete;
+    ScopedDateTimeTestZone& operator=(const ScopedDateTimeTestZone&) = delete;
+
+    ~ScopedDateTimeTestZone() {
+        std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
+        if (hadValue_) (void)::setenv("TZ", saved_.c_str(), 1);
+        else           (void)::unsetenv("TZ");
+        ::tzset();
+    }
+
+private:
+    std::string saved_;
+    bool hadValue_ = false;
+};
+
+SharpRuntime::longcs systemClockTicks(
+    const std::chrono::system_clock::time_point& value) {
+    using namespace std::chrono;
+    const auto sinceEpoch = value.time_since_epoch();
+    const auto wholeSeconds = floor<seconds>(sinceEpoch);
+    const auto remainder = sinceEpoch - wholeSeconds;
+    return DateTime::UnixEpochTicks
+        + static_cast<SharpRuntime::longcs>(wholeSeconds.count()) * DateTime::TicksPerSecond
+        + static_cast<SharpRuntime::longcs>(duration_cast<nanoseconds>(remainder).count() / 100);
+}
+
+} // namespace
+
+TEST(DateTimeTests, NowAndTodayUseLocalWallClockTicksAndLocalKind) {
+    const ScopedDateTimeTestZone zone("EST5"); // fixed UTC-05:00, with no DST
+    constexpr SharpRuntime::longcs offset = -5 * DateTime::TicksPerHour;
+
+    const auto before = std::chrono::system_clock::now();
+    const DateTime now = DateTime::getNowProperty();
+    const DateTime today = DateTime::getTodayProperty();
+    const auto after = std::chrono::system_clock::now();
+
+    EXPECT_EQ(now.getKindProperty(), System::DateTimeKind::Local);
+    EXPECT_EQ(today.getKindProperty(), System::DateTimeKind::Local);
+
+    // A one-second scheduling margin keeps the assertion robust under a loaded sanitizer build;
+    // the old UTC result is five HOURS away and cannot fit this interval.
+    const auto earliestLocal = systemClockTicks(before) + offset - DateTime::TicksPerSecond;
+    const auto latestLocal = systemClockTicks(after) + offset + DateTime::TicksPerSecond;
+    EXPECT_GE(now.getTicksProperty(), earliestLocal);
+    EXPECT_LE(now.getTicksProperty(), latestLocal);
+
+    const auto firstPossibleDay = (earliestLocal / DateTime::TicksPerDay) * DateTime::TicksPerDay;
+    const auto lastPossibleDay = (latestLocal / DateTime::TicksPerDay) * DateTime::TicksPerDay;
+    EXPECT_TRUE(today.getTicksProperty() == firstPossibleDay ||
+                today.getTicksProperty() == lastPossibleDay)
+        << "Today must be the local date even if this test straddles local midnight";
+    EXPECT_EQ(today.getTimeOfDayProperty().getTicksProperty(), 0);
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // ToString
@@ -505,8 +587,35 @@ TEST(DateTimeTests, MaxValue_Is_9999_12_31) {
     EXPECT_EQ(DateTime::MaxValue.getDayProperty(),   31);
 }
 
+TEST(DateTimeTests, ComponentDecompositionCoversTheFullYearOneTo9999Range) {
+    struct Row {
+        int year;
+        int month;
+        int day;
+        System::DayOfWeek weekday;
+        int dayOfYear;
+    };
+    for (const Row& row : {
+             Row{1, 1, 1, System::DayOfWeek::Monday, 1},
+             Row{1969, 12, 31, System::DayOfWeek::Wednesday, 365},
+             Row{3001, 1, 1, System::DayOfWeek::Thursday, 1},
+             Row{9999, 12, 31, System::DayOfWeek::Friday, 365}}) {
+        const DateTime value(row.year, row.month, row.day, 23, 58, 57, 456);
+        EXPECT_EQ(value.getYearProperty(), row.year);
+        EXPECT_EQ(value.getMonthProperty(), row.month);
+        EXPECT_EQ(value.getDayProperty(), row.day);
+        EXPECT_EQ(value.getHourProperty(), 23);
+        EXPECT_EQ(value.getMinuteProperty(), 58);
+        EXPECT_EQ(value.getSecondProperty(), 57);
+        EXPECT_EQ(value.getMillisecondProperty(), 456);
+        EXPECT_EQ(value.getDayOfWeekProperty(), row.weekday);
+        EXPECT_EQ(value.getDayOfYearProperty(), row.dayOfYear);
+    }
+}
+
 TEST(DateTimeTests, UnixEpoch_Is_1970_01_01) {
     EXPECT_EQ(DateTime::UnixEpoch.getTicksProperty(), kUnixEpochTicks);
+    EXPECT_EQ(DateTime::UnixEpoch.getKindProperty(), System::DateTimeKind::Utc);
     EXPECT_EQ(DateTime::UnixEpoch.getYearProperty(),  1970);
     EXPECT_EQ(DateTime::UnixEpoch.getMonthProperty(), 1);
     EXPECT_EQ(DateTime::UnixEpoch.getDayProperty(),   1);
@@ -989,7 +1098,9 @@ TEST(DateTimeTests, Ccf002d_EveryDocumentedShapeKeepsItsExactValue) {
 // rather than a fixed +HH:MM.
 TEST(DateTimeTests, Ccf002d_TrailingOffsetKeepsItsTwoDigitFields) {
     // §20.1's "unchanged in every option" list names the ±HH:MM offset, so it
-    // stays accepted (and stays ignored -- this port has no DateTimeKind).
+    // stays accepted. General Parse intentionally leaves it Unspecified because this Core.Base
+    // door has no implicit zone service; ParseExact's explicit-zone overload is the kind-aware
+    // conversion surface.
     DateTime dt;
     ASSERT_TRUE(DateTime::TryParse("2024-06-15 10:30:45.56+02:00", dt));
     EXPECT_EQ(dt.getMillisecondProperty(), 560);
@@ -1085,11 +1196,12 @@ TEST(DateTimeTests, Approved1929_UnapprovedRowsRemainUnchanged) {
     DateTime out;
     // Rows 1 and 3 were decided on 2026-08-18 and moved to
     // Decided1929_DateAndOffsetGrammarMatchDotNet below. What is left here is
-    // what the port still does NOT do: culture patterns, month names, a
-    // two-digit year, and a format run wider than seven fractional digits.
+    // what the general parser still does NOT do: culture patterns, month names and a
+    // two-digit year. A custom format run wider than seven fractional digits is now rejected
+    // explicitly rather than silently rendered as an unrelated tick string.
     EXPECT_FALSE(DateTime::TryParse("June 15 2024 1:2:3", out));   // culture/wider grammar
     EXPECT_FALSE(DateTime::TryParse("24-06-15", out));             // two-digit year
-    EXPECT_EQ(DateTime(1'234'567).ToString("ffffffff"), "123"); // unapproved >7 format run
+    EXPECT_THROW(DateTime(1'234'567).ToString("ffffffff"), System::FormatException);
     // Valid controls from the pre-approved subset remain accepted.
     EXPECT_TRUE(DateTime::TryParse("2024-06-15T01:02:03+02:05", out));
     EXPECT_TRUE(DateTime::TryParse("2024-06-15Z", out));
@@ -1133,9 +1245,10 @@ TEST(DateTimeTests, Decided1929_SingleDigitMonthAndDayParseToTheSameValue) {
 // Row 3. The offset is transcribed from ParseTimeZone (DateTimeParse.cs:530-556):
 // a one- or two-digit run is an hour and may be followed by ':' and a one- or
 // two-digit minute; a three- or four-digit run is split value/100 and value%100.
-// DateTime still IGNORES the offset -- it has no DateTimeKind (§16.4) -- so this
-// test is about which strings are accepted, and DateTimeOffsetTests2 is where the
-// values are pinned.
+// General DateTime Parse still consumes but does not apply the offset, returning Unspecified:
+// Core.Base has no implicit zone service. This test is about which strings are accepted;
+// DateTimeOffsetTests2 pins captured offset values, while ParseExact pins explicit-zone
+// DateTime conversion.
 TEST(DateTimeTests, Decided1929_OffsetGrammarIsDotNetsParseTimeZone) {
     const long long expected = DateTime(2024, 6, 15, 10, 20, 30).getTicksProperty();
     const char* offsets[] = {
@@ -1210,18 +1323,19 @@ TEST(DateTimeTests, Ticket1880_TryParseFailureAlwaysAssignsMinValue) {
 }
 
 // ===========================================================================
-// #1941 — DateTimeKind storage, phase 1 only (#1929 row 4D)
+// #1941 — DateTimeKind storage and the post-phase-1 existing-member ripple audit
 // ===========================================================================
 //
-// The approval is narrow and is quoted here because the boundary is the point: encode
+// The original phase-1 approval was narrow: encode
 // Unspecified/Utc/Local plus the reserved ambiguous-local marker in the high bits of an unsigned
 // 64-bit payload, PRESERVING the measured layouts; add a Kind accessor, kind-taking construction
 // and SpecifyKind; keep Ticks pure; range-check before packing; and audit arithmetic, comparison,
 // hashing, formatting and serialization so previously kindless results stay unchanged.
 //
-// NOT approved and NOT present: ToLocalTime, ToUniversalTime, offset/Z parse conversion,
-// AssumeLocal, AssumeUniversal, AdjustToUniversal, RoundtripKind parsing. A phase-2 approval must
-// name a date-sensitive timezone provider first.
+// That historical boundary is not the current contract. Phase 2 added explicit zone-taking
+// conversion and #1942 added exact-parse styles. The post-#1941 ripple audit also corrected the
+// existing static values and arithmetic to .NET's contract. Only the NO-ARGUMENT conversion forms
+// remain absent; the declaration pin below names exactly those.
 
 TEST(DateTimeKindStorageTests, Fix1941_TheLayoutIsUnchangedBecauseTheKindIsPacked) {
     // This is what makes the phase implementable at all. MaxTicks is 0x2BCA2875F4373FFF, so 62
@@ -1265,8 +1379,8 @@ TEST(DateTimeKindStorageTests, Fix1941_KindIsReportedAndSpecifyKindConvertsNothi
     const DateTime utc = DateTime::SpecifyKind(source, System::DateTimeKind::Utc);
     EXPECT_EQ(utc.getKindProperty(), System::DateTimeKind::Utc);
     EXPECT_EQ(utc.getTicksProperty(), source.getTicksProperty())
-        << "SpecifyKind must convert NOTHING -- that is the whole difference between phase 1 and "
-           "the conversion phase this approval excludes";
+        << "SpecifyKind must convert NOTHING; callers use the explicit conversion members when "
+           "they need the tick value shifted";
     EXPECT_EQ(DateTime::SpecifyKind(utc, System::DateTimeKind::Unspecified).getKindProperty(),
               System::DateTimeKind::Unspecified);
 
@@ -1285,12 +1399,11 @@ TEST(DateTimeKindStorageTests, Fix1941_KindIsReportedAndSpecifyKindConvertsNothi
         EXPECT_NE(std::string(e.what()).find("Invalid DateTimeKind value."), std::string::npos)
             << e.what();
     }
-    // Value 3 is the RESERVED LocalAmbiguousDst encoding, and it is reserved rather than
-    // reachable: nothing in phase 1 sets it, and the public constructor refuses it, exactly as
-    // .NET's does. A consequence worth stating: the fold in getKindProperty() is UNREACHABLE in
-    // this phase, so a mutation removing it is NOT caught, and was measured not to be. It is
-    // transcribed because phase 2 will start setting that encoding, and a fold added later would
-    // be a second change to a shipped accessor.
+    // Value 3 is the RESERVED LocalAmbiguousDst encoding, and it remains unreachable through the
+    // public constructor, exactly as in .NET. Current conversion also cannot produce it because
+    // the available zone abstraction has no ambiguity result. The fold in getKindProperty() is
+    // therefore still unreachable and a mutation removing it remains observationally equivalent;
+    // arithmetic nevertheless preserves both raw flag bits for the future path that can set it.
 
     // THE RANGE CHECK RUNS BEFORE PACKING, which the approval requires explicitly. Without it an
     // out-of-range tick count would collide with the flag bits and silently report a kind the
@@ -1302,9 +1415,10 @@ TEST(DateTimeKindStorageTests, Fix1941_KindIsReportedAndSpecifyKindConvertsNothi
     EXPECT_NO_THROW((void)DateTime(DateTime::MaxTicks, System::DateTimeKind::Utc));
 }
 
-TEST(DateTimeKindStorageTests, Fix1941_TheKindDoesNotParticipateInAnyOldOperation) {
-    // The audit clause. Comparison, equality, hashing, arithmetic and formatting must all give
-    // the answers they gave before, which means none of them may see the flag bits.
+TEST(DateTimeKindStorageTests, Fix1941_IdentityIgnoresKindButArithmeticPreservesIt) {
+    // Kind does not participate in identity, comparison, hashing, formatting, component access,
+    // or DateTime-DateTime subtraction. DateTime-returning arithmetic is different: .NET ORs
+    // InternalKind into every result, including its hidden ambiguous-local marker.
     const SharpRuntime::longcs raw = 638540436301234567LL;
     const DateTime unspecified(raw);
     const DateTime asUtc(raw, System::DateTimeKind::Utc);
@@ -1321,10 +1435,29 @@ TEST(DateTimeKindStorageTests, Fix1941_TheKindDoesNotParticipateInAnyOldOperatio
     EXPECT_EQ((asUtc - unspecified).getTicksProperty(), 0);
     EXPECT_EQ(asUtc.AddDays(1).getTicksProperty(), unspecified.AddDays(1).getTicksProperty());
 
-    // Arithmetic does NOT carry the kind in this phase, and that is stated rather than assumed:
-    // propagating it is a phase-2 question, because it is only meaningful once a conversion
-    // exists to be consistent with.
-    EXPECT_EQ(asUtc.AddDays(1).getKindProperty(), System::DateTimeKind::Unspecified);
+    // Pin EVERY DateTime-returning arithmetic door, not just the three implementation roots.
+    // Add/Add{units}/AddYears and the operators delegate today, but a later refactor must not be
+    // allowed to make just one public spelling lose the kind again.
+    for (const auto kind : {System::DateTimeKind::Utc, System::DateTimeKind::Local}) {
+        const DateTime source(638540436301234567LL, kind);
+        const auto expectKind = [&](const char* operation, const DateTime& result) {
+            SCOPED_TRACE(operation);
+            EXPECT_EQ(result.getKindProperty(), kind);
+        };
+
+        expectKind("Add", source.Add(TimeSpan::FromTicks(7)));
+        expectKind("AddDays", source.AddDays(1));
+        expectKind("AddHours", source.AddHours(1));
+        expectKind("AddMinutes", source.AddMinutes(1));
+        expectKind("AddSeconds", source.AddSeconds(1));
+        expectKind("AddMilliseconds", source.AddMilliseconds(1));
+        expectKind("AddTicks", source.AddTicks(1));
+        expectKind("AddMonths", source.AddMonths(1));
+        expectKind("AddYears", source.AddYears(1));
+        expectKind("Subtract(TimeSpan)", source.Subtract(TimeSpan::FromTicks(7)));
+        expectKind("operator+", source + TimeSpan::FromTicks(7));
+        expectKind("operator-", source - TimeSpan::FromTicks(7));
+    }
 }
 
 namespace {
@@ -1335,9 +1468,10 @@ template <typename T> concept HasToLocalTime     = requires(T d) { d.ToLocalTime
 template <typename T> concept HasToUniversalTime = requires(T d) { d.ToUniversalTime(); };
 } // namespace
 
-TEST(DateTimeKindStorageTests, Decl1941_TheConversionSurfaceIsStillAbsent) {
-    // Pinned as a declaration, so phase 2 is a deliberate act rather than a drift. If either of
-    // these ever compiles, the approval boundary moved and this test must move with it.
+TEST(DateTimeKindStorageTests, Decl1941_TheNoArgumentConversionSurfaceIsStillAbsent) {
+    // These concepts name only the NO-ARGUMENT .NET forms. Phase 2 deliberately added overloads
+    // that take an ILocalTimeZone; Core.Base still cannot reach a zone on its own, so an argument-
+    // free overload would move SA-15.1's recorded dependency boundary.
     EXPECT_FALSE(HasToLocalTime<DateTime>);
     EXPECT_FALSE(HasToUniversalTime<DateTime>);
     // The control: a member that IS present, so the idiom is known to discriminate rather than
@@ -1435,6 +1569,36 @@ TEST(DateTimeProvider1940Tests, TheResolutionChainIsDotNets) {
     EXPECT_EQ(&DateTimeFormatInfo::GetInstance(&knowsNothing),
               &DateTimeFormatInfo::getCurrentInfoProperty());
     EXPECT_EQ(march.ToString("MMMM", &knowsNothing), "March");
+}
+
+TEST(DateTimeProvider1940Tests, AStatefulProviderIsResolvedExactlyOncePerFormatCall) {
+    using System::Globalization::DateTimeFormatInfo;
+    DateTimeFormatInfo first;
+    DateTimeFormatInfo second;
+    first.setMonthNamesProperty(
+        {"FirstJan", "FirstFeb", "FirstMar", "FirstApr", "FirstMay", "FirstJun",
+         "FirstJul", "FirstAug", "FirstSep", "FirstOct", "FirstNov", "FirstDec", ""});
+    second.setMonthNamesProperty(
+        {"SecondJan", "SecondFeb", "SecondMar", "SecondApr", "SecondMay", "SecondJun",
+         "SecondJul", "SecondAug", "SecondSep", "SecondOct", "SecondNov", "SecondDec", ""});
+
+    struct AlternatingProvider final : System::IFormatProvider {
+        DateTimeFormatInfo* first;
+        DateTimeFormatInfo* second;
+        mutable int calls = 0;
+
+        AlternatingProvider(DateTimeFormatInfo* firstInfo, DateTimeFormatInfo* secondInfo)
+            : first(firstInfo), second(secondInfo) {}
+
+        [[nodiscard]] void* GetFormat(const std::type_info& type) const override {
+            if (type != typeid(DateTimeFormatInfo)) return nullptr;
+            ++calls;
+            return calls == 1 ? first : second;
+        }
+    } provider(&first, &second);
+
+    EXPECT_EQ(DateTime(2024, 6, 15).ToString("MMMM", &provider), "FirstJun");
+    EXPECT_EQ(provider.calls, 1);
 }
 
 // DateTimeFormatInfo.cs:325-328 -- `formatType == typeof(DateTimeFormatInfo) ? this : null`. The
@@ -1607,6 +1771,29 @@ TEST(DateTimeKindPhase2Tests, AConversionPastTheRangeClampsRatherThanThrowing) {
     } oneTickBehind;
     EXPECT_EQ(nearMin.ToLocalTime(oneTickBehind).getTicksProperty(), 0)
         << "a one-tick underflow must clamp to MinValue, not wrap";
+}
+
+TEST(DateTimeKindPhase2Tests, ExtremeProviderOffsetsClampBeforeSignedArithmetic) {
+    class ExtremeZone final : public System::ILocalTimeZone {
+    public:
+        explicit ExtremeZone(bool maximum) : maximum_(maximum) {}
+        [[nodiscard]] System::TimeSpan GetUtcOffset(const System::DateTime&) const override {
+            return maximum_ ? System::TimeSpan::MaxValue : System::TimeSpan::MinValue;
+        }
+        [[nodiscard]] bool IsDaylightSavingTime(const System::DateTime&) const override {
+            return false;
+        }
+    private:
+        bool maximum_;
+    } maximum(true), minimum(false);
+
+    const DateTime utcMiddle(DateTime::MaxTicks / 2, System::DateTimeKind::Utc);
+    EXPECT_EQ(utcMiddle.ToLocalTime(maximum).getTicksProperty(), DateTime::MaxTicks);
+    EXPECT_EQ(utcMiddle.ToLocalTime(minimum).getTicksProperty(), 0);
+
+    const DateTime localMiddle(DateTime::MaxTicks / 2, System::DateTimeKind::Local);
+    EXPECT_EQ(localMiddle.ToUniversalTime(maximum).getTicksProperty(), 0);
+    EXPECT_EQ(localMiddle.ToUniversalTime(minimum).getTicksProperty(), DateTime::MaxTicks);
 }
 
 // The real local zone implements the interface, which is what makes the whole shape usable rather
@@ -2019,6 +2206,33 @@ TEST(DateTimeStyles1942Tests, TheZoneTokenWidthsDifferAndAnOutOfRangeOffsetFails
                                                  DateTimeStyles::None, out, &utcZone));
 }
 
+TEST(DateTimeStyles1942Tests, TryParseExactReturnsFalseWhenOffsetMovesPastDateTimeRange) {
+    using System::Globalization::DateTimeStyles;
+    const std::string format = "yyyy-MM-ddTHH:mm:ssK";
+    System::DateTime result(2024, 6, 15);
+
+    // Each wall clock is representable and each offset is within +/-14h; only the resulting UTC
+    // instant is outside DateTime's range. A Try* door must not leak the checked arithmetic
+    // exception used by ordinary DateTime.AddMinutes.
+    EXPECT_FALSE(System::DateTime::TryParseExact(
+        "0001-01-01T00:00:00+05:00", format, nullptr,
+        DateTimeStyles::AdjustToUniversal, result));
+    EXPECT_EQ(result, System::DateTime::MinValue);
+    EXPECT_FALSE(System::DateTime::TryParseExact(
+        "9999-12-31T23:59:59-05:00", format, nullptr,
+        DateTimeStyles::AdjustToUniversal, result));
+    EXPECT_EQ(result, System::DateTime::MinValue);
+
+    EXPECT_THROW((void)System::DateTime::ParseExact(
+                     "0001-01-01T00:00:00+05:00", format, nullptr,
+                     DateTimeStyles::AdjustToUniversal),
+                 System::FormatException);
+    EXPECT_THROW((void)System::DateTime::ParseExact(
+                     "9999-12-31T23:59:59-05:00", format, nullptr,
+                     DateTimeStyles::AdjustToUniversal),
+                 System::FormatException);
+}
+
 // ===========================================================================
 // #2416 -- DateTime::ToString had no standard-format table at all
 // ===========================================================================
@@ -2044,6 +2258,8 @@ TEST(DateTimeToStringStandard2416Tests, EveryStandardSpecifierResolvesRatherThan
     EXPECT_EQ(d.ToString("D"), "Saturday, 15 June 2024");
     EXPECT_EQ(d.ToString("t"), "12:00");
     EXPECT_EQ(d.ToString("T"), "12:00:00");
+    EXPECT_THROW(d.ToString("U"), System::FormatException)
+        << "Core.Base cannot perform U's required implicit local-to-UTC conversion";
 
     // NONE of these may be the specifier letter itself, which is what the defect looked like and
     // is the assertion a table-shaped test would omit.
@@ -2087,6 +2303,7 @@ TEST(DateTimeToStringStandard2416Tests, ThePercentEscapeSelectsASingleCustomSpec
     EXPECT_EQ(d.ToString("%d"), "15");
     EXPECT_EQ(d.ToString("%y"), "24");
     EXPECT_EQ(d.ToString("%H"), "12");
+    EXPECT_EQ(d.ToString("yyyy %d"), "2024 15");
     // ...and the bare letter is the STANDARD reading, so the pair must differ. Asserting only the
     // escape would pass against a body that ignored the `%` and got `d` right by accident.
     EXPECT_NE(d.ToString("%d"), d.ToString("d"));
@@ -2095,6 +2312,8 @@ TEST(DateTimeToStringStandard2416Tests, ThePercentEscapeSelectsASingleCustomSpec
     // literal -- which is what this did -- is neither the FormatException .NET raises nor the
     // ArgumentException GetAllDateTimePatterns raises: two members, two contracts.
     EXPECT_THROW(d.ToString("%%"), System::FormatException);
+    EXPECT_THROW(d.ToString("yyyy %"), System::FormatException);
+    EXPECT_THROW(d.ToString("yyyy %%"), System::FormatException);
     EXPECT_THROW(d.ToString("q"), System::FormatException);
     EXPECT_THROW(d.ToString("Z"), System::FormatException);
 }
@@ -2119,6 +2338,9 @@ TEST(DateTimeToStringStandard2416Tests, TheCustomFormatterGainedTheTwoTokensItWa
     EXPECT_EQ(System::DateTime::SpecifyKind(naive, System::DateTimeKind::Utc).ToString("%K"), "Z");
     EXPECT_EQ(naive.ToString("%K"), "");
     EXPECT_EQ(System::DateTime::SpecifyKind(naive, System::DateTimeKind::Local).ToString("%K"), "");
+
+    EXPECT_THROW(naive.ToString("zzz"), System::FormatException)
+        << "Core.Base has no implicit zone with which to evaluate DateTime's offset token";
 }
 
 // A MULTI-CHARACTER format is still custom, so the widening did not reach the spelling that
@@ -2128,6 +2350,9 @@ TEST(DateTimeToStringStandard2416Tests, MultiCharacterFormatsAreStillCustom) {
     EXPECT_EQ(d.ToString("yyyy-MM-dd"), "2024-06-15");
     EXPECT_EQ(d.ToString("dd/MM/yyyy HH:mm:ss"), "15/06/2024 12:00:00");
     EXPECT_EQ(d.ToString("MMMM"), "June");
+    EXPECT_EQ(d.ToString("yyyy \"MM\" 'dd'"), "2024 MM dd");
+    EXPECT_THROW(d.ToString("yyyy 'unterminated"), System::FormatException);
+    EXPECT_THROW(d.ToString("HH:mm:ss.ffffffff"), System::FormatException);
     // ...and the no-argument overload is untouched, keeping its space separator.
     EXPECT_EQ(d.ToString(), "2024-06-15 12:00:00");
 }
@@ -2237,7 +2462,16 @@ TEST(MultiFormatParseExact1944Tests, TheStyleIsValidatedBeforeTheLoopRuns) {
     EXPECT_THROW(DateTime::TryParseExact("2024-06-15", std::vector<std::string>{}, nullptr,
                                          bogus, out),
                  System::ArgumentException);
+    EXPECT_THROW(DateTime::ParseExact("2024-06-15", std::vector<std::string>{}, nullptr,
+                                      bogus),
+                 System::ArgumentException)
+        << "ParseExact validates styles before diagnosing an empty format collection too";
     EXPECT_EQ(out, DateTime::MinValue);
+}
+
+TEST(DateTimeKindRippleTests, ExactTwoDigitYearUsesTheCanonical2049Window) {
+    EXPECT_EQ(DateTime::ParseExact("49-06-15", "yy-MM-dd"), DateTime(2049, 6, 15));
+    EXPECT_EQ(DateTime::ParseExact("50-06-15", "yy-MM-dd"), DateTime(1950, 6, 15));
 }
 
 // A FAILED MULTI-FORMAT PARSE MUST NOT LEAVE A PARTIAL RESULT from a format that matched part of

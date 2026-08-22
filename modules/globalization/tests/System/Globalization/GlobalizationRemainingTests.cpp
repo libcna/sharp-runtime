@@ -171,12 +171,16 @@ TEST(TimeSpanStylesTests, AssumeNegative_IsOne) {
 // ===========================================================================
 
 TEST(DaylightTimeTests, Constructor_StoresStartEndDelta) {
-    DateTime start(2021, 3, 28);
-    DateTime end(2021, 10, 31);
+    const DateTime start = DateTime::SpecifyKind(
+        DateTime(2021, 3, 28), System::DateTimeKind::Local);
+    const DateTime end = DateTime::SpecifyKind(
+        DateTime(2021, 10, 31), System::DateTimeKind::Utc);
     TimeSpan delta = TimeSpan::FromHours(1);
     DaylightTime dt(start, end, delta);
     EXPECT_EQ(dt.getStartProperty(), start);
     EXPECT_EQ(dt.getEndProperty(),   end);
+    EXPECT_EQ(dt.getStartProperty().getKindProperty(), System::DateTimeKind::Local);
+    EXPECT_EQ(dt.getEndProperty().getKindProperty(), System::DateTimeKind::Utc);
     EXPECT_EQ(dt.getDeltaProperty(), delta);
 }
 

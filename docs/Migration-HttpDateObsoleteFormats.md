@@ -24,7 +24,7 @@ layout, vtable or `noexcept` change.
 | `Sun, 06 Nov 94 08:49:37 GMT` | **accepted as the year 94 AD** | accepted as **1994** |
 | trailing text after any of them | rejected | **rejected** |
 | an embedded NUL | rejected | **rejected** |
-| `Sun, 06 Nov 1994 08:49:37 UTC` and fifteen other lenient .NET forms | rejected | **rejected** — see §4 |
+| `Sun, 06 Nov 1994 08:49:37 UTC` and fifteen other lenient .NET forms | rejected | accepted by the later #2360 widening — see §4 |
 
 All three required forms parse to the same instant, and a test asserts that rather than checking
 each separately.
@@ -50,21 +50,21 @@ no test had noticed. .NET accepts the same text and reads 1994
 So this row is a **correction**, not a widening: the port's answer was wrong rather than merely
 strict.
 
-The window is .NET's: `DateTimeFormatInfo.InvariantInfo`'s Gregorian calendar has
-`TwoDigitYearMax == 2029`, so `00`..`29` are 2000..2029 and `30`..`99` are 1930..1999. The naive
+The final shared invariant window is `TwoDigitYearMax == 2049`, so `00`..`49` are 2000..2049 and
+`50`..`99` are 1950..1999. #2418 reconciled this parser with the exact date/time parser and
+`Calendar::ToFourDigitYear`; retaining the earlier 2029 checkpoint here would leave three public
+doors answering the same two-digit year differently. The naive
 `1900 + yy` — which turns `06` into 1906 — is caught by a mutation. Only an **exactly**
 two-digit token is expanded, so a four-digit year keeps meaning exactly what it says.
 
-## 4. What is deliberately *not* adopted
+## 4. The later #2360 widening
 
-.NET's remaining sixteen formats are **leniency**, not required forms: a `UTC` zone token
-instead of `GMT`, no zone token at all, a missing day-of-week, and RFC 5322 numeric offsets.
-Adopting them would accept text RFC 9110 does not define as an HTTP-date — a much larger
-widening than this ticket asked for — and each carries its own ambiguity: a bare time with no
-zone is only UTC because .NET *assumes* it is, and an RFC 5322 numeric offset means the value is
-**not** UTC, which every consumer of this parser currently assumes it is.
-
-That is ticket **#2360**, and the current behaviour is pinned so it cannot land by accident.
+#2130 deliberately stopped at RFC 9110's three recipient forms. Ticket **#2360** subsequently
+measured and adopted .NET's remaining sixteen lenient forms: `UTC`, an absent zone, an omitted
+weekday, and supported numeric-offset shapes. Numeric offsets are converted to the represented
+UTC instant rather than stamped as UTC. The exact cross, including two deliberately absent
+two-digit-year-plus-numeric-offset combinations, is recorded in
+`Migration-HttpDateLenientFormats.md` and pinned at the shared parser rather than seven consumers.
 
 ## 5. To migrate
 

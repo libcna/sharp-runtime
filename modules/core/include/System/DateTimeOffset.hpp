@@ -38,12 +38,16 @@ namespace System {
      *
      * @note Status: Partial. Deviations from .NET, mirroring the deviations already
      *   documented on System::DateTime:
-     *   - DateTimeKind is not tracked. The single-argument DateTime constructor and
-     *     ToOffset-free implicit conversion always attach a zero offset instead of
-     *     inferring it from Kind.
-     *   - ToLocalTime()/LocalDateTime approximate "local" using the current system
-     *     UTC offset for every instant (no historical/future DST or timezone-rule
-     *     lookup), consistent with System::TimeZoneInfo's own documented limitations.
+     *   - DateTime-taking constructors honour `DateTimeKind`: Utc requires/chooses zero;
+     *     Local requires/chooses the supported local offset; Unspecified accepts any valid
+     *     explicit offset and chooses the supported local offset when none is supplied.
+     *     Like .NET, the exposed DateTime is nevertheless always Unspecified, UtcDateTime is
+     *     Utc, and LocalDateTime is Local.
+     *   - The supported local-offset model is the process's **current** system UTC offset.
+     *     It is used for Local-kind validation, the one-argument DateTime constructor,
+     *     Now, ToLocalTime(), and LocalDateTime. Unlike .NET, a historical/future wall clock
+     *     is not resolved through that date's DST/timezone rules. This is a named practical-
+     *     subset limitation rather than a claim of date-sensitive parity.
      *   - Calendar-based constructors, leap-second handling, culture-aware
      *     ToString/Parse (IFormatProvider), span-based TryFormat, Deconstruct, and
      *     FromFileTime/ToFileTime (OLE/FILETIME conversions) are out of scope.
@@ -58,14 +62,33 @@ namespace System {
 
     public:
         DateTimeOffset();
+
+        /**
+         * @brief Initializes an instance from a DateTime and explicit UTC offset.
+         *
+         * The stored/exposed DateTime is normalized to DateTimeKind::Unspecified. A Utc input
+         * requires a zero offset; a Local input requires the process's current local offset;
+         * an Unspecified input accepts any otherwise-valid offset.
+         *
+         * @throws System::ArgumentException if a Utc or Local input is inconsistent with
+         *         @p offset, or if @p offset is not a whole number of minutes.
+         * @throws System::ArgumentOutOfRangeException if @p offset is outside +/-14 hours or
+         *         produces an unrepresentable UTC instant.
+         * @note .NET resolves a Local input against the timezone rules for that particular
+         *       date. This practical subset compares against the supported current-offset model
+         *       described in the class note.
+         */
         DateTimeOffset(const DateTime& dateTime, const TimeSpan& offset);
 
         /**
-         * @brief Initializes a new instance from a DateTime, attaching a zero UTC offset.
+         * @brief Initializes a new instance from a DateTime, choosing its UTC offset by Kind.
          *
          * C++ counterpart of .NET's implicit operator DateTimeOffset(DateTime).
-         * @note Since DateTimeKind is not tracked, this always attaches TimeSpan::Zero
-         *       rather than inferring the offset from Kind.
+         * Utc chooses TimeSpan::Zero; Local and Unspecified choose the process's current local
+         * offset. The DateTime property of the resulting value is always Unspecified.
+         *
+         * @note .NET's local-zone lookup is date-sensitive. This practical subset uses the
+         *       current-offset model described in the class note.
          */
         DateTimeOffset(const DateTime& dateTime);
 
@@ -130,13 +153,13 @@ namespace System {
         static const DateTimeOffset UnixEpoch;
 
         // Static factory
-        /** @brief Gets a DateTimeOffset for the current local date and time, with the local UTC offset. */
+        /** @brief Gets the current local date and time with the current local UTC offset. */
         [[nodiscard]] static DateTimeOffset getNowProperty();
-        /** @brief Gets a DateTimeOffset for the current UTC date and time, with a zero offset. */
+        /** @brief Gets the current UTC date and time with a zero offset. */
         [[nodiscard]] static DateTimeOffset getUtcNowProperty();
 
         // Component accessors
-        /** @return The DateTime part of this instance, in the instance's own offset. */
+        /** @return The DateTime part in the instance's own offset, with Kind Unspecified. */
         [[nodiscard]] const DateTime& getDateTimeProperty() const;
         /** @return The time's UTC offset. */
         [[nodiscard]] const TimeSpan& getOffsetProperty() const;
@@ -168,9 +191,9 @@ namespace System {
         [[nodiscard]] TimeSpan getTimeOfDayProperty() const;
         /** @return The date component, with the time set to midnight. */
         [[nodiscard]] DateTime getDateProperty()          const;
-        /** @return The UTC DateTime represented by this instance. */
+        /** @return The UTC DateTime represented by this instance, with Kind Utc. */
         [[nodiscard]] DateTime getUtcDateTimeProperty()   const;
-        /** @return The local DateTime represented by this instance. */
+        /** @return The local DateTime represented by this instance, with Kind Local. */
         [[nodiscard]] DateTime getLocalDateTimeProperty() const;
 
         /**
@@ -179,7 +202,9 @@ namespace System {
          *
          * C++ counterpart of .NET DateTimeOffset.ToOffset(TimeSpan).
          * @throws System::ArgumentOutOfRangeException if @p offset is outside ±14 hours,
-         *         or if the resulting UTC time is outside DateTime's representable range.
+         *         or if the target offset-relative clock is outside DateTime's representable
+         *         range.
+         * @throws System::ArgumentException if @p offset is not a whole number of minutes.
          */
         [[nodiscard]] DateTimeOffset ToOffset(const TimeSpan& offset) const;
 
@@ -213,7 +238,9 @@ namespace System {
          * @brief Converts this instance to local time.
          *
          * C++ counterpart of .NET DateTimeOffset.ToLocalTime().
-         * @note Approximates "local" using the current system UTC offset (see class note).
+         * @note Uses the current system UTC offset for every instant (see class note).
+         *       If applying it leaves DateTime's representable range, the visible local clock
+         *       clamps to MinValue or MaxValue, matching .NET's non-throwing conversion path.
          */
         [[nodiscard]] DateTimeOffset ToLocalTime() const;
 
@@ -379,9 +406,16 @@ namespace System {
             return TryParseExact(input, std::vector<std::string>(formats), provider,
                                  styles, result, zone);
         }
-        /** @brief Returns a string representation using the default round-trip format. */
+        /** @brief Returns a string representation using the default format. */
         [[nodiscard]] std::string ToString() const override;
-        /** @brief Returns a string representation using the given .NET custom/standard format string. */
+        /**
+         * @brief Returns a string representation using the given .NET custom/standard format.
+         *
+         * Custom `z`, `zz`, `zzz`, and `K` tokens render this value's stored offset; quote marks
+         * make them literals. An offset is not appended when the format does not request one.
+         * `O`/`o` preserves seven fractional digits and the offset, while `R`/`r` and `u`
+         * convert the represented instant to UTC. As in .NET, `U` is invalid for DateTimeOffset.
+         */
         [[nodiscard]] std::string ToString(const std::string& format) const;
 
         using Object::Equals;

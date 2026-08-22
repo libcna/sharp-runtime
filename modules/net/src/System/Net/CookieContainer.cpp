@@ -3,13 +3,31 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/CookieContainer.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/DateTimeOffset.hpp"
 #include "System/Net/CookieException.hpp"
+#include "System/Net/detail/HttpDateParser.hpp"
 #include "System/Net/IPAddress.hpp"
+#include "System/TimeZone.hpp"
 #include <algorithm>
 #include <cctype>
 #include <sstream>
+#include <stdexcept>
 
 namespace System::Net {
+
+bool Cookie::getExpiredProperty() const {
+    if (expires_ == DateTime::MinValue) return false;
+
+    // Cookie.cs compares `Expires.ToUniversalTime()` with `DateTime.UtcNow`. This conversion is
+    // load-bearing now that DateTime::Now really is a Local wall clock: HTTP expiry values are on
+    // the UTC scale, and comparing them directly with local ticks moves the decision by the
+    // process offset. Unspecified follows DateTime.ToUniversalTime's .NET rule and is treated as
+    // a local wall clock.
+    const DateTime expiresUtc = expires_.getKindProperty() == DateTimeKind::Utc
+        ? expires_
+        : expires_.ToUniversalTime(TimeZone::CurrentTimeZone());
+    return expiresUtc <= DateTimeOffset::getUtcNowProperty().getUtcDateTimeProperty();
+}
 
 std::string CookieContainer::toLowerAscii(std::string s) {
     for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -255,6 +273,7 @@ void CookieContainer::SetCookies(const System::Uri& uri, const std::string& cook
         throw CookieException("SetCookies: missing '=' in cookie Name=Value pair: '" + parts[0] + "'.");
 
     Cookie cookie(trim(parts[0].substr(0, eq)), trim(parts[0].substr(eq + 1)));
+    bool expirationSeen = false;
 
     for (size_t i = 1; i < parts.size(); ++i) {
         const std::string& attr = parts[i];
@@ -271,16 +290,28 @@ void CookieContainer::SetCookies(const System::Uri& uri, const std::string& cook
             cookie.setSecureProperty(true);
         } else if (attrName == "httponly") {
             cookie.setHttpOnlyProperty(true);
-        } else if (attrName == "expires") {
-            DateTime parsed;
-            if (DateTime::TryParse(attrValue, parsed)) cookie.setExpiresProperty(parsed);
-        } else if (attrName == "max-age") {
+        } else if (attrName == "expires" && !expirationSeen) {
+            expirationSeen = true;
+            DateTimeOffset parsed;
+            if (!System::Net::Http::Headers::detail::TryParseCookieDate(attrValue, parsed)) {
+                throw CookieException("SetCookies: invalid Expires attribute: '" + attrValue + "'.");
+            }
+            cookie.setExpiresProperty(parsed.getUtcDateTimeProperty());
+        } else if (attrName == "max-age" && !expirationSeen) {
+            expirationSeen = true;
             try {
-                int seconds = std::stoi(attrValue);
+                std::size_t consumed = 0;
+                int seconds = std::stoi(attrValue, &consumed);
+                if (consumed != attrValue.size()) throw std::invalid_argument("trailing text");
                 cookie.setExpiresProperty(
-                    seconds <= 0 ? DateTime(1601, 1, 1) : DateTime::getNowProperty().AddSeconds(seconds));
+                    seconds <= 0
+                        ? DateTime::SpecifyKind(DateTime(1601, 1, 1), DateTimeKind::Utc)
+                        : DateTimeOffset::getUtcNowProperty().getUtcDateTimeProperty().AddSeconds(seconds));
             } catch (...) {
-                // Malformed Max-Age: ignore the attribute, matching real .NET's lenient parser.
+                // CookieParser uses full-consuming int.TryParse and rejects the cookie when the
+                // first expiration attribute is malformed. Accepting a numeric prefix such as
+                // `3600junk` silently changes a session cookie into a persistent one.
+                throw CookieException("SetCookies: invalid Max-Age attribute: '" + attrValue + "'.");
             }
         }
         // Version/Comment/CommentUri/Port/SameSite attributes are accepted but not modeled.

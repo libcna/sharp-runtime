@@ -12,12 +12,11 @@
 // PREMISE CORRECTION: §4.3 counted SIX copies. There are SEVEN — it did not name
 // `WarningHeaderValue`'s date field, which extracts the date from inside a quoted string and then
 // hands it to its own copy of the same parser. All seven are now one body,
-// `src/System/Net/Http/Headers/HttpDateParser.hpp`.
+// `modules/net/include/System/Net/detail/HttpDateParser.hpp`.
 //
-// WHAT THIS TICKET DELIBERATELY DOES NOT DO: narrow the grammar. The `sscanf` conversion string
-// is kept verbatim with `%n` appended, so every value that parsed before parses to the same
-// instant. Rewriting it as a fixed-width scanner would also reject text `sscanf` accepts, and
-// with `/rv` absent there is no evidence here for what .NET does with that text.
+// HISTORICAL #2125 BOUNDARY: that ticket did not narrow the grammar; it appended `%n` to the
+// then-existing `sscanf` conversion. Later #2130/#2360 measured and widened the grammar, and
+// #2418 replaced every remaining unbounded numeric conversion with the explicit bounded cursor.
 #include <gtest/gtest.h>
 
 #include <string>
@@ -187,16 +186,15 @@ TEST(HttpDateConsumptionTests, Fix2130_AllThreeFormsRFC9110RequiresAreAccepted) 
 }
 
 TEST(HttpDateConsumptionTests, Fix2130_TheRFC850TwoDigitYearWindowIsDotNets) {
-    // The easy mistake in RFC 850 support: a naive `1900 + yy` turns 06 into 1906.
-    // DateTimeFormatInfo.InvariantInfo's Gregorian calendar has TwoDigitYearMax == 2029, so
-    // 00..29 are 2000..2029 and 30..99 are 1930..1999. Both ends of the window are pinned.
+    // The runtime's invariant Gregorian policy has TwoDigitYearMax == 2049. The HTTP parser
+    // used to retain an obsolete 2029 window and therefore disagreed with Calendar.
     RetryConditionHeaderValue parsed{System::TimeSpan::Zero};
 
-    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Sunday, 06-Nov-29 08:49:37 GMT", parsed));
-    EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 2029) << "29 is the last 20xx year";
+    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Saturday, 06-Nov-49 08:49:37 GMT", parsed));
+    EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 2049) << "49 is the last 20xx year";
 
-    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Sunday, 06-Nov-30 08:49:37 GMT", parsed));
-    EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 1930) << "30 is the first 19xx year";
+    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Monday, 06-Nov-50 08:49:37 GMT", parsed));
+    EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 1950) << "50 is the first 19xx year";
 
     ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Sunday, 06-Nov-94 08:49:37 GMT", parsed));
     EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 1994);
@@ -236,18 +234,18 @@ TEST(HttpDateConsumptionTests, Fix2130_AShortYearOnAnIMFDateWasSILENTLYWRONGNotR
     EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 1994)
         << "this used to report 94";
 
-    // The same window as RFC 850's, because it is the same calendar rule.
-    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Sun, 06 Nov 29 08:49:37 GMT", parsed));
-    EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 2029);
+    // The same 2049 window as RFC 850's, because it is the same calendar rule.
+    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Sat, 06 Nov 49 08:49:37 GMT", parsed));
+    EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 2049);
 
     // ONLY an exactly-two-digit token is expanded, so a four-digit year is untouched and a
     // three-digit one keeps whatever it had -- nothing else moves.
-    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Sun, 06 Nov 0094 08:49:37 GMT", parsed));
+    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Sat, 06 Nov 0094 08:49:37 GMT", parsed));
     EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 94)
         << "a four-digit year means exactly what it says";
 }
 
-TEST(HttpDateConsumptionTests, Pin2130_TheLENIENTDotNetVariantsAreDELIBERATELYNotAccepted) {
+TEST(HttpDateConsumptionTests, Pin2360_TheLenientDotNetVariantsAreAcceptedWithCorrectInstants) {
     // .NET accepts sixteen further formats, and they are LENIENCY rather than required forms: a
     // UTC zone token instead of GMT, no zone token at all, a missing day-of-week, a two-digit
     // year on an IMF-fixdate, and RFC 5322 numeric offsets. Adopting them would accept text
@@ -370,7 +368,7 @@ TEST(HttpDateConsumptionTests, Fix2360_TheShapesDoNotCrossContaminate) {
 }
 
 // FLIPPED by #2376 (2026-08-18). #2360's own tests surfaced these: the three strict arms are
-// sscanf conversions, and sscanf's %d and %[A-Za-z] do not bound a field's width, so each arm was
+// sscanf conversions, and sscanf's %d and %[A-Za-z] did not bound a field's width, so each arm was
 // WIDER than the format string it transcribes.
 //
 // THE TICKET NAMED TWO SITES AND THERE ARE THREE. It listed the abbreviated weekday on the
@@ -410,22 +408,62 @@ TEST(HttpDateConsumptionTests, Fix2376_TheStrictArmsMatchTheirFormatStrings) {
         ASSERT_TRUE(parsed.getDateProperty().has_value());
         EXPECT_EQ(parsed.getDateProperty()->getUtcTicksProperty(), expected.getUtcTicksProperty());
     }
-    // All seven weekday names are accepted on both shapes, so this is a name check and not an
-    // accidental "Sun only".
-    for (const char* d : {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}) {
+    // Every name is recognized, but it must agree with the date. 6..12 November 1994 are
+    // Sunday..Saturday, so this also proves the check is not accidentally "Sun only".
+    const char* abbreviated[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    const char* full[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+                          "Saturday"};
+    for (int i = 0; i < 7; ++i) {
+        const std::string day = std::to_string(6 + i);
         EXPECT_TRUE(RangeConditionHeaderValue::TryParse(
-            std::string(d) + ", 06 Nov 1994 08:49:37 GMT", parsed)) << d;
-    }
-    for (const char* d : {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
-                          "Saturday"}) {
+            std::string(abbreviated[i]) + ", " + day + " Nov 1994 08:49:37 GMT", parsed));
         EXPECT_TRUE(RangeConditionHeaderValue::TryParse(
-            std::string(d) + ", 06-Nov-94 08:49:37 GMT", parsed)) << d;
+            std::string(full[i]) + ", " + day + "-Nov-94 08:49:37 GMT", parsed));
     }
+
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse(
+        "Mon, 06 Nov 1994 08:49:37 GMT", parsed));
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse(
+        "Monday, 06-Nov-94 08:49:37 GMT", parsed));
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse(
+        "Mon Nov  6 08:49:37 1994", parsed));
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse(
+        "Mon, 06 Nov 1994 08:49:37 UTC", parsed))
+        << "the lenient arm must not reaccept a strict value with a false weekday";
+}
+
+TEST(HttpDateConsumptionTests, InvariantNamesAreAsciiCaseInsensitiveButGmtLiteralIsNot) {
+    RangeConditionHeaderValue parsed{std::string("\"x\"")};
+    const System::DateTimeOffset expected(1994, 11, 6, 8, 49, 37, System::TimeSpan::Zero);
+    for (const char* value : {"sUn, 06 nOv 1994 08:49:37 GMT",
+                              "sUnDaY, 06-nOv-94 08:49:37 GMT",
+                              "sUn nOv  6 08:49:37 1994"}) {
+        ASSERT_TRUE(RangeConditionHeaderValue::TryParse(value, parsed)) << value;
+        ASSERT_TRUE(parsed.getDateProperty().has_value());
+        EXPECT_EQ(parsed.getDateProperty()->getUtcTicksProperty(), expected.getUtcTicksProperty());
+    }
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse(
+        "Sun, 06 Nov 1994 08:49:37 gmt", parsed));
+}
+
+TEST(HttpDateConsumptionTests, NumericFieldsRejectSignsAndOversizedLexemes) {
+    RangeConditionHeaderValue parsed{std::string("\"x\"")};
+    for (const char* value : {"Sun, +06 Nov 1994 08:49:37 GMT",
+                              "Sun, 06 Nov +1994 08:49:37 GMT",
+                              "Sun, 06 Nov 1994 +08:49:37 GMT",
+                              "Sunday, 06-Nov-99999999999999999999 08:49:37 GMT",
+                              "Sun Nov  6 08:49:37 99999999999999999999"}) {
+        EXPECT_FALSE(RangeConditionHeaderValue::TryParse(value, parsed)) << value;
+    }
+
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse(
+        "06-Nov-2094 08:49:37 GMT", parsed))
+        << "the no-weekday hyphenated form belongs to Cookie Expires, not HTTP headers";
 }
 
 TEST(HttpDateConsumptionTests, AnEmbeddedNULCannotTruncateTheValueIntoAValidDate) {
-    // sscanf works on a C string, so without this guard "…GMT\0trailing" would consume a clean
-    // prefix and report a complete match over text the caller never bounded.
+    // The original sscanf implementation could truncate here; the current bounded cursor rejects
+    // NUL as a non-token too. The regression stays at the public door across both implementations.
     RetryConditionHeaderValue parsed{System::TimeSpan::Zero};
     EXPECT_FALSE(RetryConditionHeaderValue::TryParse(std::string(kValid) + std::string("\0junk", 5),
                                                      parsed));

@@ -21,19 +21,21 @@ namespace System {
      * not header-only, carries two exception types and a 270-line private POSIX header, and would
      * put tzdata reading under **every** consumer of `Core.Base`.
      *
-     * @note **This is deliberately two members, not a zone.** It is not `TimeZoneInfo`'s API in
-     * miniature and must not grow into one: identifiers, adjustment rules, ambiguity and
-     * serialisation all stay on the real types. What `ToLocalTime`/`ToUniversalTime` need is an
-     * offset for an instant, and that is all this promises.
+     * @note **This is deliberately a conversion boundary, not a zone.** It is not
+     * `TimeZoneInfo`'s API in miniature and must not grow into one: identifiers, adjustment
+     * rules, ambiguity and serialisation all stay on the real types. The two offset queries are
+     * distinct because a local wall clock and a UTC instant require different DST resolution at
+     * transition boundaries. The UTC query has a compatibility default for fixed test zones.
      *
-     * @note **A DATE-SENSITIVE implementation exists and that is why phase 2 could land.** #1941's
+     * @note **DATE-SENSITIVE implementations exist and that is why phase 2 could land.** #1941's
      * record blocked the conversion phase on *"a date-sensitive timezone/DST model"* and looked at
      * `TimeZoneInfo`, whose `GetUtcOffset(DateTime)` **ignores its argument** and whose
      * `IsDaylightSavingTime` is always `false` -- both documented as limitations on that type.
-     * `System::TimeZone::CurrentTimeZone()` is the one that is per-date: on POSIX it resolves the
-     * offset **and the DST flag** for the instant given. It describes only the process-local zone,
-     * which is precisely the zone `ToLocalTime` and `ToUniversalTime` convert against, so the model
-     * the record wanted was present all along -- on the other type.
+     * `System::TimeZone::CurrentTimeZone()` is the one that is per-date: on POSIX and Windows it
+     * resolves the offset **and the DST flag** for the supplied wall clock / UTC instant. It
+     * describes only the process-local zone, which is precisely the zone `ToLocalTime` and
+     * `ToUniversalTime` convert against. Emscripten has no timezone database and explicitly uses
+     * a distinct zero-offset Local model.
      */
     class ILocalTimeZone {
     public:
@@ -41,6 +43,18 @@ namespace System {
 
         /** @return This zone's offset from UTC **at @p time**, DST included where modelled. */
         [[nodiscard]] virtual TimeSpan GetUtcOffset(const DateTime& time) const = 0;
+
+        /**
+         * @brief Returns the offset selected by the UTC instant @p time.
+         *
+         * `DateTime::ToLocalTime` uses this member. A date-sensitive implementation must resolve
+         * DST from the UTC instant rather than reinterpret its fields as a local wall clock.
+         * Fixed-offset implementations need not override it.
+         */
+        [[nodiscard]] virtual TimeSpan GetUtcOffsetFromUniversalTime(
+            const DateTime& time) const {
+            return GetUtcOffset(time);
+        }
 
         /** @return true if @p time falls in this zone's daylight saving period. */
         [[nodiscard]] virtual bool IsDaylightSavingTime(const DateTime& time) const = 0;

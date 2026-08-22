@@ -1064,6 +1064,7 @@ EXCLUDE_SYMLINKS       = NO
 # exclude all test directories for example use the pattern */test/*
 
 EXCLUDE_PATTERNS       = */src/* \
+                         */modules/net/include/System/Net/detail/HttpDateParser.hpp \
                          */tests/*
 
 # The EXCLUDE_SYMBOLS tag can be used to specify one or more symbol names

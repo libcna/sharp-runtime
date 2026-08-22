@@ -4,21 +4,27 @@
 #include "System/ArgumentNullException.hpp"
 #include "System/ILocalTimeZone.hpp"
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include <cstdlib>
+#include <ctime>
 #include <gtest/gtest.h>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
+#include "System/DateTimeKind.hpp"
 #include "System/DateTimeOffset.hpp"
 #include "System/FormatException.hpp"
 #include "System/DayOfWeek.hpp"
 #include "System/TimeSpan.hpp"
+#include "System/detail/ProcessTimeZoneState.hpp"
 
 using System::ArgumentException;
 using System::ArgumentOutOfRangeException;
 using System::DateTime;
+using System::DateTimeKind;
 using System::DateTimeOffset;
 using System::DayOfWeek;
 using System::TimeSpan;
@@ -57,18 +63,226 @@ TEST(DateTimeOffsetTests2, CtorFromTicksAndOffset) {
     EXPECT_NEAR(dto.getOffsetProperty().getTotalHoursProperty(), 2.0, 1e-9);
 }
 
-TEST(DateTimeOffsetTests2, CtorFromDateTime_AttachesZeroOffset) {
-    DateTime dt(2020, 6, 15, 10, 30, 0);
+TEST(DateTimeOffsetTests2, CtorFromUtcDateTime_AttachesZeroOffset) {
+    DateTime dt(DateTime(2020, 6, 15, 10, 30, 0).getTicksProperty(), DateTimeKind::Utc);
     DateTimeOffset dto(dt);
     EXPECT_TRUE(dto.getOffsetProperty() == TimeSpan::Zero);
     EXPECT_EQ(dto.getUtcTicksProperty(), dt.getTicksProperty());
+    EXPECT_EQ(dto.getDateTimeProperty().getKindProperty(), DateTimeKind::Unspecified);
 }
 
 TEST(DateTimeOffsetTests2, CtorFromDateTime_ImplicitConversion) {
-    DateTime dt(2020, 6, 15, 10, 30, 0);
+    DateTime dt(DateTime(2020, 6, 15, 10, 30, 0).getTicksProperty(), DateTimeKind::Utc);
     DateTimeOffset dto = dt; // implicit conversion, mirrors .NET's implicit operator
     EXPECT_EQ(dto.getUtcTicksProperty(), dt.getTicksProperty());
 }
+
+// ===========================================================================================
+// Post-#1941 DateTimeKind ripple: DateTimeOffset constructors, properties, and factories
+//
+// Core.Base cannot name TimeZone::CurrentTimeZone() without making the TimeZone -> Core.Base
+// dependency cyclic. DateTimeOffset already had a private platform reader and documents the
+// accepted practical-subset boundary: every local operation uses the process's CURRENT offset,
+// not historical/future rules for the input date. A fixed POSIX TZ string makes the supported
+// contract deterministic without depending on the host's configured zone or installed tzdata.
+// ===========================================================================================
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+namespace {
+
+class ScopedDateTimeOffsetTz final {
+    std::string saved_;
+    bool wasSet_;
+
+public:
+    explicit ScopedDateTimeOffsetTz(const char* zone) {
+        std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
+        const char* current = ::getenv("TZ");
+        wasSet_ = current != nullptr;
+        if (wasSet_) saved_ = current;
+        ::setenv("TZ", zone, 1);
+        ::tzset();
+    }
+
+    ScopedDateTimeOffsetTz(const ScopedDateTimeOffsetTz&) = delete;
+    ScopedDateTimeOffsetTz& operator=(const ScopedDateTimeOffsetTz&) = delete;
+
+    ~ScopedDateTimeOffsetTz() {
+        std::lock_guard<std::mutex> lock(System::detail::processTimeZoneMutex());
+        if (wasSet_) ::setenv("TZ", saved_.c_str(), 1);
+        else         ::unsetenv("TZ");
+        ::tzset();
+    }
+};
+
+SharpRuntime::longcs tickDistance(SharpRuntime::longcs left, SharpRuntime::longcs right) {
+    return left >= right ? left - right : right - left;
+}
+
+} // namespace
+
+TEST(DateTimeOffsetKindRippleTests, Post1941_OneArgumentConstructorChoosesOffsetByKind) {
+    ScopedDateTimeOffsetTz tz("UTC-02"); // POSIX sign convention: a fixed UTC+02:00 zone
+    const DateTime clock(2024, 6, 15, 12, 0, 0);
+    const DateTime utc(clock.getTicksProperty(), DateTimeKind::Utc);
+    const DateTime local(clock.getTicksProperty(), DateTimeKind::Local);
+
+    const DateTimeOffset fromUtc(utc);
+    const DateTimeOffset fromLocal(local);
+    const DateTimeOffset fromUnspecified(clock);
+
+    EXPECT_EQ(fromUtc.getOffsetProperty(), TimeSpan::Zero);
+    EXPECT_EQ(fromLocal.getOffsetProperty(), TimeSpan::FromHours(2));
+    EXPECT_EQ(fromUnspecified.getOffsetProperty(), TimeSpan::FromHours(2));
+
+    for (const DateTimeOffset* value : {&fromUtc, &fromLocal, &fromUnspecified}) {
+        EXPECT_EQ(value->getDateTimeProperty().getTicksProperty(), clock.getTicksProperty());
+        EXPECT_EQ(value->getDateTimeProperty().getKindProperty(), DateTimeKind::Unspecified);
+    }
+}
+
+TEST(DateTimeOffsetKindRippleTests, Post1941_GeneralParseDefaultsAnOffsetlessInputToLocal) {
+    ScopedDateTimeOffsetTz tz("UTC-02"); // fixed UTC+02:00
+    DateTimeOffset parsed;
+
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T12:34:56", parsed));
+    EXPECT_EQ(parsed.getDateTimeProperty(), DateTime(2024, 6, 15, 12, 34, 56));
+    EXPECT_EQ(parsed.getOffsetProperty(), TimeSpan::FromHours(2));
+    EXPECT_EQ(DateTimeOffset::Parse("2024-06-15T12:34:56").getOffsetProperty(),
+              TimeSpan::FromHours(2));
+
+    // An explicit designator still wins over the local default.
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T12:34:56Z", parsed));
+    EXPECT_EQ(parsed.getOffsetProperty(), TimeSpan::Zero);
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T12:34:56-05:30", parsed));
+    EXPECT_EQ(parsed.getOffsetProperty(), TimeSpan::FromMinutes(-330));
+}
+
+TEST(DateTimeOffsetKindRippleTests, Post1941_OffsetlessParseStillEnforcesTheUtcRange) {
+    ScopedDateTimeOffsetTz tz("UTC-14"); // fixed UTC+14:00
+    const DateTimeOffset sentinel(DateTime(2024, 6, 15), TimeSpan::Zero);
+    DateTimeOffset parsed = sentinel;
+
+    // The visible clock fits, but applying the default local offset would place the represented
+    // UTC instant before DateTime.MinValue. TryParse must fail and reset its out value; Parse must
+    // translate the same condition to FormatException.
+    EXPECT_FALSE(DateTimeOffset::TryParse("0001-01-01T00:00:00", parsed));
+    EXPECT_EQ(parsed, DateTimeOffset::MinValue);
+    EXPECT_THROW((void)DateTimeOffset::Parse("0001-01-01T00:00:00"),
+                 System::FormatException);
+}
+
+TEST(DateTimeOffsetKindRippleTests, Post1941_ExplicitOffsetMustAgreeWithUtcAndLocalKind) {
+    ScopedDateTimeOffsetTz tz("UTC-02");
+    const DateTime clock(2024, 6, 15, 12, 0, 0);
+    const DateTime utc(clock.getTicksProperty(), DateTimeKind::Utc);
+    const DateTime local(clock.getTicksProperty(), DateTimeKind::Local);
+
+    DateTimeOffset utcValue(utc, TimeSpan::Zero);
+    DateTimeOffset localValue(local, TimeSpan::FromHours(2));
+    DateTimeOffset arbitrary(clock, TimeSpan::FromHours(-5));
+    EXPECT_EQ(utcValue.getDateTimeProperty().getKindProperty(), DateTimeKind::Unspecified);
+    EXPECT_EQ(localValue.getDateTimeProperty().getKindProperty(), DateTimeKind::Unspecified);
+    EXPECT_EQ(arbitrary.getDateTimeProperty().getKindProperty(), DateTimeKind::Unspecified);
+
+    try {
+        (void)DateTimeOffset(utc, TimeSpan::FromHours(15));
+        FAIL() << "expected Utc/offset mismatch";
+    } catch (const ArgumentException& e) {
+        // Kind consistency runs before the ordinary +/-14h bound, as in DateTimeOffset.cs.
+        EXPECT_EQ(e.getParamNameProperty(), "offset");
+        EXPECT_EQ(e.getMessageProperty(),
+                  "The UTC Offset for Utc DateTime instances must be 0. (Parameter 'offset')");
+    }
+
+    try {
+        (void)DateTimeOffset(local, TimeSpan(TimeSpan::TicksPerMinute / 2));
+        FAIL() << "expected Local/offset mismatch";
+    } catch (const ArgumentException& e) {
+        // This is the Local mismatch, not the later whole-minute diagnostic.
+        EXPECT_EQ(e.getParamNameProperty(), "offset");
+        EXPECT_EQ(e.getMessageProperty(),
+                  "The UTC Offset of the local dateTime parameter does not match the offset "
+                  "argument. (Parameter 'offset')");
+    }
+
+    EXPECT_NO_THROW((void)DateTimeOffset(clock, TimeSpan::FromHours(13)));
+    EXPECT_THROW((void)DateTimeOffset(clock, TimeSpan(TimeSpan::TicksPerMinute / 2)),
+                 ArgumentException);
+}
+
+TEST(DateTimeOffsetKindRippleTests, Post1941_DateTimePropertiesPublishTheReferenceKinds) {
+    ScopedDateTimeOffsetTz tz("UTC-02");
+    const DateTimeOffset value(2024, 6, 15, 12, 0, 0, TimeSpan::FromHours(5));
+
+    const DateTime clock = value.getDateTimeProperty();
+    const DateTime utc = value.getUtcDateTimeProperty();
+    const DateTime local = value.getLocalDateTimeProperty();
+
+    EXPECT_EQ(clock.getKindProperty(), DateTimeKind::Unspecified);
+    EXPECT_EQ(clock.getHourProperty(), 12);
+    EXPECT_EQ(utc.getKindProperty(), DateTimeKind::Utc);
+    EXPECT_EQ(utc.getHourProperty(), 7);
+    EXPECT_EQ(local.getKindProperty(), DateTimeKind::Local);
+    EXPECT_EQ(local.getHourProperty(), 9);
+
+    // Internal clock construction must stay Unspecified even when it starts from UtcDateTime.
+    const DateTimeOffset shifted = value.ToOffset(TimeSpan::FromHours(-3));
+    EXPECT_EQ(shifted.getDateTimeProperty().getKindProperty(), DateTimeKind::Unspecified);
+    EXPECT_EQ(shifted.getUtcTicksProperty(), value.getUtcTicksProperty());
+    const DateTimeOffset asLocal = value.ToLocalTime();
+    EXPECT_EQ(asLocal.getDateTimeProperty().getKindProperty(), DateTimeKind::Unspecified);
+}
+
+TEST(DateTimeOffsetKindRippleTests, Post1941_NowFactoriesShareOneUtcInstantAndCorrectOffsets) {
+    ScopedDateTimeOffsetTz tz("UTC-02");
+    const DateTimeOffset utcBefore = DateTimeOffset::getUtcNowProperty();
+    const DateTimeOffset localNow = DateTimeOffset::getNowProperty();
+    const DateTimeOffset utcAfter = DateTimeOffset::getUtcNowProperty();
+
+    EXPECT_EQ(utcBefore.getOffsetProperty(), TimeSpan::Zero);
+    EXPECT_EQ(localNow.getOffsetProperty(), TimeSpan::FromHours(2));
+    EXPECT_EQ(utcAfter.getOffsetProperty(), TimeSpan::Zero);
+    EXPECT_EQ(utcBefore.getDateTimeProperty().getKindProperty(), DateTimeKind::Unspecified);
+    EXPECT_EQ(localNow.getDateTimeProperty().getKindProperty(), DateTimeKind::Unspecified);
+    EXPECT_EQ(utcBefore.getUtcDateTimeProperty().getKindProperty(), DateTimeKind::Utc);
+    EXPECT_EQ(localNow.getLocalDateTimeProperty().getKindProperty(), DateTimeKind::Local);
+
+    constexpr SharpRuntime::longcs generousClockTolerance = 5 * DateTime::TicksPerSecond;
+    EXPECT_LT(tickDistance(localNow.getUtcTicksProperty(), utcBefore.getUtcTicksProperty()),
+              generousClockTolerance);
+    EXPECT_LT(tickDistance(localNow.getUtcTicksProperty(), utcAfter.getUtcTicksProperty()),
+              generousClockTolerance);
+    EXPECT_EQ(localNow.getTicksProperty() - localNow.getUtcTicksProperty(),
+              TimeSpan::FromHours(2).getTicksProperty());
+}
+
+TEST(DateTimeOffsetKindRippleTests, Post1941_LocalConversionClampsAtBothDateTimeBounds) {
+    {
+        ScopedDateTimeOffsetTz tz("UTC-14"); // POSIX spelling for fixed UTC+14:00
+        const DateTimeOffset local = DateTimeOffset::MaxValue.ToLocalTime();
+        EXPECT_EQ(local.getOffsetProperty(), TimeSpan::FromHours(14));
+        EXPECT_EQ(local.getTicksProperty(), DateTime::MaxTicks);
+        EXPECT_EQ(local.getDateTimeProperty().getKindProperty(), DateTimeKind::Unspecified);
+
+        const DateTime property = DateTimeOffset::MaxValue.getLocalDateTimeProperty();
+        EXPECT_EQ(property.getTicksProperty(), DateTime::MaxTicks);
+        EXPECT_EQ(property.getKindProperty(), DateTimeKind::Local);
+    }
+
+    {
+        ScopedDateTimeOffsetTz tz("UTC+14"); // POSIX spelling for fixed UTC-14:00
+        const DateTimeOffset local = DateTimeOffset::MinValue.ToLocalTime();
+        EXPECT_EQ(local.getOffsetProperty(), TimeSpan::FromHours(-14));
+        EXPECT_EQ(local.getTicksProperty(), 0);
+        EXPECT_EQ(local.getDateTimeProperty().getKindProperty(), DateTimeKind::Unspecified);
+
+        const DateTime property = DateTimeOffset::MinValue.getLocalDateTimeProperty();
+        EXPECT_EQ(property.getTicksProperty(), 0);
+        EXPECT_EQ(property.getKindProperty(), DateTimeKind::Local);
+    }
+}
+#endif
 
 TEST(DateTimeOffsetTests2, CtorFromComponentsAndOffset) {
     DateTimeOffset dto(2020, 6, 15, 10, 30, 45, TimeSpan::FromHours(-5));
@@ -155,6 +369,73 @@ TEST(DateTimeOffsetTests2, LocalDateTimeProperty_MatchesUtcPlusLocalOffset) {
 }
 
 // ---------------------------------------------------------------------------
+// DateTimeOffset formatting uses DateTime's one custom grammar with an offset
+// ---------------------------------------------------------------------------
+
+TEST(DateTimeOffsetFormatKindRippleTests, CustomClockFormatsDoNotAcquireAnOffsetSuffix) {
+    const DateTimeOffset value(2024, 6, 15, 10, 30, 45, TimeSpan::FromHours(5.5));
+
+    EXPECT_EQ(value.ToString("yyyy"), "2024");
+    EXPECT_EQ(value.ToString("yyyy-MM-dd HH:mm:ss"), "2024-06-15 10:30:45");
+    EXPECT_EQ(value.ToString(""), value.ToString());
+}
+
+TEST(DateTimeOffsetFormatKindRippleTests, CustomOffsetTokensUseTheStoredOffsetAndTheirOwnWidths) {
+    const DateTimeOffset positive(2024, 6, 15, 10, 30, 45, TimeSpan::FromMinutes(330));
+    EXPECT_EQ(positive.ToString("%z"), "+5");
+    EXPECT_EQ(positive.ToString("zz"), "+05");
+    EXPECT_EQ(positive.ToString("zzz"), "+05:30");
+    EXPECT_EQ(positive.ToString("zzzz"), "+05:30");
+    EXPECT_EQ(positive.ToString("%K"), "+05:30");
+    EXPECT_EQ(positive.ToString("KK"), "+05:30+05:30");
+    EXPECT_EQ(positive.ToString("yyyy %z"), "2024 +5");
+
+    const DateTimeOffset negative(2024, 6, 15, 10, 30, 45, TimeSpan::FromMinutes(-30));
+    EXPECT_EQ(negative.ToString("%z"), "-0");
+    EXPECT_EQ(negative.ToString("zz"), "-00");
+    EXPECT_EQ(negative.ToString("zzz"), "-00:30");
+
+    // One character is first interpreted as a standard specifier. `%` is therefore required
+    // for the one-character custom forms, just as DateTime requires `%d` for a custom day.
+    EXPECT_THROW(positive.ToString("z"), System::FormatException);
+    EXPECT_THROW(positive.ToString("K"), System::FormatException);
+}
+
+TEST(DateTimeOffsetFormatKindRippleTests, QuotedOffsetLettersStayLiteral) {
+    const DateTimeOffset value(2024, 6, 15, 10, 30, 45, TimeSpan::FromMinutes(330));
+    EXPECT_EQ(value.ToString("yyyy 'z' 'K' zzz"), "2024 z K +05:30");
+    EXPECT_EQ(value.ToString("yyyy \"z\" \"K\" zzz"), "2024 z K +05:30");
+}
+
+TEST(DateTimeOffsetFormatKindRippleTests, StandardClockPatternsDoNotAppendAnOffset) {
+    const DateTimeOffset value(2024, 6, 15, 10, 30, 45, TimeSpan::FromMinutes(330));
+    EXPECT_EQ(value.ToString("s"), "2024-06-15T10:30:45");
+    EXPECT_EQ(value.ToString("G"), "06/15/2024 10:30:45");
+}
+
+TEST(DateTimeOffsetFormatKindRippleTests, RoundtripHasSevenDigitsAndUniversalFullIsRejected) {
+    const DateTime clock = DateTime(2024, 6, 15, 10, 30, 45, 123).AddTicks(4567);
+    const DateTimeOffset value(clock, TimeSpan::FromMinutes(330));
+
+    EXPECT_EQ(value.ToString("O"), "2024-06-15T10:30:45.1234567+05:30");
+    EXPECT_EQ(value.ToString("o"), value.ToString("O"));
+    EXPECT_THROW(value.ToString("U"), System::FormatException);
+}
+
+TEST(DateTimeOffsetFormatKindRippleTests, OptionalFractionsTrimZerosAndADanglingPoint) {
+    const DateTime partial = DateTime(2024, 6, 15, 10, 30, 45, 123).AddTicks(4000);
+    const DateTimeOffset withFraction(partial, TimeSpan::FromMinutes(330));
+    const DateTimeOffset whole(2024, 6, 15, 10, 30, 45, TimeSpan::FromMinutes(330));
+
+    EXPECT_EQ(withFraction.ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz"),
+              "2024-06-15T10:30:45.1234+05:30");
+    EXPECT_EQ(whole.ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz"),
+              "2024-06-15T10:30:45+05:30");
+    EXPECT_THROW(withFraction.ToString("yyyy-MM-ddTHH:mm:ss.ffffffffzzz"),
+                 System::FormatException);
+}
+
+// ---------------------------------------------------------------------------
 // ToOffset
 // ---------------------------------------------------------------------------
 
@@ -163,6 +444,16 @@ TEST(DateTimeOffsetTests2, ToOffset_PreservesUtcInstant) {
     DateTimeOffset converted = dto.ToOffset(TimeSpan::FromHours(-3));
     EXPECT_EQ(converted.getUtcTicksProperty(), dto.getUtcTicksProperty());
     EXPECT_NEAR(converted.getOffsetProperty().getTotalHoursProperty(), -3.0, 1e-9);
+}
+
+TEST(DateTimeOffsetTests2, ToOffset_ExtremeTimeSpanThrowsWithoutSignedOverflow) {
+    // ToOffset accepts a full TimeSpan, not merely an already-validated timezone offset. The
+    // checked DateTime addition must reject these values before the DateTimeOffset offset guard;
+    // spelling this as raw signed addition is UBSan-confirmed overflow at the upper boundary.
+    EXPECT_THROW(DateTimeOffset::MaxValue.ToOffset(TimeSpan(SharpRuntime::LONGCS_MAX)),
+                 ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTimeOffset::MinValue.ToOffset(TimeSpan(SharpRuntime::LONGCS_MIN)),
+                 ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------
@@ -632,7 +923,7 @@ TEST(DateTimeOffsetTests2, Decided1929_ShortDatePartStillFindsItsOffset) {
 
     // A bare short date is eight characters; the removed `size() < 10` precheck
     // rejected it before the grammar ever saw it.
-    ASSERT_TRUE(DateTimeOffset::TryParse("2024-6-5", out));
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-6-5Z", out));
     EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 0);
     EXPECT_EQ(out.getTicksProperty(), DateTime(2024, 6, 5).getTicksProperty());
 }
@@ -768,6 +1059,14 @@ TEST(DateTimeOffsetParseExact1943Tests, StylesAreValidatedAndTheOutParameterIsLe
                  System::ArgumentException);
     EXPECT_EQ(sentinel.getDateTimeProperty(), System::DateTime(2001, 2, 3, 4, 5, 6));
 
+    // DateTimeOffset has a narrower validator than DateTime: NoCurrentDateDefault is invalid,
+    // and Try* still validates it before touching the out parameter.
+    EXPECT_THROW(DateTimeOffset::TryParseExact(
+                     "2024-06-15", "yyyy-MM-dd", nullptr,
+                     DateTimeStyles::NoCurrentDateDefault, sentinel),
+                 System::ArgumentException);
+    EXPECT_EQ(sentinel.getDateTimeProperty(), System::DateTime(2001, 2, 3, 4, 5, 6));
+
     // The parameter name is `styles` here where DateTime's is `style`. .NET VARIES IT BY OVERLOAD
     // rather than using one name, and both are transcribed as they are rather than harmonised.
     try {
@@ -777,6 +1076,46 @@ TEST(DateTimeOffsetParseExact1943Tests, StylesAreValidatedAndTheOutParameterIsLe
     } catch (const System::ArgumentException& e) {
         EXPECT_EQ(e.getParamNameProperty(), "styles");
     }
+
+    try {
+        (void)DateTimeOffset::ParseExact("2024-06-15", "yyyy-MM-dd", nullptr,
+                                         DateTimeStyles::NoCurrentDateDefault);
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "styles");
+    }
+
+    EXPECT_THROW(DateTimeOffset::ParseExact(
+                     "2024-06-15", std::vector<std::string>{}, nullptr,
+                     static_cast<DateTimeStyles>(0x4000)),
+                 System::ArgumentException)
+        << "styles are validated before an empty format collection is diagnosed";
+}
+
+TEST(DateTimeOffsetParseExact1943Tests, AdjustToUniversalNormalizesClockAndOffset) {
+    using System::DateTimeOffset;
+    using System::Globalization::DateTimeStyles;
+    const Dto1943FixedZone plusTwo(2);
+
+    const auto explicitOffset = DateTimeOffset::ParseExact(
+        "2024-06-15T12:00:00+02:00", "yyyy-MM-ddTHH:mm:sszzz", nullptr,
+        DateTimeStyles::AdjustToUniversal);
+    EXPECT_EQ(explicitOffset.getDateTimeProperty(), System::DateTime(2024, 6, 15, 10, 0, 0));
+    EXPECT_EQ(explicitOffset.getOffsetProperty(), System::TimeSpan::Zero);
+
+    const auto defaultedLocal = DateTimeOffset::ParseExact(
+        "2024-06-15T12:00:00", "yyyy-MM-ddTHH:mm:ss", nullptr,
+        DateTimeStyles::AdjustToUniversal, &plusTwo);
+    EXPECT_EQ(defaultedLocal.getDateTimeProperty(), System::DateTime(2024, 6, 15, 10, 0, 0));
+    EXPECT_EQ(defaultedLocal.getOffsetProperty(), System::TimeSpan::Zero);
+
+    // DateTimeOffset accepts and ignores RoundtripKind for compatibility, unlike DateTime's
+    // generic validation which rejects this combination. The remaining Adjust flag still acts.
+    const auto roundtripIgnored = DateTimeOffset::ParseExact(
+        "2024-06-15T12:00:00+02:00", "yyyy-MM-ddTHH:mm:sszzz", nullptr,
+        DateTimeStyles::RoundtripKind | DateTimeStyles::AdjustToUniversal);
+    EXPECT_EQ(roundtripIgnored.getDateTimeProperty(), System::DateTime(2024, 6, 15, 10, 0, 0));
+    EXPECT_EQ(roundtripIgnored.getOffsetProperty(), System::TimeSpan::Zero);
 }
 
 TEST(DateTimeOffsetParseExact1943Tests, TheOffsetBoundAndTheUtcRangeAreBothEnforced) {
@@ -793,4 +1132,33 @@ TEST(DateTimeOffsetParseExact1943Tests, TheOffsetBoundAndTheUtcRangeAreBothEnfor
                                                "yyyy-MM-ddTHH:mm:sszzz", out));
     EXPECT_TRUE(DateTimeOffset::TryParseExact("0001-01-01T00:00:00-05:00",
                                               "yyyy-MM-ddTHH:mm:sszzz", out));
+}
+
+TEST(DateTimeOffsetParseExact1943Tests, AnInvalidZoneOffsetFailsWithoutSignedOverflow) {
+    class InvalidZone final : public System::ILocalTimeZone {
+    public:
+        explicit InvalidZone(System::TimeSpan offset) : offset_(offset) {}
+        [[nodiscard]] System::TimeSpan GetUtcOffset(const System::DateTime&) const override {
+            return offset_;
+        }
+        [[nodiscard]] bool IsDaylightSavingTime(const System::DateTime&) const override {
+            return false;
+        }
+    private:
+        System::TimeSpan offset_;
+    };
+
+    const DateTimeOffset sentinel(DateTime(2001, 2, 3), TimeSpan::Zero);
+    for (const TimeSpan& invalid : {TimeSpan::MinValue, TimeSpan::MaxValue, TimeSpan(1)}) {
+        const InvalidZone zone(invalid);
+        DateTimeOffset out = sentinel;
+        EXPECT_FALSE(DateTimeOffset::TryParseExact(
+            "2024-06-15", "yyyy-MM-dd", nullptr,
+            System::Globalization::DateTimeStyles::None, out, &zone));
+        EXPECT_EQ(out, DateTimeOffset::MinValue);
+        EXPECT_THROW((void)DateTimeOffset::ParseExact(
+                         "2024-06-15", "yyyy-MM-dd", nullptr,
+                         System::Globalization::DateTimeStyles::None, &zone),
+                     System::FormatException);
+    }
 }

@@ -179,9 +179,10 @@ directions from one run.
 ### 5.2 SR-AUD-229 is a contradiction of the port's own documentation, not only of .NET
 
 `TimeZoneInfo.hpp:364-369` already says *"DST transitions are not modelled; this is always the
-standard offset."* The POSIX implementation does not deliver the standard offset. The Windows
-branch already does (`-(tzi.Bias * 60)` excludes `DaylightBias`). The repair makes POSIX agree with
-the documented contract and with the Windows branch — **no contract changes**.
+standard offset."* The POSIX implementation did not deliver the standard offset. The original
+repair made it agree with the documented contract. The later #2418 ripple review corrected the
+Windows formula independently: standard offset is `-(Bias + StandardBias)`, while
+`DaylightBias` remains excluded.
 
 ### 5.3 SR-AUD-223 is *two* independent defects in a 39-line file
 
@@ -366,9 +367,9 @@ wrong-answer classes with no diagnostic; neither is a memory-safety class.
   deliberate: the legacy `TimeZone` contract *is* per-date, it only ever describes the process-local
   zone, and it can answer per date without storing anything. `TimeZoneInfo` keeps its documented
   fixed-offset model. The asymmetry is stated in both headers.
-- **Ambiguous local times resolve to daylight** in the legacy adapter, because `mktime()` with
-  `tm_isdst = -1` picks the DST interpretation for a repeated hour. .NET's `TimeZone` picks
-  standard. Recorded in #2186; the legacy surface has no `IsAmbiguousTime` member to express it.
+- **Ambiguous local times resolve to standard** in the legacy adapter. Raw `mktime()` with
+  `tm_isdst = -1` was measured to depend on unrelated preceding calls; #2186 established .NET's
+  standard reading and the adapter now asks both interpretations explicitly.
 - **Invalid local times normalise forward** (02:30 on a spring-forward date answers with the
   post-transition offset) for the same reason.
 
@@ -379,8 +380,8 @@ wrong-answer classes with no diagnostic; neither is a memory-safety class.
 | Platform | Effect |
 |---|---|
 | Linux/POSIX | all of it; this is the tested baseline |
-| Windows | untouched. The `_WIN32` branches already read `Bias` (the standard offset) and `DaylightBias` separately, so §5.2's defect never existed there. #2177/#2178/#2179/#2180 are platform-neutral header code. #2182's adapter uses the POSIX helper only under `#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)` and keeps the frozen-offset behaviour elsewhere |
-| Emscripten | untouched. `Local()` still returns UTC and `FindSystemTimeZoneById` still throws `PlatformNotSupportedException`; the new helpers are inside the same POSIX guard |
+| Windows | #2418 repairs the `Bias + StandardBias` standard-offset formula, keeps standard and daylight names distinct, and makes the legacy `TimeZone` adapter select the per-year system rule for local-wall-clock and UTC-instant questions. Windows-only compile/contract pins guard the branches; runtime CI remains Ubuntu-only. |
+| Emscripten | The zero-offset model remains, but `Local()` is now a distinct Local-identity object rather than the canonical Utc singleton, so Kind propagation remains truthful. Non-Local/non-UTC database lookup is still unsupported. |
 | macOS | uses the POSIX branch. `/usr/share/zoneinfo` is present on macOS, so the TZif check and the month scan behave as on Linux. Not executed here — the repository's tracked CI is Ubuntu-only |
 
 No POSIX header enters any public `.hpp`. The new shared helper lives in
@@ -440,7 +441,7 @@ question without writing a byte, and #2183 is the repair.
 | **UBSan** | **yes** | offset arithmetic: `TimeSpan` negation, `FromSeconds(double)` conversions, the tick multiplications in the month scan, `intcs`/`long` mixing in the POSIX helpers |
 | **ASan** | **yes** | `tm_zone` is a pointer into libc-owned storage that `tzset()` may invalidate; the month scan reads it repeatedly across `setenv`/`tzset` cycles. Also covers the `stat`/`fopen` paths #2183 adds |
 | **LSan** | **yes** (with ASan) | the failure paths of #2183 must not leak the `FILE*` or a partially built zone |
-| **TSan** | **yes, and it is discriminating here** | the module holds **real shared mutable state**: `tzMutex()`, the `Local()` function-local static, and process-global `TZ`/`tzset()`. Concurrent `Local()` and `FindSystemTimeZoneById()` is exactly the race the existing mutex comment claims to prevent |
+| **TSan** | **yes, and it is discriminating here** | the module holds **real shared mutable state**: Core.Base's `System::detail::processTimeZoneMutex()`, the `Local()` function-local static, and process-global `TZ`/`tzset()`. Concurrent `Local()` and `FindSystemTimeZoneById()` is exactly the race the shared mutex prevents |
 
 TSan is run because there is shared mutable state to exercise, not as a formality — and a clean
 TSan run is reported as "no report on this workload", never as "the module is thread-safe".
@@ -496,8 +497,9 @@ a statement *about .NET*, not about this code.
   `TimeZoneNotFoundException` for a non-TZif file rather than switching to
   `InvalidTimeZoneException`, because which one .NET uses for "the id resolves to a file that is
   not zone data" is exactly the kind of claim this review will not make without evidence. Recorded.
-- **Windows and Emscripten runtime behaviour** — compiled, not executed. Unchanged from the
-  repository's standing platform policy.
+- **Windows and Emscripten runtime behaviour** — platform-specific branches are compiled and
+  contract-pinned but not executed by the repository's Ubuntu-only runtime CI. #2418 changed the
+  Windows per-date adapter and Emscripten Local identity as recorded in §13.
 
 ---
 

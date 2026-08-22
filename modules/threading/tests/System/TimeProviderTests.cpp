@@ -25,12 +25,17 @@ TEST(TimeProviderTests, GetUtcNow_ReturnsRecentTime) {
     TimeProvider& tp = TimeProvider::getSystemProperty();
     DateTimeOffset now = tp.GetUtcNow();
     EXPECT_GT(now.getYearProperty(), 2020);
+    EXPECT_EQ(now.getOffsetProperty(), TimeSpan::Zero);
+    EXPECT_EQ(now.getDateTimeProperty().getKindProperty(), System::DateTimeKind::Unspecified);
+    EXPECT_EQ(now.getUtcDateTimeProperty().getKindProperty(), System::DateTimeKind::Utc);
 }
 
 TEST(TimeProviderTests, GetLocalNow_ReturnsRecentTime) {
     TimeProvider& tp = TimeProvider::getSystemProperty();
     DateTimeOffset local = tp.GetLocalNow();
     EXPECT_GT(local.getYearProperty(), 2020);
+    EXPECT_EQ(local.getDateTimeProperty().getKindProperty(), System::DateTimeKind::Unspecified);
+    EXPECT_EQ(local.getLocalDateTimeProperty().getKindProperty(), System::DateTimeKind::Local);
 }
 
 TEST(TimeProviderTests, TimestampFrequency_Matches_Stopwatch) {

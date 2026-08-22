@@ -8,6 +8,7 @@
 
 using System::TimeZoneInfo;
 using System::DateTime;
+using System::DateTimeKind;
 using System::TimeSpan;
 using System::DayOfWeek;
 
@@ -118,13 +119,14 @@ TEST(AdjustmentRuleTests, NoDaylightTransitions_DefaultIsFalse) {
 // getHasDaylightSavingProperty
 // ---------------------------------------------------------------------------
 
-TEST(AdjustmentRuleTests, HasDaylightSaving_ZeroDelta_DefaultTransitions_False) {
+TEST(AdjustmentRuleTests, Create5_IdenticalDefaultTransitionsAreRejected) {
     DateTime start(2020, 1, 1), end(2020, 12, 31);
-    // Zero delta, default transitions → no DST
-    auto r = TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
-        start, end, TimeSpan::Zero,
-        TimeZoneInfo::TransitionTime{}, TimeZoneInfo::TransitionTime{});
-    EXPECT_FALSE(r->getHasDaylightSavingProperty());
+    // Public factories always have noDaylightTransitions=false. Two identical transition values
+    // therefore do not describe a valid public rule, even when both values and the delta are zero.
+    EXPECT_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+                     start, end, TimeSpan::Zero,
+                     TimeZoneInfo::TransitionTime{}, TimeZoneInfo::TransitionTime{}),
+                 System::ArgumentException);
 }
 
 TEST(AdjustmentRuleTests, HasDaylightSaving_NonZeroDelta_True) {
@@ -296,5 +298,122 @@ TEST(AdjustmentRuleTests, Create5_EndBeforeStart_MessageNamesTheOrdering) {
         FAIL() << "expected ArgumentException";
     } catch (const System::ArgumentException& e) {
         EXPECT_NE(std::string(e.what()).find("must come before"), std::string::npos);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Post-#1941 ripple audit: AdjustmentRule now consumes DateTimeKind.
+// ---------------------------------------------------------------------------
+
+TEST(AdjustmentRuleTests, Post1941_NonUnspecifiedStartAndEndAreRejectedByBothFactories) {
+    const DateTime start = DateTime::SpecifyKind(DateTime(2025, 1, 1), DateTimeKind::Utc);
+    const DateTime end = DateTime::SpecifyKind(DateTime(2025, 12, 31), DateTimeKind::Local);
+    const DateTime plainStart(2025, 1, 1);
+    const DateTime plainEnd(2025, 12, 31);
+
+    EXPECT_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+                     start, plainEnd, TimeSpan::Zero, fixedTT(), floatTT()),
+                 System::ArgumentException);
+    EXPECT_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+                     plainStart, end, TimeSpan::Zero, fixedTT(), floatTT()),
+                 System::ArgumentException);
+    EXPECT_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+                     start, plainEnd, TimeSpan::Zero, fixedTT(), floatTT(), TimeSpan::Zero),
+                 System::ArgumentException);
+    EXPECT_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+                     plainStart, end, TimeSpan::Zero, fixedTT(), floatTT(), TimeSpan::Zero),
+                 System::ArgumentException);
+
+    try {
+        (void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+            start, plainEnd, TimeSpan::Zero, fixedTT(), floatTT());
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "dateStart");
+        EXPECT_NE(std::string(e.what()).find("DateTimeKind.Unspecified"),
+                  std::string::npos);
+    }
+
+    try {
+        (void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+            plainStart, end, TimeSpan::Zero, fixedTT(), floatTT());
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "dateEnd");
+        EXPECT_NE(std::string(e.what()).find("DateTimeKind.Unspecified"),
+                  std::string::npos);
+    }
+}
+
+TEST(AdjustmentRuleTests, Post1941_OnlyUnspecifiedBoundariesAreAccepted) {
+    auto unspecified = TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+        DateTime(2025, 1, 1), DateTime(2025, 12, 31), TimeSpan::Zero,
+        fixedTT(), floatTT());
+    ASSERT_NE(unspecified, nullptr);
+    EXPECT_EQ(unspecified->getDateStartProperty().getKindProperty(),
+              DateTimeKind::Unspecified);
+    EXPECT_EQ(unspecified->getDateEndProperty().getKindProperty(),
+              DateTimeKind::Unspecified);
+
+    // Public CreateAdjustmentRule requires Unspecified even though internal runtime rule shapes
+    // may carry UTC transition instants.
+    const DateTime start = DateTime::SpecifyKind(DateTime(2025, 1, 1, 5, 30, 0),
+                                                  DateTimeKind::Utc);
+    const DateTime end = DateTime::SpecifyKind(DateTime(2025, 12, 31, 6, 30, 0),
+                                                DateTimeKind::Utc);
+
+    EXPECT_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+                     start, end, TimeSpan::Zero, fixedTT(), floatTT()),
+                 System::ArgumentException);
+    EXPECT_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+                     start, end, TimeSpan::Zero, fixedTT(), floatTT(), TimeSpan::FromHours(1)),
+                 System::ArgumentException);
+}
+
+TEST(AdjustmentRuleTests, IdenticalTransitionsAreRejectedByBothPublicFactories) {
+    const DateTime start(2025, 1, 1);
+    const DateTime end(2025, 12, 31);
+    const auto same = fixedTT();
+
+    EXPECT_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+                     start, end, TimeSpan::Zero, same, same),
+                 System::ArgumentException);
+    EXPECT_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+                     start, end, TimeSpan::Zero, same, same, TimeSpan::Zero),
+                 System::ArgumentException);
+
+    try {
+        (void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+            start, end, TimeSpan::Zero, same, same);
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "daylightTransitionEnd");
+        EXPECT_NE(std::string(e.what()).find("must not equal"), std::string::npos);
+    }
+}
+
+TEST(AdjustmentRuleTests, KindThenTransitionThenRangeIsTheReferenceValidationOrder) {
+    const auto same = fixedTT();
+    const DateTime localStart =
+        DateTime::SpecifyKind(DateTime(2025, 12, 31), DateTimeKind::Local);
+    const DateTime plainStart(2025, 12, 31);
+    const DateTime plainEnd(2025, 1, 1);
+
+    // Kind precedes both the identical-transition and reversed-range checks.
+    try {
+        (void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+            localStart, plainEnd, TimeSpan::Zero, same, same);
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "dateStart");
+    }
+
+    // Once both Kinds are valid, identical transitions precede the reversed range.
+    try {
+        (void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+            plainStart, plainEnd, TimeSpan::Zero, same, same);
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "daylightTransitionEnd");
     }
 }

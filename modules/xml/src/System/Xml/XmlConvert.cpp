@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Xml/XmlConvert.hpp"
 #include "System/DateTimeKind.hpp"
+#include "System/Globalization/DateTimeStyles.hpp"
 #include "System/TimeZone.hpp"
 
 #include <algorithm>
@@ -577,6 +578,45 @@ namespace {
         return out;
     }
 
+    /** @brief XSD `dateTime` rendering for a DateTimeOffset, preserving its explicit offset. */
+    std::string renderXsdDateTimeOffset(const System::DateTimeOffset& value) {
+        const System::DateTime clock = value.getDateTimeProperty();
+        char buffer[64];
+        int written = std::snprintf(
+            buffer, sizeof(buffer), "%04d-%02d-%02dT%02d:%02d:%02d",
+            static_cast<int>(clock.getYearProperty()), static_cast<int>(clock.getMonthProperty()),
+            static_cast<int>(clock.getDayProperty()), static_cast<int>(clock.getHourProperty()),
+            static_cast<int>(clock.getMinuteProperty()),
+            static_cast<int>(clock.getSecondProperty()));
+        std::string out(buffer, static_cast<std::size_t>(written));
+
+        const long fractionTicks = static_cast<long>(
+            clock.getTicksProperty() % System::DateTime::TicksPerSecond);
+        if (fractionTicks != 0) {
+            written = std::snprintf(buffer, sizeof(buffer), "%07ld", fractionTicks);
+            std::string fraction(buffer, static_cast<std::size_t>(written));
+            while (!fraction.empty() && fraction.back() == '0') fraction.pop_back();
+            out += '.';
+            out += fraction;
+        }
+
+        SharpRuntime::longcs totalMinutes =
+            value.getOffsetProperty().getTicksProperty() / System::TimeSpan::TicksPerMinute;
+        if (totalMinutes == 0) {
+            // XsdDateTime classifies a zero DateTimeOffset offset as Zulu. `+00:00` names the
+            // same instant, but XmlConvert's canonical lexical form is the single `Z` marker.
+            out += 'Z';
+            return out;
+        }
+        const char sign = totalMinutes < 0 ? '-' : '+';
+        if (totalMinutes < 0) totalMinutes = -totalMinutes; // offset is validated within +/-14h
+        written = std::snprintf(buffer, sizeof(buffer), "%c%02d:%02d", sign,
+                                static_cast<int>(totalMinutes / 60),
+                                static_cast<int>(totalMinutes % 60));
+        out.append(buffer, static_cast<std::size_t>(written));
+        return out;
+    }
+
     /**
      * @brief Splits a trailing XSD kind marker off @p text (#1945, SA-16.3's reading half).
      *
@@ -613,8 +653,17 @@ namespace {
 
         const int hours = (tail[1] - '0') * 10 + (tail[2] - '0');
         const int minutes = (tail[4] - '0') * 10 + (tail[5] - '0');
-        if (hours > 14 || minutes > 59) return;
-        offsetMinutes = (tail[0] == '-' ? -1 : 1) * (hours * 60 + minutes);
+        const int magnitudeMinutes = hours * 60 + minutes;
+        if (minutes > 59 || magnitudeMinutes > 14 * 60) {
+            // XSD's numeric timezone bound is exactly +/-14:00. Leaving the marker attached and
+            // falling through to DateTime::Parse would be unsafe here because that broader
+            // practical-subset grammar deliberately accepts and discards offsets such as
+            // +14:59. XmlConvert must reject the invalid XSD value explicitly.
+            throw System::FormatException(
+                "The string is not a valid XSD dateTime value: timezone offset is outside "
+                "+/-14:00.");
+        }
+        offsetMinutes = (tail[0] == '-' ? -1 : 1) * magnitudeMinutes;
         kind = System::DateTimeKind::Local;
         text.erase(text.size() - 6);
     }
@@ -637,16 +686,11 @@ namespace {
             case XmlDateTimeSerializationMode::Unspecified:
                 return System::DateTime::SpecifyKind(value, System::DateTimeKind::Unspecified);
             // The one arm that does NOTHING, which is what "roundtrip" means: the kind survives.
-            //
-            // THIS ARM AND `Unspecified` ARE CURRENTLY INDISTINGUISHABLE THROUGH THE PUBLIC
-            // SURFACE, and #1945 proved it rather than assuming it: this runtime's
-            // `DateTime::ToString()` emits no kind marker where .NET's `XsdDateTime` emits a `Z`,
-            // and `DateTime::Parse` sets no kind from one -- so nothing a caller can observe
-            // carries a kind across a string. Measured over every input kind and both doors
-            // (`Decl1945_RoundtripKindCannotRoundtripThroughAString`), the two modes agree
-            // everywhere, which is why #1945's mutations M4 and M6 are equivalences rather than
-            // uncaught defects. The arms are kept apart because they are .NET's and because they
-            // SEPARATE the day #1942 teaches `Parse` to read a `Z`.
+            // `renderXsdDateTime` and `splitXsdKindMarker` are the matching write/read halves, so
+            // this is observably different from Unspecified for both Utc (`Z`) and Local
+            // (numeric offset) values. This path deliberately does not depend on general
+            // DateTime::Parse, whose practical-subset contract still consumes but does not apply
+            // an implicit local-zone designator.
             case XmlDateTimeSerializationMode::RoundtripKind: return value;
         }
         throw System::ArgumentException(
@@ -667,7 +711,9 @@ namespace {
         return renderXsdDateTime(applyDateTimeMode(value, mode));
     }
 
-    std::string XmlConvert::ToString(const System::DateTimeOffset& value) { return value.ToString(); }
+    std::string XmlConvert::ToString(const System::DateTimeOffset& value) {
+        return renderXsdDateTimeOffset(value);
+    }
     std::string XmlConvert::ToString(const System::DateTimeOffset& value, const std::string& format) { return value.ToString(format); }
     std::string XmlConvert::ToString(const System::Guid& value) { return value.ToString(); }
 
@@ -755,7 +801,10 @@ namespace {
         return System::TimeSpan::FromTicks(ticks);
     }
     System::DateTime XmlConvert::ToDateTime(const std::string& s) {
-        std::string body = s;
+        // XML Schema's whitespace facet is applied before the lexical timezone marker is read.
+        // Splitting against the original physical end lost `Z` / `+hh:mm` whenever legal outer
+        // whitespace followed it, and could let an invalid +14:01 marker bypass the XSD bound.
+        std::string body = TrimXmlWhitespace(s);
         System::DateTimeKind kind = System::DateTimeKind::Unspecified;
         int offsetMinutes = 0;
         splitXsdKindMarker(body, kind, offsetMinutes);
@@ -764,19 +813,44 @@ namespace {
             // A numeric offset names an INSTANT, so the value is converted to this process's zone
             // rather than merely stamped -- otherwise `+05:00` and `+02:00` would produce the same
             // local wall-clock time and the offset would have been read and thrown away again.
-            parsed = System::DateTime::SpecifyKind(
-                         parsed.AddMinutes(-static_cast<double>(offsetMinutes)),
-                         System::DateTimeKind::Utc)
-                         .ToLocalTime(System::TimeZone::CurrentTimeZone());
+            // XsdDateTime has explicit compatibility behavior at DateTime's range boundaries:
+            // if converting the named offset to UTC under/overflows, it applies the process-local
+            // offset directly to the original clock and clamps only if that still lies outside.
+            // Calling AddMinutes here used to leak ArgumentOutOfRangeException from a Try-style
+            // parsing path instead of reproducing that result.
+            const auto& zone = System::TimeZone::CurrentTimeZone();
+            const SharpRuntime::longcs offsetTicks =
+                static_cast<SharpRuntime::longcs>(offsetMinutes) *
+                System::TimeSpan::TicksPerMinute;
+            SharpRuntime::longcs utcTicks = parsed.getTicksProperty() - offsetTicks;
+            if (utcTicks < 0 || utcTicks > System::DateTime::MaxTicks) {
+                const SharpRuntime::longcs localOffset =
+                    zone.GetUtcOffset(parsed).getTicksProperty();
+                SharpRuntime::longcs compatibleTicks = utcTicks + localOffset;
+                if (compatibleTicks < 0) compatibleTicks = 0;
+                if (compatibleTicks > System::DateTime::MaxTicks)
+                    compatibleTicks = System::DateTime::MaxTicks;
+                parsed = System::DateTime(
+                    compatibleTicks, System::DateTimeKind::Local);
+            } else {
+                parsed = System::DateTime(utcTicks, System::DateTimeKind::Utc)
+                             .ToLocalTime(zone);
+            }
         } else if (kind == System::DateTimeKind::Utc) {
             parsed = System::DateTime::SpecifyKind(parsed, System::DateTimeKind::Utc);
         }
         return parsed;
     }
     System::DateTime XmlConvert::ToDateTime(const std::string& s, const std::string& format) {
-        // .NET is `DateTime.ParseExact(s, format, CultureInfo.InvariantCulture)`. The overload it
-        // needs did not exist on this port's DateTime at all until #2414.
-        return System::DateTime::ParseExact(s, format);
+        // XmlConvert.cs routes this door through invariant ParseExact with leading/trailing
+        // whitespace enabled. Supplying the process zone is the C++ signature adaptation recorded
+        // by #1942: it is needed when the exact format carries z/K or its styles require a local
+        // conversion, and modules/xml can name the TimeZone component without creating a cycle.
+        const auto styles =
+            System::Globalization::DateTimeStyles::AllowLeadingWhite |
+            System::Globalization::DateTimeStyles::AllowTrailingWhite;
+        return System::DateTime::ParseExact(
+            s, format, nullptr, styles, &System::TimeZone::CurrentTimeZone());
     }
     System::DateTime XmlConvert::ToDateTime(const std::string& s, XmlDateTimeSerializationMode mode) {
         // THROUGH THE ONE-ARGUMENT DOOR, not DateTime::Parse: the marker must be split off before
@@ -785,23 +859,35 @@ namespace {
         // shape, and it is the exact defect this ticket exists to end.
         return applyDateTimeMode(ToDateTime(s), mode);
     }
-    System::DateTimeOffset XmlConvert::ToDateTimeOffset(const std::string& s) { return System::DateTimeOffset::Parse(s); }
+    System::DateTimeOffset XmlConvert::ToDateTimeOffset(const std::string& s) {
+        // The XSD door must choose an offset for the parsed DATE, not Core.Base's documented
+        // current-offset-only DateTimeOffset::Parse fallback. Splitting the marker here also
+        // keeps all XmlConvert date-time doors on the same XSD numeric-offset bound.
+        std::string body = TrimXmlWhitespace(s);
+        System::DateTimeKind markerKind = System::DateTimeKind::Unspecified;
+        int offsetMinutes = 0;
+        splitXsdKindMarker(body, markerKind, offsetMinutes);
+        const System::DateTime clock = System::DateTime::Parse(body);
+        System::TimeSpan offset = System::TimeSpan::Zero;
+        if (markerKind == System::DateTimeKind::Local) {
+            offset = System::TimeSpan::FromMinutes(offsetMinutes);
+        } else if (markerKind == System::DateTimeKind::Unspecified) {
+            offset = System::TimeZone::CurrentTimeZone().GetUtcOffset(clock);
+        }
+        return System::DateTimeOffset(clock, offset);
+    }
     System::DateTimeOffset XmlConvert::ToDateTimeOffset(const std::string& s,
                                                         const std::string& format) {
-        // .NET is `DateTimeOffset.ParseExact(s, format, CultureInfo.InvariantCulture,
-        // DateTimeStyles.None)`, and THIS PORT HAS NO `DateTimeOffset::ParseExact` -- an exact
-        // DateTimeOffset needs a zone, and `Core.Base` cannot name one, which is #1943's
-        // remaining half.
-        //
-        // COMPOSING IT HERE IS NOT A SECOND GRAMMAR. It is .NET's own semantics spelled out: with
-        // no zone token in the format -- and this port's exact grammar has none at all -- .NET's
-        // DateTimeStyles.None gives the result the LOCAL offset, so parsing with the one exact
-        // grammar and attaching the local zone's offset is what .NET computes, not an
-        // approximation of it. A later `DateTimeOffset::ParseExact` should absorb this body
-        // rather than sit beside it.
-        const System::DateTime parsed = System::DateTime::ParseExact(s, format);
-        return System::DateTimeOffset(parsed,
-                                      System::TimeZone::CurrentTimeZone().GetUtcOffset(parsed));
+        // Keep this paired with the DateTime door above. #1943 added the real DateTimeOffset exact
+        // grammar, including zzz/K offset capture; the former DateTime-plus-local-offset
+        // composition predated it and silently made every explicit-offset format impossible.
+        // XmlConvert itself permits outer whitespace, and a missing offset defaults from the
+        // explicit process zone as required by this port's Core.Base dependency boundary.
+        const auto styles =
+            System::Globalization::DateTimeStyles::AllowLeadingWhite |
+            System::Globalization::DateTimeStyles::AllowTrailingWhite;
+        return System::DateTimeOffset::ParseExact(
+            s, format, nullptr, styles, &System::TimeZone::CurrentTimeZone());
     }
     System::Guid XmlConvert::ToGuid(const std::string& s) { return System::Guid::Parse(s); }
 
