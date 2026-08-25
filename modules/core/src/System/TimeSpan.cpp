@@ -609,6 +609,18 @@ namespace System {
 
     TimeSpan TimeSpan::operator+(const TimeSpan &t2) const { return Add(t2); }
 
+    TimeSpan &TimeSpan::operator+=(const TimeSpan &t2)
+    {
+        *this = Add(t2);
+        return *this;
+    }
+
+    TimeSpan &TimeSpan::operator-=(const TimeSpan &t2)
+    {
+        *this = Subtract(t2);
+        return *this;
+    }
+
 
     TimeSpan TimeSpan::operator*(double factor) const {
         if (std::isnan(factor)) {

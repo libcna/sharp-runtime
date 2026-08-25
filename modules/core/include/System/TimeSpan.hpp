@@ -578,6 +578,29 @@ namespace System {
         TimeSpan operator+(const TimeSpan &t2) const;
 
     public:
+        /**
+         * @brief Adds @p t2 to this TimeSpan in place.
+         *
+         * C++ counterpart of the compound assignment C# synthesizes from
+         * <c>operator +(TimeSpan, TimeSpan)</c>.
+         *
+         * @param t2 The interval to add.
+         * @return A reference to this TimeSpan after the addition.
+         */
+        TimeSpan &operator+=(const TimeSpan &t2);
+
+        /**
+         * @brief Subtracts @p t2 from this TimeSpan in place.
+         *
+         * C++ counterpart of the compound assignment C# synthesizes from
+         * <c>operator -(TimeSpan, TimeSpan)</c>.
+         *
+         * @param t2 The interval to subtract.
+         * @return A reference to this TimeSpan after the subtraction.
+         */
+        TimeSpan &operator-=(const TimeSpan &t2);
+
+    public:
         /** Multiplies this TimeSpan by scalar @p factor. */
         TimeSpan operator*(double factor) const;
 

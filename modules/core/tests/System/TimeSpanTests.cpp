@@ -838,3 +838,44 @@ TEST(TimeSpanParseExact1943Tests, TheEscapeEdgeCasesAreRejectedAsDotNetRejectsTh
     EXPECT_FALSE(TimeSpan::TryParseExact("1", "hh\\", unused));    // trailing '\' is an error
     EXPECT_FALSE(TimeSpan::TryParseExact("01:30", "hh':'mm'", unused));  // unterminated quote
 }
+
+TEST(TimeSpanTests, OperatorPlusAssign_AccumulatesInPlace) {
+    TimeSpan total = TimeSpan::Zero;
+    total += TimeSpan::FromSeconds(1.5);
+    EXPECT_EQ(total.getTicksProperty(), 15000000LL);
+    total += TimeSpan::FromSeconds(2.5);
+    EXPECT_DOUBLE_EQ(total.getTotalSecondsProperty(), 4.0);
+    // The result must equal the value-returning operator+ it is built on.
+    EXPECT_EQ(total, TimeSpan::FromSeconds(1.5) + TimeSpan::FromSeconds(2.5));
+}
+
+TEST(TimeSpanTests, OperatorPlusAssign_ReturnsReferenceToTheSameObject) {
+    TimeSpan value = TimeSpan::FromSeconds(1.0);
+    TimeSpan& returned = (value += TimeSpan::FromSeconds(1.0));
+    EXPECT_EQ(&returned, &value);
+    EXPECT_DOUBLE_EQ(value.getTotalSecondsProperty(), 2.0);
+}
+
+TEST(TimeSpanTests, OperatorPlusAssign_OverflowsThroughAdd) {
+    TimeSpan value = TimeSpan::MaxValue;
+    EXPECT_THROW(value += TimeSpan(static_cast<longcs>(1)), System::OverflowException);
+}
+
+TEST(TimeSpanTests, OperatorMinusAssign_SubtractsInPlace) {
+    TimeSpan value = TimeSpan(5, 0, 0);
+    value -= TimeSpan(2, 30, 0);
+    EXPECT_EQ(value.getTicksProperty(), 90000000000LL);
+    EXPECT_EQ(value, TimeSpan(5, 0, 0) - TimeSpan(2, 30, 0));
+}
+
+TEST(TimeSpanTests, OperatorMinusAssign_ReturnsReferenceToTheSameObject) {
+    TimeSpan value = TimeSpan::FromSeconds(3.0);
+    TimeSpan& returned = (value -= TimeSpan::FromSeconds(1.0));
+    EXPECT_EQ(&returned, &value);
+    EXPECT_DOUBLE_EQ(value.getTotalSecondsProperty(), 2.0);
+}
+
+TEST(TimeSpanTests, OperatorMinusAssign_OverflowsThroughSubtract) {
+    TimeSpan value = TimeSpan::MinValue;
+    EXPECT_THROW(value -= TimeSpan(static_cast<longcs>(1)), System::OverflowException);
+}
