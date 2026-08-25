@@ -689,9 +689,13 @@ TEST(TryWriteInterpolatedStringHandlerTests, UnrecognisedFloatSpecifierThrows) {
     TryWriteInterpolatedStringHandler h(buf, sizeof(buf));
     EXPECT_THROW(h.AppendFormatted(3.14, std::string("Q")), System::FormatException);
 
+    // SAMPLE-028 correction: "Fz" is not an unrecognised specifier, it is a CUSTOM numeric
+    // format string whose two characters are both literals. Measured against the reference
+    // implementation: string.Format("{0:Fz}", 2.5f) is "Fz", while "{0:Q}" above does throw.
     char buf2[32];
     TryWriteInterpolatedStringHandler h2(buf2, sizeof(buf2));
-    EXPECT_THROW(h2.AppendFormatted(2.5f, std::string("Fz")), System::FormatException);
+    EXPECT_TRUE(h2.AppendFormatted(2.5f, std::string("Fz")));
+    EXPECT_EQ(std::string(buf2, 2), "Fz");
 }
 
 // The specifier is validated while producing the text, before a single byte is

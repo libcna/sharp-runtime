@@ -458,8 +458,13 @@ TEST(DoubleTests, ToString_FormatR) {
 // SR-AUD-021 float slice (#1849 / CCF-006): a malformed precision no longer leaks a
 // std::stoi exception, and an unrecognised specifier is rejected loudly instead of
 // silently round-tripping. Matches the integer wrappers (#1847) and .NET.
-TEST(DoubleTests, ToString_MalformedPrecision_ThrowsFormatException) {
-    EXPECT_THROW(Double::ToString(1.0, "Fz"), System::FormatException);
+// SAMPLE-028 correction: "Fz" is NOT a malformed standard specifier to .NET. A standard
+// numeric format string is one letter plus an optional integer precision; "Fz" fails that
+// shape, so .NET reads it as a CUSTOM format string in which both characters are literals
+// and returns "Fz". Measured directly against the reference implementation rather than
+// assumed. A single unrecognised letter does still throw.
+TEST(DoubleTests, ToString_MalformedPrecisionIsACustomFormatOfLiterals) {
+    EXPECT_EQ(Double::ToString(1.0, "Fz"), "Fz");
 }
 TEST(DoubleTests, ToString_OversizedPrecision_ThrowsFormatException) {
     EXPECT_THROW(Double::ToString(1.0, "F99999999999"), System::FormatException);
@@ -652,4 +657,13 @@ TEST(DoubleTests, Ccf7_5_EverythingElseIsUnchanged) {
     EXPECT_EQ(Double::ToString(Double::NegativeInfinity, "N2"), "-Infinity");
     EXPECT_THROW(Double::ToString(1.0, "Q"), System::FormatException);
     EXPECT_THROW(Double::ToString(1.0, "F99999999999"), System::FormatException);
+}
+
+TEST(DoubleTests, CustomFormat_SharesSingleImplementationAndCannotDrift) {
+    // Both types format through the same System::detail helpers, so this pins the double
+    // side of that shared grammar.
+    EXPECT_EQ(System::Double::ToString(3.14159, "0.00"), "3.14");
+    EXPECT_EQ(System::Double::ToString(0.5, "0"), "1");
+    EXPECT_EQ(System::Double::ToString(-1234.5, "#,##0.0"), "-1,234.5");
+    EXPECT_EQ(System::Double::ToString(12.0, "F2"), "12.00");
 }

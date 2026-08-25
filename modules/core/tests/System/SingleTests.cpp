@@ -8,6 +8,7 @@
 #include "System/MathF.hpp"
 #include "System/Single.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/NotSupportedException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ArithmeticException.hpp"
 #include "System/FormatException.hpp"
@@ -341,8 +342,15 @@ TEST(SingleTest, ToString_Format_F2)    { EXPECT_EQ(Single::ToString(3.14159f, "
 // SR-AUD-021 float slice (#1849 / CCF-006): a malformed precision no longer leaks a
 // std::stoi exception, and an unrecognised specifier is rejected loudly instead of
 // silently round-tripping. Matches the integer wrappers (#1847) and .NET.
-TEST(SingleTest, ToString_MalformedPrecision_ThrowsFormatException) {
-    EXPECT_THROW(Single::ToString(1.0f, "Fx"), System::FormatException);
+//
+// SAMPLE-028 correction: "Fx" is NOT a malformed standard specifier to .NET. A standard
+// numeric format string is one letter plus an optional integer precision; "Fx" fails that
+// shape, so .NET reads it as a CUSTOM format string in which both characters are literals
+// and returns "Fx". Measured directly against the reference implementation rather than
+// assumed -- 28 format/value pairs were run through both, and this was one of them. A
+// single unrecognised letter ("Q") does still throw, which the sibling test below pins.
+TEST(SingleTest, ToString_MalformedPrecisionIsACustomFormatOfLiterals) {
+    EXPECT_EQ(Single::ToString(1.0f, "Fx"), "Fx");
 }
 TEST(SingleTest, ToString_OversizedPrecision_ThrowsFormatException) {
     EXPECT_THROW(Single::ToString(1.0f, "F99999999999"), System::FormatException);
@@ -562,4 +570,74 @@ TEST(SingleTest, Ccf7_5_EverythingElseIsUnchanged) {
     EXPECT_EQ(Single::ToString(1234.5f, "F2"), "1234.50");   // F does NOT group
     EXPECT_EQ(Single::ToString(Single::NaN, "N2"), "NaN");
     EXPECT_THROW(Single::ToString(1.0f, "Q"), System::FormatException);
+}
+
+// --- Custom numeric format strings -------------------------------------------------
+//
+// .NET reads a format as standard only when it is one letter plus an optional precision.
+// "0.000" is therefore a custom numeric format string, a separate grammar; it used to
+// reach the standard dispatch and throw FormatException.
+
+TEST(SingleTests, CustomFormat_ZeroPlaceholdersPadToAFixedWidth) {
+    EXPECT_EQ(System::Single::ToString(0.0f, "0.000"), "0.000");
+    EXPECT_EQ(System::Single::ToString(1.0f, "0.000"), "1.000");
+    EXPECT_EQ(System::Single::ToString(0.5f, "0.000"), "0.500");
+    EXPECT_EQ(System::Single::ToString(7.0f, "00"), "07");
+}
+
+TEST(SingleTests, CustomFormat_RoundsToThePlaceholderCount) {
+    EXPECT_EQ(System::Single::ToString(0.123456f, "0.000"), "0.123");
+    EXPECT_EQ(System::Single::ToString(0.9999f, "0.000"), "1.000");
+}
+
+TEST(SingleTests, CustomFormat_RoundsMidpointsAwayFromZero) {
+    // .NET's number formatting rounds midpoints away from zero, unlike Math.Round's
+    // default and unlike std::fixed's round-half-to-even.
+    EXPECT_EQ(System::Single::ToString(0.5f, "0"), "1");
+    EXPECT_EQ(System::Single::ToString(2.5f, "0"), "3");
+    EXPECT_EQ(System::Single::ToString(-2.5f, "0"), "-3");
+}
+
+TEST(SingleTests, CustomFormat_AValueThatRoundsToZeroIsNotSigned) {
+    EXPECT_EQ(System::Single::ToString(-0.4f, "0"), "0");
+    EXPECT_EQ(System::Single::ToString(-0.0004f, "0.00"), "0.00");
+}
+
+TEST(SingleTests, CustomFormat_HashPlaceholdersAreDroppedWhenInsignificant) {
+    EXPECT_EQ(System::Single::ToString(0.25f, "#.##"), ".25");
+    EXPECT_EQ(System::Single::ToString(1.5f, "#.##"), "1.5");
+    EXPECT_EQ(System::Single::ToString(1.0f, "0.##"), "1");
+}
+
+TEST(SingleTests, CustomFormat_CommaBetweenIntegerPlaceholdersGroups) {
+    EXPECT_EQ(System::Single::ToString(1234.5f, "#,##0.0"), "1,234.5");
+    EXPECT_EQ(System::Single::ToString(1234567.0f, "#,##0"), "1,234,567");
+    // A comma with no integer placeholder before it is not a group separator.
+    EXPECT_EQ(System::Single::ToString(12.0f, "0.0"), "12.0");
+}
+
+TEST(SingleTests, CustomFormat_NegativeValuesKeepTheirSign) {
+    EXPECT_EQ(System::Single::ToString(-0.25f, "0.000"), "-0.250");
+    EXPECT_EQ(System::Single::ToString(-1234.5f, "#,##0.0"), "-1,234.5");
+}
+
+TEST(SingleTests, CustomFormat_UnimplementedConstructsAreRefusedNotMisEmitted) {
+    // Section separators, percent scaling, custom exponent forms and escaping are the
+    // parts of the grammar this build does not implement; they refuse rather than
+    // silently emitting a wrong number.
+    EXPECT_THROW((void)System::Single::ToString(1.0f, "0;(0)"), System::NotSupportedException);
+    EXPECT_THROW((void)System::Single::ToString(1.0f, "0%"), System::NotSupportedException);
+    EXPECT_THROW((void)System::Single::ToString(1.0f, "0.0E+0"), System::NotSupportedException);
+}
+
+TEST(SingleTests, CustomFormat_DoesNotDisturbTheStandardSpecifiers) {
+    EXPECT_EQ(System::Single::ToString(12.0f, "F2"), "12.00");
+    EXPECT_EQ(System::Single::ToString(1234.5f, "N2"), "1,234.50");
+    EXPECT_THROW((void)System::Single::ToString(1.0f, "Q"), System::FormatException);
+}
+
+TEST(SingleTests, CustomFormat_NonFiniteValuesAreUnaffected) {
+    EXPECT_EQ(System::Single::ToString(std::numeric_limits<float>::quiet_NaN(), "0.000"), "NaN");
+    EXPECT_EQ(System::Single::ToString(std::numeric_limits<float>::infinity(), "0.000"),
+              "Infinity");
 }

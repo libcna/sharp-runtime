@@ -22,6 +22,7 @@
 #include "System/FormatException.hpp"
 #include "System/MathF.hpp"
 #include "System/detail/FloatParseGrammar.hpp"
+#include "System/NotSupportedException.hpp"
 #include "System/detail/FloatTextFormat.hpp"
 
 namespace System {
@@ -1024,6 +1025,29 @@ public:
         if (format.empty()) return ToString(value);
         if (std::isnan(value)) return "NaN";
         if (std::isinf(value)) return value > 0 ? "Infinity" : "-Infinity";
+        // .NET reads a format as standard only when it is one letter plus an optional
+        // precision. Anything else -- "0.000", "#,##0.0" -- is a custom numeric format
+        // string, a separate grammar that the standard specifiers below cannot express.
+        if (!System::detail::isStandardNumericFormat(format)) {
+            const System::detail::CustomNumericFormat shape =
+                System::detail::parseCustomNumericFormat(format, [] {
+                    throw System::NotSupportedException(
+                        "This custom numeric format string uses a construct that is not "
+                        "implemented: section separators, percent/permille scaling, custom "
+                        "exponent forms and escaping are not supported.");
+                });
+            bool negative = false;
+            std::string integerDigits;
+            std::string fractionDigits;
+            // The shortest round-trippable text is what .NET Core formats from, so the
+            // custom format rounds the same digits .NET would round.
+            System::detail::splitDecimalText(ToString(value), negative, integerDigits,
+                                             fractionDigits);
+            System::detail::roundDecimalDigits(integerDigits, fractionDigits,
+                                               shape.hasDecimalPoint ? shape.maximumDecimals : 0);
+            return System::detail::emitCustomNumeric(negative, integerDigits, fractionDigits,
+                                                     format, shape);
+        }
         char type = format[0];
         // SR-AUD-021 float slice (#1849 / CCF-006): guard the precision parse so a malformed
         // precision (e.g. "Fx", or an oversized width) surfaces as System::FormatException
