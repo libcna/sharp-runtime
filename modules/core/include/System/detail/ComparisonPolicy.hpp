@@ -328,11 +328,63 @@ using DefaultKeyLess = std::conditional_t<std::is_floating_point_v<T> ||
                                               isDirectNullableFloatingV<T>,
                                           DefaultLess<T>, std::less<T>>;
 
+
+/**
+ * @brief True when `std::hash<T>` is a usable specialization rather than the disabled
+ *        primary template.
+ */
+template<typename T, typename = void>
+inline constexpr bool hasStdHashV = false;
+template<typename T>
+inline constexpr bool hasStdHashV<
+    T, std::void_t<decltype(std::hash<T>{}(std::declval<const T&>()))>> = true;
+
+/** @brief True when @p T carries a .NET-style `GetHashCode()`. */
+template<typename T, typename = void>
+inline constexpr bool hasGetHashCodeV = false;
+template<typename T>
+inline constexpr bool hasGetHashCodeV<
+    T, std::void_t<decltype(std::declval<const T&>().GetHashCode())>> = true;
+
+/**
+ * @brief Hashes a key through its own .NET-style `GetHashCode()`.
+ *
+ * .NET reaches `EqualityComparer<TKey>.Default` for a dictionary key, which exists for
+ * every type; C++ reaches `std::hash<TKey>`, which does not. A type that carries the
+ * .NET contract -- `GetHashCode()` alongside `operator==` -- has everything a hash map
+ * needs, so it is served from that rather than requiring a `std::hash` specialization
+ * the .NET API never asked for. `Microsoft::Xna::Framework::Point` as a dictionary key
+ * is the case this exists for.
+ *
+ * The substitution is deliberately narrow: it applies only when `std::hash<T>` is absent
+ * AND `GetHashCode()` is present. A type with `std::hash` keeps using it, and a type with
+ * neither keeps selecting `std::hash<T>` exactly as before -- still unusable as a key,
+ * but unusable in the same way and with the same diagnostic.
+ */
+template<typename T>
+struct GetHashCodeHash {
+    /**
+     * @brief Hashes @p value through its own GetHashCode().
+     * @param value The key to hash.
+     * @return The key's hash code, widened to the size_t std::unordered_map expects.
+     */
+    [[nodiscard]] std::size_t operator()(const T& value) const {
+        static_assert(requires { { value.GetHashCode() }; },
+                      "A Dictionary/HashSet key needs either a std::hash specialization or "
+                      "a .NET-style GetHashCode(); this type has neither.");
+        return static_cast<std::size_t>(value.GetHashCode());
+    }
+};
+
 /** @brief The bounded CCF-010 key hashing selector. */
 template<typename T>
 using DefaultKeyHash = std::conditional_t<std::is_floating_point_v<T> ||
                                               isDirectNullableFloatingV<T>,
-                                          DefaultHash<T>, std::hash<T>>;
+                                          DefaultHash<T>,
+                                          std::conditional_t<!hasStdHashV<T> &&
+                                                                 hasGetHashCodeV<T>,
+                                                             GetHashCodeHash<T>,
+                                                             std::hash<T>>>;
 
 /** @brief The bounded CCF-010 key equality selector. */
 template<typename T>
