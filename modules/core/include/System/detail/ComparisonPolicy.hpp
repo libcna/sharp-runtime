@@ -4,6 +4,7 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <functional>
 #include <iterator>
@@ -11,6 +12,8 @@
 #include <optional>
 #include <type_traits>
 #include <utility>
+
+#include "System/NotSupportedException.hpp"
 
 namespace System::detail {
 
@@ -185,13 +188,28 @@ template<typename T>
  */
 template<typename It, typename T>
 [[nodiscard]] It findValue(It first, It last, const T& value) {
-    if constexpr (std::is_floating_point_v<typename std::iterator_traits<It>::value_type>) {
-        if (std::isnan(value)) {
-            return std::find_if(first, last,
-                                [](const auto& v) { return std::isnan(v); });
+    if constexpr (!std::equality_comparable<T>) {
+        // .NET reaches `EqualityComparer<T>.Default` here, which exists for every T: a
+        // reference type with no Equals override falls back to reference equality. This
+        // port stores elements by value, so a type that declares no equality has nothing
+        // to compare and no reference identity to fall back on. Refusing at the call is
+        // what keeps `List<T>` and `Array` usable for such a T at all -- a hard
+        // requirement on `operator==` would make the container itself uninstantiable,
+        // which C#'s never is.
+        (void)first; (void)last; (void)value;
+        throw System::NotSupportedException(
+            "This element type declares no equality, so the .NET EqualityComparer<T>.Default "
+            "search this method performs has no counterpart. Give the type an operator== to "
+            "make Contains/IndexOf/Remove meaningful for it.");
+    } else {
+        if constexpr (std::is_floating_point_v<typename std::iterator_traits<It>::value_type>) {
+            if (std::isnan(value)) {
+                return std::find_if(first, last,
+                                    [](const auto& v) { return std::isnan(v); });
+            }
         }
+        return std::find(first, last, value);
     }
-    return std::find(first, last, value);
 }
 
 /**
