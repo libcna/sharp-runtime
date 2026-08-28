@@ -1120,6 +1120,37 @@ TEST(StringFormatBoundaryTests, SpecifierBoundIsTheReferenceBound) {
     EXPECT_THROW(String::Format("{0:D2147483648}", 7), System::FormatException);
 }
 
+TEST(StringFormatBoundaryTests, CustomNumericFormatIsAppliedNotDropped) {
+    // Format carried a second, partial numeric formatter that knew only X/x/D/d for integers
+    // and F/G/E for doubles, so every CUSTOM numeric format string fell through to a plain
+    // decimal and was silently DROPPED -- the wrong answer with no diagnostic. Both of these
+    // returned "3:7" and "59.4" before; .NET returns what is asserted here. Found by
+    // cna-samples SAMPLE-046: MarbleMaze and HoneycombRush both print a clock with
+    // String.Format("{0:00}:{1:00}", minutes, seconds).
+    EXPECT_EQ(String::Format("{0:00}:{1:00}", 3, 7), "03:07");
+    EXPECT_EQ(String::Format("{0:0.00}", 59.4), "59.40");
+    EXPECT_EQ(String::Format("{0:0.00}", 59.4f), "59.40");
+    EXPECT_EQ(String::Format("{0:000}", 7), "007");
+}
+
+TEST(StringFormatBoundaryTests, AFloatIsFormattedAsSingleNotAsWidenedDouble) {
+    // The float overload forwarded to the double one, so the argument was formatted through
+    // Double's round-trip digits: "{0}" on 59.4f produced "59.400001525878906". .NET formats
+    // the argument with its OWN Single.ToString().
+    EXPECT_EQ(String::Format("{0}", 59.4f), "59.4");
+    EXPECT_EQ(String::Format("{0}", 0.1f), "0.1");
+    EXPECT_EQ(String::Format("{0}", 3.1415927f), "3.1415927");
+}
+
+TEST(StringFormatBoundaryTests, CustomFormatDoesNotCaptureAMalformedStandardSpecifier) {
+    // The gate is deliberately narrower than "not a standard format": a malformed standard
+    // specifier is also not a standard format, and those have their own tested behaviour that
+    // must not change. A custom format begins with something other than a specifier letter.
+    EXPECT_EQ(String::Format("{0:DX}", 42), "42");
+    EXPECT_EQ(String::Format("{0:D-3}", 7), "007");
+    EXPECT_THROW(String::Format("{0:D1000000000}", 7), System::FormatException);
+}
+
 TEST(StringFormatBoundaryTests, NonNumericSpecifierTailDoesNotThrowStdException) {
     // Was std::invalid_argument escaping from std::stoi. This port does not implement
     // custom numeric format strings, so the value is emitted with no specifier applied.

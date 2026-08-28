@@ -13,6 +13,8 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include "System/NotSupportedException.hpp"
+#include "System/detail/FloatTextFormat.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -199,6 +201,31 @@ public:
      */
     static std::string ToString(SharpRuntime::intcs value, const std::string& format) {
         if (format.empty()) return std::to_string(value);
+        // .NET reads a format as standard only when it is one letter plus an optional
+        // precision. Anything else -- "00", "0.0", "#,##0" -- is a CUSTOM numeric format
+        // string, a separate grammar the standard specifiers below cannot express, and
+        // Int32 supports it exactly as Single and Double already do. Without this branch
+        // `int.ToString("00")` -- and therefore `String.Format("{0:00}", n)`, which several
+        // XNA samples use to print a two-digit clock -- raised FormatException on a format
+        // .NET formats fine.
+        if (System::detail::isCustomNumericPlaceholderFormat(format)) {
+            const System::detail::CustomNumericFormat shape =
+                System::detail::parseCustomNumericFormat(format, [] {
+                    throw System::NotSupportedException(
+                        "This custom numeric format string uses a construct that is not "
+                        "implemented: section separators, percent/permille scaling, custom "
+                        "exponent forms and escaping are not supported.");
+                });
+            bool negative = false;
+            std::string integerDigits;
+            std::string fractionDigits;
+            System::detail::splitDecimalText(std::to_string(value), negative, integerDigits,
+                                             fractionDigits);
+            System::detail::roundDecimalDigits(integerDigits, fractionDigits,
+                                               shape.hasDecimalPoint ? shape.maximumDecimals : 0);
+            return System::detail::emitCustomNumeric(negative, integerDigits, fractionDigits,
+                                                     format, shape);
+        }
         char type = format[0];
         int width = 0;
         if (format.size() > 1) {

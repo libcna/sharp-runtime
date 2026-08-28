@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/FormatException.hpp"
 #include "System/Int32.hpp"
 
 using System::Int32;
@@ -38,4 +39,24 @@ TEST(Int32NewTests, MinMagnitude_MinValueAlwaysLoses) {
     EXPECT_EQ(Int32::MinMagnitude(5, Int32::MinValue), 5);
     EXPECT_EQ(Int32::MinMagnitude(Int32::MinValue, Int32::MinValue), Int32::MinValue);
     EXPECT_EQ(Int32::MinMagnitude(Int32::MinValue, Int32::MaxValue), Int32::MaxValue);
+}
+
+TEST(Int32NewTests, ToString_CustomNumericFormat) {
+    // Int32 lacked the custom-numeric path Single and Double already had, so int.ToString("00")
+    // -- and therefore String.Format("{0:00}", n) -- raised FormatException on a format .NET
+    // formats fine. Found by cna-samples SAMPLE-046, where two ported XNA samples print a clock
+    // with String.Format("{0:00}:{1:00}", minutes, seconds).
+    EXPECT_EQ(Int32::ToString(3, "00"), "03");
+    EXPECT_EQ(Int32::ToString(3, "000"), "003");
+    EXPECT_EQ(Int32::ToString(-3, "00"), "-03");
+    EXPECT_EQ(Int32::ToString(1234, "00"), "1234");
+    EXPECT_EQ(Int32::ToString(3, "0.0"), "3.0");
+}
+
+TEST(Int32NewTests, ToString_MalformedStandardSpecifierIsUnaffectedByTheCustomPath) {
+    // The custom path must not swallow a malformed STANDARD specifier: those still throw, which
+    // is what ticket #1847 pinned. The gate asks whether the format begins with something other
+    // than a specifier letter, not merely whether it fails to be a standard format.
+    EXPECT_THROW(Int32::ToString(5, "Xz"), System::FormatException);
+    EXPECT_THROW(Int32::ToString(5, "Q"), System::FormatException);
 }

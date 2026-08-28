@@ -134,6 +134,27 @@ template <class T>
 }
 
 /**
+ * @brief True when @p format is unambiguously a CUSTOM numeric format string.
+ *
+ * Stricter than `!isStandardNumericFormat(format)` on purpose. That test is also false for a
+ * *malformed standard* specifier -- "DX", "D-3", "X99999999999999999999" -- and those have their
+ * own long-standing, tested behaviour in the integer wrappers and in String::Format (a
+ * FormatException, or the tail ignored) that must not change. This asks the narrower question the
+ * callers actually mean: does the format begin with something other than a specifier letter and
+ * contain a digit placeholder? "00", "0.00" and "#,##0" do; every malformed standard specifier
+ * begins with its letter and is left alone.
+ *
+ * @param format The format string to classify.
+ * @return True when @p format should be handled by the custom numeric grammar.
+ */
+[[nodiscard]] inline bool isCustomNumericPlaceholderFormat(const std::string& format) {
+    if (format.empty()) return false;
+    const unsigned char first = static_cast<unsigned char>(format[0]);
+    if ((first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z')) return false;
+    return format.find_first_of("0#") != std::string::npos;
+}
+
+/**
  * @brief The subset of .NET's custom numeric format grammar this build implements.
  *
  * Implemented: the digit placeholders `0` (always emitted) and `#` (emitted only

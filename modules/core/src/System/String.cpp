@@ -3,6 +3,10 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/String.hpp"
 #include "System/detail/CompositeFormat.hpp"
+#include "System/detail/FloatTextFormat.hpp"
+#include "System/Double.hpp"
+#include "System/Int32.hpp"
+#include "System/Single.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OutOfMemoryException.hpp"
@@ -150,16 +154,22 @@ namespace System
         // format item. `text` points at the caller's own std::string parameter, which outlives
         // the call; nothing here owns or copies it.
         struct FormatArg {
-            enum class Kind { Int, Long, Double, Text };
+            enum class Kind { Int, Long, Float, Double, Text };
             Kind                 kind = Kind::Int;
             SharpRuntime::intcs  i    = 0;
             SharpRuntime::longcs l    = 0;
+            float                f    = 0.0f;
             double               d    = 0.0;
             const std::string*   text = nullptr;
         };
 
         FormatArg argOf(SharpRuntime::intcs v)   { FormatArg a; a.kind = FormatArg::Kind::Int;    a.i = v; return a; }
         FormatArg argOf(SharpRuntime::longcs v)  { FormatArg a; a.kind = FormatArg::Kind::Long;   a.l = v; return a; }
+        // A float is NOT widened to double. Single and Double round-trip through a different
+        // number of digits, so Format("{0}", 59.4f) came out as "59.400001525878906" -- the
+        // double text of the widened float -- where .NET prints "59.4", because .NET formats the
+        // argument with its OWN Single.ToString().
+        FormatArg argOf(float v)                 { FormatArg a; a.kind = FormatArg::Kind::Float;  a.f = v; return a; }
         FormatArg argOf(double v)                { FormatArg a; a.kind = FormatArg::Kind::Double; a.d = v; return a; }
         FormatArg argOf(const std::string& v)    { FormatArg a; a.kind = FormatArg::Kind::Text;   a.text = &v; return a; }
 
@@ -211,6 +221,19 @@ namespace System
         // Format integer with .NET-style specifier (X/x=hex, D=decimal padded, else plain).
         std::string fmtInt(SharpRuntime::intcs value, std::string_view spec) {
             if (spec.empty()) return std::to_string(value);
+            // A format that is not one letter plus an optional precision is a CUSTOM numeric
+            // format string -- "00", "0.00", "#,##0" -- a separate .NET grammar the standard
+            // specifiers below cannot express. This function knew only X/x/D/d, so every custom
+            // format fell through to a plain decimal and was silently DROPPED:
+            // Format("{0:00}:{1:00}", 3, 7) returned "3:7" where .NET returns "03:07". The
+            // grammar is already implemented once, in the type's own ToString, so this defers to
+            // it rather than growing a second copy. Standard specifiers keep taking the path
+            // below unchanged, which is what preserves the specifier-tail hardening of tickets
+            // #1847/#1849 -- ToString's own tail parsing is stricter in ways Format's callers
+            // are already tested against ("{0:DX}" must yield "42", not throw).
+            if (System::detail::isCustomNumericPlaceholderFormat(std::string(spec))) {
+                return System::Int32::ToString(value, std::string(spec));
+            }
             const char sc = spec[0];
             const SpecNumber num = parseSpecNumber(spec);
             if (num.kind == SpecNumberKind::TooLarge) throwBadFormatSpecifier();
@@ -270,6 +293,11 @@ namespace System
                 auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
                 return ec == std::errc{} ? std::string(buf.data(), ptr) : std::to_string(value);
             }
+            // Same custom-format gap as fmtInt above, in the floating-point half:
+            // Format("{0:0.00}", 59.4) returned "59.4" instead of "59.40".
+            if (System::detail::isCustomNumericPlaceholderFormat(std::string(spec))) {
+                return System::Double::ToString(value, std::string(spec));
+            }
             const char sc = spec[0];
             const SpecNumber num = parseSpecNumber(spec);
             if (num.kind == SpecNumberKind::TooLarge) throwBadFormatSpecifier();
@@ -298,9 +326,20 @@ namespace System
             }
         }
 
+        // Format a float as .NET does: through Single's own ToString, never through Double's.
+        // The specifier tail is validated here first, so an oversized one is still the
+        // FormatException ticket #1849 pinned rather than a 10^9-digit precision request.
+        std::string fmtFloat(float value, std::string_view spec) {
+            if (spec.empty()) return System::Single::ToString(value);
+            const SpecNumber num = parseSpecNumber(spec);
+            if (num.kind == SpecNumberKind::TooLarge) throwBadFormatSpecifier();
+            return System::Single::ToString(value, std::string(spec));
+        }
+
         std::string renderArg(const FormatArg& arg, std::string_view spec) {
             switch (arg.kind) {
                 case FormatArg::Kind::Int:    return fmtInt(arg.i, spec);
+                case FormatArg::Kind::Float:  return fmtFloat(arg.f, spec);
                 case FormatArg::Kind::Double: return fmtDouble(arg.d, spec);
                 case FormatArg::Kind::Long:   return std::to_string(arg.l);
                 case FormatArg::Kind::Text:   return *arg.text;
@@ -838,7 +877,8 @@ namespace System
 
     std::string String::Format(const std::string& format, float arg0)
     {
-        return Format(format, static_cast<double>(arg0));
+        const FormatArg args[] = {argOf(arg0)};
+        return formatCore(format, args, 1);
     }
 
     std::string String::Format(const std::string& format, SharpRuntime::longcs arg0, SharpRuntime::longcs arg1)
