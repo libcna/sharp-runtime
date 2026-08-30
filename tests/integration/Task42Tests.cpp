@@ -15,6 +15,7 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -1359,6 +1360,11 @@ TEST(SharpRuntimeHelperTests, SingleIsFloat) {
     EXPECT_EQ(sizeof(SharpRuntime::Single), sizeof(float));
 }
 
+TEST(SharpRuntimeHelperTests, DoubleIsDouble) {
+    static_assert(std::is_same_v<SharpRuntime::Double, double>);
+    EXPECT_EQ(sizeof(SharpRuntime::Double), sizeof(double));
+}
+
 TEST(SharpRuntimeHelperTests, DotNetNameAliases) {
     EXPECT_EQ(sizeof(SharpRuntime::Byte),   1u);
     EXPECT_EQ(sizeof(SharpRuntime::Int16),  2u);
@@ -1367,6 +1373,7 @@ TEST(SharpRuntimeHelperTests, DotNetNameAliases) {
     EXPECT_EQ(sizeof(SharpRuntime::UInt16), 2u);
     EXPECT_EQ(sizeof(SharpRuntime::UInt32), 4u);
     EXPECT_EQ(sizeof(SharpRuntime::UInt64), 8u);
+    EXPECT_EQ(sizeof(SharpRuntime::Double), sizeof(double));
 }
 
 // ===========================================================================

@@ -249,6 +249,8 @@ namespace SharpRuntime
     using UInt64 = ulongcs;
     /** C# @c Single – 32-bit IEEE 754 floating-point. */
     using Single = float;
+    /** C# @c Double – 64-bit IEEE 754 floating-point. */
+    using Double = double;
     /** C# @c String – mapped to std::string. */
     using String = std::string;
 } // namespace SharpRuntime
