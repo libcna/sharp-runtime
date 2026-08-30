@@ -248,6 +248,26 @@ operations should compile and fail explicitly with
 `PlatformNotSupportedException`, rather than silently degrade. The detailed
 policy and known runtime-limited areas are in [CLAUDE.md](CLAUDE.md).
 
+### Emscripten pthread consumers
+
+Emscripten builds remain single-threaded by default. A consumer that uses
+`System::Threading::Thread` may opt into shared-memory pthread support before
+adding Sharp Runtime:
+
+```cmake
+set(SHARP_RUNTIME_ENABLE_EMSCRIPTEN_THREADS ON CACHE BOOL "" FORCE)
+set(SHARP_RUNTIME_EMSCRIPTEN_PTHREAD_POOL_SIZE "1" CACHE STRING "" FORCE)
+add_subdirectory(path/to/sharp-runtime)
+```
+
+The pool size must be a positive integer. Enabling the option outside an
+Emscripten toolchain is a configuration error. In a threaded Emscripten build,
+`-pthread` changes the WebAssembly memory ABI, so the option applies it to all
+Sharp Runtime objects and propagates the required link settings from the
+`Threading` component to the final executable. The serving origin must also
+provide the COOP/COEP headers required for `SharedArrayBuffer`; the CMake option
+cannot create browser cross-origin isolation on its own.
+
 ## Intentional differences from .NET
 
 Sharp Runtime intentionally excludes:

@@ -22,6 +22,27 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(SHARP_RUNTIME_ENABLE_EMSCRIPTEN_THREADS
+    "Build Emscripten targets with shared-memory pthread support" OFF)
+set(SHARP_RUNTIME_EMSCRIPTEN_PTHREAD_POOL_SIZE "1" CACHE STRING
+    "Preallocated Emscripten pthread workers for Sharp Runtime consumers")
+if(NOT SHARP_RUNTIME_EMSCRIPTEN_PTHREAD_POOL_SIZE MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR
+        "SHARP_RUNTIME_EMSCRIPTEN_PTHREAD_POOL_SIZE must be a positive integer; got "
+        "'${SHARP_RUNTIME_EMSCRIPTEN_PTHREAD_POOL_SIZE}'.")
+endif()
+if(SHARP_RUNTIME_ENABLE_EMSCRIPTEN_THREADS AND NOT EMSCRIPTEN)
+    message(FATAL_ERROR
+        "SHARP_RUNTIME_ENABLE_EMSCRIPTEN_THREADS is available only with Emscripten.")
+endif()
+if(EMSCRIPTEN AND SHARP_RUNTIME_ENABLE_EMSCRIPTEN_THREADS)
+    # Unlike native platforms, Emscripten's pthread mode changes the WebAssembly memory ABI.
+    # Every object in a final threaded executable must therefore be compiled for atomics and
+    # bulk memory, including components that do not call System.Threading themselves.
+    add_compile_options(-pthread)
+    add_link_options(-pthread)
+endif()
+
 option(SHARP_RUNTIME_BUILD_TESTS "Build sharp-runtime tests" ON)
 option(SHARP_RUNTIME_BUILD_BENCHMARKS "Build sharp-runtime standalone micro-benchmarks" OFF)
 option(SHARP_RUNTIME_BUILD_I686_REGRESSION "Build the i686 MinGW compile/link boundary regression" OFF)
