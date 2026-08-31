@@ -171,6 +171,34 @@ through `XmlConvert::ToString` → `ToSingle`/`ToDouble` and compared **bit patt
 round-tripped exactly. This is why the module adds no float-formatting logic of its own: the
 capability already existed, tested and audited, in `modules/xml`.
 
+## Robustness and scale
+
+A save file is read back after an arbitrary interval, possibly truncated by a crash mid-write,
+possibly hand-edited, possibly from a different build of the game.
+`XmlSerializerRobustnessTests.cpp` covers that: malformed and truncated documents throw
+`XmlException`; a foreign root element yields defaults rather than an error (a caller that must
+reject one checks `RootElementName()` first); non-numeric text in a numeric field throws rather
+than reading as zero, because zero is a legitimate value and guessing would hide corruption; an
+unrecognised sibling inside a collection is skipped, so a version that added an element does not
+make the list unreadable; 5,000-element collections and one-megabyte strings round-trip.
+
+### 6. A bare `&` is accepted where .NET rejects it
+
+Measured with `build-probe/xml_probe_entity_leniency.cpp`: `a & b` and `&amp` (no semicolon)
+parse as literal text, where .NET's `XmlReader` rejects the document. Real references are
+unaffected — `&amp;` → `&`, `&#65;` → `A` — and an undeclared entity still throws.
+
+The direction is the safe one for a loader: more files read, never fewer, and no valid input
+turns into wrong data. The writer escapes unconditionally, so this module never emits a bare
+`&`; reading such a file and writing it back repairs it.
+
+### Scale, measured
+
+`build-probe/xml_probe_scale.cpp` (`-O2`): a list of three-member entries reads at ~23 µs/entry
+at 100 entries and ~29 µs at 20,000, so the per-member child scan is effectively linear in
+document size rather than quadratic. A 40-member element repeated 2,000 times reads in ~480 ms.
+Realistic save routes hold tens to hundreds of entries, well inside this.
+
 ## Sanitizers
 
 Built with `-fsanitize=address,undefined` in `build-asan/` and run with
