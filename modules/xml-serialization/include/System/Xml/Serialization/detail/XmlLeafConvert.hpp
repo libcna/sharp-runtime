@@ -14,6 +14,34 @@
 namespace System::Xml::Serialization::detail {
 
     /**
+     * @brief Uppercases the exponent marker in a float/double lexical form.
+     *
+     * **A measured deviation, not a preference.** XML Schema's canonical lexical space for
+     * `float`/`double` spells the exponent `E`, .NET's `XmlConvert.ToString` emits `E`, and the
+     * authentic fixture `Samples/NetRumble_4_0/.../rocketTrail.xml` contains
+     * `<Duration>3.40282347E+38</Duration>`. `System::Xml::XmlConvert::ToString(float)` here
+     * produces a lowercase `e` (`3.4028235e+38`), because it delegates to
+     * `System::Single::ToString`, whose lowercase form is pinned by an existing core test
+     * (`DoubleTests.cpp:643` asserts `Double::ToString(1e100, "R") == "1e+100"`, where real
+     * .NET gives `1E+100`).
+     *
+     * That core deviation is out of this module's blast radius -- changing it would rewrite a
+     * pinned expectation in another module, which needs its own ticket and audit trail. So the
+     * XML wire form is corrected here, where the contract is XML's, and the finding is recorded
+     * in `docs/XmlSerializationScope.md` rather than silently absorbed.
+     *
+     * @note The remaining difference is digit count, and it is harmless: .NET Framework 4.0
+     * wrote `3.40282347E+38` (9 significant digits, its `R` algorithm) where the shortest
+     * round-trippable form is `3.4028235E+38` (8). Both parse to the identical `float`, which
+     * `XnaFixtureTests` asserts rather than assumes.
+     */
+    [[nodiscard]] inline std::string UppercaseExponent(std::string text) {
+        const std::size_t marker = text.find('e');
+        if (marker != std::string::npos) text[marker] = 'E';
+        return text;
+    }
+
+    /**
      * @brief Text <-> value for the leaf (non-composite, non-collection) types the three
      * DEC-008 samples' save data actually uses: `std::string`, `bool`, `float`, `double`, the
      * fixed-width integers, and any enum registered with `SHARP_XML_ENUM`.
@@ -40,9 +68,9 @@ namespace System::Xml::Serialization::detail {
         } else if constexpr (std::is_same_v<T, bool>) {
             return System::Xml::XmlConvert::ToString(value);
         } else if constexpr (std::is_same_v<T, float>) {
-            return System::Xml::XmlConvert::ToString(value);
+            return UppercaseExponent(System::Xml::XmlConvert::ToString(value));
         } else if constexpr (std::is_same_v<T, double>) {
-            return System::Xml::XmlConvert::ToString(value);
+            return UppercaseExponent(System::Xml::XmlConvert::ToString(value));
         } else if constexpr (std::is_same_v<T, std::int32_t>) {
             return System::Xml::XmlConvert::ToString(value);
         } else if constexpr (std::is_same_v<T, std::int64_t>) {
