@@ -165,9 +165,9 @@ four-space form.
 
 ## Float round-trip: measured, not assumed
 
-`build-probe/xml_probe_float_roundtrip.cpp` swept 47 values — a full `Matrix.Identity`, a placed
+`build-probe/xml_probe_float_roundtrip.cpp` swept 55 values — a full `Matrix.Identity`, a placed
 entity transform, `0.1f`, `1/3`, denormals, `epsilon`, `±INF`, `NaN`, `float`/`double` extremes —
-through `XmlConvert::ToString` → `ToSingle`/`ToDouble` and compared **bit patterns**. 47/47
+through `XmlConvert::ToString` → `ToSingle`/`ToDouble` and compared **bit patterns**. 55/55
 round-tripped exactly. This is why the module adds no float-formatting logic of its own: the
 capability already existed, tested and audited, in `modules/xml`.
 

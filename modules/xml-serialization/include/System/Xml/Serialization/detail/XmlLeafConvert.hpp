@@ -74,7 +74,7 @@ namespace System::Xml::Serialization::detail {
      *
      * Delegates entirely to `System::Xml::XmlConvert`, which is where the float/double
      * round-trip work already lives (probed empirically in `build-probe/
-     * xml_probe_float_roundtrip.cpp`: 47/47 values -- including a full `Matrix.Identity` and a
+     * xml_probe_float_roundtrip.cpp`: 55/55 values -- including a full `Matrix.Identity` and a
      * placed-entity transform -- round-tripped bit-for-bit through `XmlConvert::ToString`/
      * `ToSingle`/`ToDouble`). This header adds no float-formatting logic of its own; it only
      * dispatches to it by type, which is the entire reason Opus's "risk #1" turned out to be
