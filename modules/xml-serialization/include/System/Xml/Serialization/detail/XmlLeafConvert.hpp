@@ -42,6 +42,32 @@ namespace System::Xml::Serialization::detail {
     }
 
     /**
+     * @brief Drops a leading `+` before handing numeric text to `XmlConvert`.
+     *
+     * XML Schema's lexical space for the numeric types allows an explicit `+`
+     * (`(\+|-)?` in the grammar), and .NET's `float.Parse`/`XmlConvert` accept it.
+     * `System::Xml::XmlConvert::ToSingle("+0.4")` throws `Input string was not in a correct
+     * format` here, because it reaches `std::from_chars`, which rejects a leading plus.
+     *
+     * No authentic XNA fixture uses the form -- grepped across Spacewar's `settings.xml`,
+     * ShipGame's level and ship content and NetRumble's particle effects, zero hits -- so this
+     * is a conformance gap rather than a blocker. It is closed anyway, at this module's own
+     * boundary, for the same reason as the exponent case: a save file edited by hand or written
+     * by another XSD-conformant tool may carry it, and a reader that is strictly more tolerant
+     * than the writer can only help. The underlying `XmlConvert` behaviour is left alone; see
+     * `docs/XmlSerializationScope.md`.
+     */
+    [[nodiscard]] inline std::string WithoutLeadingPlus(const std::string& text) {
+        std::size_t first = text.find_first_not_of(" \t\r\n");
+        if (first != std::string::npos && text[first] == '+') {
+            std::string stripped = text;
+            stripped.erase(first, 1);
+            return stripped;
+        }
+        return text;
+    }
+
+    /**
      * @brief Text <-> value for the leaf (non-composite, non-collection) types the three
      * DEC-008 samples' save data actually uses: `std::string`, `bool`, `float`, `double`, the
      * fixed-width integers, and any enum registered with `SHARP_XML_ENUM`.
@@ -94,13 +120,13 @@ namespace System::Xml::Serialization::detail {
         } else if constexpr (std::is_same_v<T, bool>) {
             return System::Xml::XmlConvert::ToBoolean(text);
         } else if constexpr (std::is_same_v<T, float>) {
-            return System::Xml::XmlConvert::ToSingle(text);
+            return System::Xml::XmlConvert::ToSingle(WithoutLeadingPlus(text));
         } else if constexpr (std::is_same_v<T, double>) {
-            return System::Xml::XmlConvert::ToDouble(text);
+            return System::Xml::XmlConvert::ToDouble(WithoutLeadingPlus(text));
         } else if constexpr (std::is_same_v<T, std::int32_t>) {
-            return System::Xml::XmlConvert::ToInt32(text);
+            return System::Xml::XmlConvert::ToInt32(WithoutLeadingPlus(text));
         } else if constexpr (std::is_same_v<T, std::int64_t>) {
-            return System::Xml::XmlConvert::ToInt64(text);
+            return System::Xml::XmlConvert::ToInt64(WithoutLeadingPlus(text));
         } else {
             static_assert(!sizeof(T), "FromXmlText: unsupported leaf type.");
         }

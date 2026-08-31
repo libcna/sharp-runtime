@@ -49,6 +49,9 @@ inside a local class, so a type declared inside a function body will not compile
 | Missing element → member keeps default | .NET's own behaviour; rejecting instead would refuse saves written by older builds |
 | Unknown element ignored | same |
 | Whitespace-insensitive reading | every authentic fixture is indented |
+| Floats without a leading zero (`.4`) | Spacewar's `settings.xml` ShipLights block writes exactly that, and the original game loads it |
+| `INF`/`-INF`/`NaN` schema tokens, not .NET's `Infinity` spelling | XML Schema's `float` lexical space |
+| Markup escaping (`&`, `<`, `>`, quotes) and non-ASCII text | a quest named `Smith & Son` must not corrupt a save |
 | **Nested serialization into a caller's document** (`SerializeInto`/`DeserializeFrom`/`RootElementName`) | **16 of the 20** `Session.cs` call sites serialize into an already-open `XmlWriter` |
 
 ## The dominant call-site shape: nesting, not standalone documents
@@ -129,7 +132,30 @@ XNA ran on .NET Framework 4.0, whose `R` format wrote `3.40282347E+38` (9 signif
 The shortest round-trippable form, which this runtime produces, is `3.4028235E+38` (8). Both
 parse to the identical `float`; the fixture test asserts that rather than assuming it.
 
-### 3. Whitespace is not part of the contract
+### 3. A whitespace-only string is lost on read
+
+Localised with `build-probe/xml_probe_whitespace_text.cpp`. The write side is correct and emits
+`<Value> </Value>`; the **parser** discards it, so `XmlDocument::LoadXml` returns an element
+with no children (`OuterXml == "<Value/>"`). tinyxml2 drops a text node that is entirely
+whitespace. Real .NET preserves it.
+
+The deviation lives in `modules/xml` and its vendored parser, not here — this module never sees
+the text node. Its blast radius was checked rather than assumed: nothing in the three samples'
+save or content routes stores an all-whitespace string, and whitespace *around* real content is
+unaffected (`"  a  "` survives). `XmlLexicalFormTests.WhitespaceOnlyString_IsLostByTheParser_…`
+pins the current behaviour, so a future parser change that fixes it fails there and gets
+noticed.
+
+### 4. Numeric text with a leading `+`
+
+XML Schema allows an explicit `+` and .NET accepts it; `XmlConvert::ToSingle("+0.4")` throws
+here, because it reaches `std::from_chars`, which rejects it. No authentic fixture uses the form
+(grepped across Spacewar's `settings.xml`, ShipGame's level and ship content, and NetRumble's
+particle effects — zero hits), so it is a conformance gap rather than a blocker. This module
+strips the sign at its own boundary anyway: a reader strictly more tolerant than the writer can
+only help, and a hand-edited save may carry it.
+
+### 5. Whitespace is not part of the contract
 
 `Samples/Spacewar_4_0/settings.xml` is indented with two spaces and
 `Samples/ShipGame_4_0/.../level1_spawns.xml` with four — both genuine `XmlSerializer` output in
