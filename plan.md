@@ -8,6 +8,44 @@ translation units with `-Werror`, 0 warnings and 0 errors. Graph **41 / 96**, se
 negative fixtures **55 / 284**. Ticket #2418 closed the bounded post-#1941 `DateTimeKind`
 propagation gap; #2419 restored and permanently gates ticket #37's GCC/Clang warning invariant.*
 
+## Branch `xml` — `SAMPLES-DEC-008`: `System.Xml.Serialization`
+
+Measured 2026-08-31 on branch **`xml`** (branched from `next` at `4a49afb0`), not estimated:
+
+| | |
+|---|---|
+| full suite | **17,914 across 38 executables: 17,914 passed, 0 failed** |
+| of which `Xml.Serialization` | **38** |
+| graph | **42 / 98** (was 41 / 96) |
+| ASAN + UBSAN, `detect_leaks=1` | 38/38, no leaks, no undefined behaviour |
+| gate scripts (`test/*.py`) | 11 / 11 OK |
+
+New module `modules/xml-serialization` (`Xml.Serialization`, header-only `INTERFACE`, public
+dependencies `Core.Base` and `Xml`). It exists to unblock `SAMPLE-014`, `SAMPLE-066` and
+`SAMPLE-070` in `cna-samples`, which the owner marked blocked on 2026-08-28 with an explicit
+instruction not to add another hand-written per-sample XML parser.
+
+`XmlSerializer<T>` with `SHARP_XML_SERIALIZABLE`/`SHARP_XML_M`/`SHARP_XML_ENUM` — a compile-time
+customization point in the same shape `JsonSerializer` uses through `nlohmann`'s ADL hooks, since
+reflection remains a permanent deviation. No vendored library does the work underneath: tinyxml2
+is a parser, not an object mapper.
+
+**Verified against Microsoft's own output, not against this repository's reading of the format.**
+The XNA Game Studio tree ships files produced by the real .NET `XmlSerializer` and loaded at
+runtime by the games: ShipGame's `level1_spawns.xml`, `level1_lights.xml`, `ship1.xml`/`ship2.xml`
+and the level2 pair, Spacewar's 184-line `settings.xml`, NetRumble's particle effects. Those are
+the corpus.
+
+Three deviations are recorded rather than absorbed, each localised with a probe:
+`XmlConvert::ToString(float)` emits a lowercase exponent where XML Schema, .NET and every
+authentic fixture use `E`; a whitespace-only string is dropped by the parser, not by the
+serializer; numeric text with a leading `+` is rejected by `std::from_chars` though XSD allows it.
+The first and third are corrected at this module's boundary; the second is out of reach here.
+Full inventory, evidence and scope boundaries: `docs/XmlSerializationScope.md`.
+
+Remaining work is in `cna-samples`, not here: registering each game's types, removing the
+hand-written workarounds, and re-qualifying the three samples.
+
 ## Status: maintenance-ready for the declared scope
 
 Measured 2026-08-22, not estimated:

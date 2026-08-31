@@ -3,6 +3,22 @@
 
 # NEXT.md
 
+> **BRANCH `xml` — `SAMPLES-DEC-008` ENGINE COMPLETE, 2026-08-31.** `modules/xml-serialization`
+> implements `System.Xml.Serialization` for the closed set of types the three blocked
+> `cna-samples` ports reach. Suite **17,914 / 38 executables, 0 failed** (+38, all in the new
+> module); graph **42 / 98**; ASAN+UBSAN with leak detection clean; 11/11 gate scripts OK.
+>
+> Verified against the authentic `XmlSerializer` output shipped in the XNA Game Studio tree —
+> ShipGame's six `EntityList`/`LightList` content files and Spacewar's 184-line `settings.xml` —
+> rather than against this repository's own reading of the format. Four negative controls were
+> planted and removed; one of them exposed a fixture test that could not fail (it parsed zero
+> entities, wrote zero, read zero, and compared equal), now fixed with exact per-file counts.
+>
+> **Next step is in `cna-samples`, not here:** register each game's types against the engine,
+> remove the hand-written XML workarounds, and re-qualify `SAMPLE-014`, `SAMPLE-066` and
+> `SAMPLE-070`. Scope, evidence and the three recorded deviations:
+> `docs/XmlSerializationScope.md`.
+
 > **#2419 CLOSED — CLANG GATE GREEN, 2026-08-22.** An independent Clang 17 build found four
 > bounded `-Werror` regressions after the GCC-only final gate: one potentially evaluated `typeid`,
 > two unused compression constants and one unused WebSocket private field. They are repaired
