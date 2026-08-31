@@ -100,6 +100,74 @@ namespace System::Xml::Serialization {
             return result;
         }
 
+        /**
+         * @brief Appends @p value to @p parent as one element, inside a document the caller owns.
+         *
+         * This is the shape RolePlayingGame's save routes actually use: sixteen of the twenty
+         * `XmlSerializer` call sites in `Session.cs` are
+         * `new XmlSerializer(typeof(X)).Serialize(xmlWriter, value)` against an **already open**
+         * writer, nesting several serialized objects inside one `<rolePlayingGameSaveData>`
+         * document rather than each producing a document of its own.
+         *
+         * The element carries the `xsi`/`xsd` declarations, because .NET writes them on the
+         * element it creates regardless of the surrounding namespace scope, and it carries no
+         * XML declaration, because the enclosing document already has one.
+         */
+        void SerializeInto(System::Xml::XmlDocument& doc, System::Xml::XmlElement* parent,
+                            const T& value) const {
+            if constexpr (detail::IsXmlListV<T>) {
+                using Item = typename T::value_type;
+                System::Xml::XmlElement* root =
+                    doc.CreateElement(std::string("ArrayOf") + ItemElementName<Item>());
+                AddSchemaNamespaces(root);
+                parent->AppendChild(root);
+                for (const Item& item : value) {
+                    WriteValue(doc, root, ItemElementName<Item>(), item);
+                }
+            } else {
+                static_assert(detail::XmlComposite<T>,
+                              "XmlSerializer<T>::SerializeInto: T must be SHARP_XML_SERIALIZABLE, "
+                              "or a std::vector of one.");
+                System::Xml::XmlElement* root =
+                    doc.CreateElement(SharpXmlRootName(static_cast<const T*>(nullptr)));
+                AddSchemaNamespaces(root);
+                parent->AppendChild(root);
+                WriteMembers(doc, root, value);
+            }
+        }
+
+        /**
+         * @brief Reads @p value out of an element the caller located in its own document -- the
+         * read counterpart of `SerializeInto`, and what `Deserialize(xmlReader)` amounts to once
+         * the enclosing document has been parsed.
+         */
+        [[nodiscard]] T DeserializeFrom(System::Xml::XmlElement* element) const {
+            if (element == nullptr) {
+                throw System::Xml::XmlException("XmlSerializer::DeserializeFrom: null element.");
+            }
+            T result{};
+            if constexpr (detail::IsXmlListV<T>) {
+                ReadList(element, result);
+            } else {
+                static_assert(detail::XmlComposite<T>,
+                              "XmlSerializer<T>::DeserializeFrom: T must be "
+                              "SHARP_XML_SERIALIZABLE, or a std::vector of one.");
+                ReadMembers(element, result);
+            }
+            return result;
+        }
+
+        /** @brief The element name this type serializes as at document or fragment root --
+         * `"PlayerPosition"`, `"ArrayOfModifiedChestEntry"`, and so on. Lets a caller locate its
+         * own nodes without duplicating the `ArrayOf` rule. */
+        [[nodiscard]] static std::string RootElementName() {
+            if constexpr (detail::IsXmlListV<T>) {
+                return std::string("ArrayOf") + ItemElementName<typename T::value_type>();
+            } else {
+                return SharpXmlRootName(static_cast<const T*>(nullptr));
+            }
+        }
+
     private:
         // --- document assembly ---------------------------------------------------------------
 
@@ -151,11 +219,17 @@ namespace System::Xml::Serialization {
             return declaration + "\n" + body;
         }
 
+        /** @brief The two namespace declarations .NET's XmlSerializer writes on every root it
+         * creates -- including one nested inside an already-open document. */
+        static void AddSchemaNamespaces(System::Xml::XmlElement* element) {
+            element->SetAttribute("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance");
+            element->SetAttribute("xmlns:xsd", "http://www.w3.org/2001/XMLSchema");
+        }
+
         [[nodiscard]] static System::Xml::XmlElement* MakeRootElement(System::Xml::XmlDocument& doc,
                                                                         const std::string& name) {
             System::Xml::XmlElement* root = doc.CreateElement(name);
-            root->SetAttribute("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance");
-            root->SetAttribute("xmlns:xsd", "http://www.w3.org/2001/XMLSchema");
+            AddSchemaNamespaces(root);
             doc.AppendChild(root);
             return root;
         }

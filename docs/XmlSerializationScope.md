@@ -49,6 +49,42 @@ inside a local class, so a type declared inside a function body will not compile
 | Missing element → member keeps default | .NET's own behaviour; rejecting instead would refuse saves written by older builds |
 | Unknown element ignored | same |
 | Whitespace-insensitive reading | every authentic fixture is indented |
+| **Nested serialization into a caller's document** (`SerializeInto`/`DeserializeFrom`/`RootElementName`) | **16 of the 20** `Session.cs` call sites serialize into an already-open `XmlWriter` |
+
+## The dominant call-site shape: nesting, not standalone documents
+
+RolePlayingGame does **not** produce one document per serialized object. `Session.Save` opens a
+single writer and nests:
+
+```csharp
+xmlWriter.WriteStartElement("rolePlayingGameSaveData");
+xmlWriter.WriteStartElement("mapData");
+xmlWriter.WriteElementString("mapContentName", TileEngine.Map.AssetName);
+new XmlSerializer(typeof(PlayerPosition)).Serialize(xmlWriter, ...);
+new XmlSerializer(typeof(List<WorldEntry<Chest>>)).Serialize(xmlWriter, ...);
+new XmlSerializer(typeof(List<WorldEntry<FixedCombat>>)).Serialize(xmlWriter, ...);
+new XmlSerializer(typeof(List<WorldEntry<Player>>)).Serialize(xmlWriter, ...);
+new XmlSerializer(typeof(List<ModifiedChestEntry>)).Serialize(xmlWriter, ...);
+xmlWriter.WriteEndElement();
+```
+
+Sixteen of the twenty call sites look like this; only `SaveGameDescription` and the standalone
+routes write a document of their own. `SerializeInto(doc, parent, value)` and
+`DeserializeFrom(element)` cover it: the nested element carries the `xsi`/`xsd` declarations
+(.NET writes them on each element it creates, whatever the surrounding namespace scope) and no
+XML declaration of its own. `RootElementName()` gives the caller the element name to look for
+without re-deriving the `ArrayOf` rule.
+
+`RolePlayingGameSaveTests.cpp` builds that exact document and reads it back through the same
+route `Session.Load` uses.
+
+### A C# shape that does not survive the port
+
+`PlayerPosition`, `MapEntry<T>` and others declare `public Direction Direction`, a member named
+after its own type. C++ rejects that (`-Wchanges-meaning`), so a port renames the **type** and
+keeps the **member** name. The wire form is unaffected, because the element name comes from the
+member. Anyone porting these types will hit the same rule; it is recorded here so it reads as a
+known translation step rather than a surprise.
 
 ## Deliberately out of scope
 
@@ -119,6 +155,17 @@ capability already existed, tested and audited, in `modules/xml`.
 - `XnaFixtureTests.cpp` — two tiers. Transcribed excerpts that run everywhere, and tests that
   read the **real** shipped XNA files when the tree is present (`XNA_SAMPLES_ROOT`, default
   `/rv/tmp/XNAGameStudio/Samples`), skipping otherwise.
+
+### Negative controls
+
+Four defects were planted and removed, each proving a specific test can fail:
+
+| Planted defect | Tests that failed |
+|---|---|
+| List items renamed to `<Item>` | 11, including every fixture test |
+| Nested roots omit `xsi`/`xsd` | the save-document wire-shape test |
+| `RootElementName` drops the `ArrayOf` prefix | the save/load round-trip test |
+| All nested list roots share one name | all three save-route tests |
 
 ### The negative control that mattered
 
