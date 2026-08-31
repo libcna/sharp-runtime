@@ -192,6 +192,23 @@ The direction is the safe one for a loader: more files read, never fewer, and no
 turns into wrong data. The writer escapes unconditionally, so this module never emits a bare
 `&`; reading such a file and writing it back repairs it.
 
+### 7. The consumer surface inherits a pedantic-mode blocker from `Xml`
+
+`test/consumer/xml_serialization.cpp` exercises the component the way `cna-samples` will: select
+`Xml.Serialization` alone, round-trip a value. Component resolution is correct — that selection
+pulls exactly `Core.Base, Uri, Diagnostics, TimeZone, Xml, Xml.Serialization` and nothing more.
+
+It does **not** build under the consumer harness's `-Wpedantic -Werror`, and the cause is
+inherited: `XmlSerializer.hpp` reaches `XmlConvert.hpp`, which reaches `System/Decimal.hpp`,
+whose `__int128` trips `-Werror=pedantic`. Measured — a fixture including nothing but
+`System/Xml/XmlConvert.hpp` under component `Xml` fails identically, so this is a pre-existing
+condition of the `Xml` consumer surface, not something this module introduced. It is presumably
+why the catalogue names the tiny `System/Xml/ConformanceLevel.hpp` as `Xml`'s representative
+header.
+
+With `-Wall -Wextra -Werror` and no `-Wpedantic` the fixture compiles clean, links, and returns
+0. Fixing the underlying header needs its own ticket in `Core`.
+
 ### Scale, measured
 
 `build-probe/xml_probe_scale.cpp` (`-O2`): a list of three-member entries reads at ~23 µs/entry
