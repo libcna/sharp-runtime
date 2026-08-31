@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <memory>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -12,17 +13,44 @@
 #include "System/Xml/XmlDocument.hpp"
 #include "System/Xml/XmlElement.hpp"
 #include "System/Xml/XmlException.hpp"
+#include "System/Xml/XmlWriter.hpp"
+#include "System/Xml/XmlWriterSettings.hpp"
 
 namespace System::Xml::Serialization {
+
+    /**
+     * @brief Formatting knobs for `XmlSerializer::Serialize`.
+     *
+     * Defaults produce the compact form, which is what the exact-wire tests pin because it is
+     * the only fully deterministic one.
+     *
+     * @note **Whitespace is not part of the compatibility contract, and the authentic fixtures
+     * prove it.** `Samples/Spacewar_4_0/settings.xml` is indented with two spaces and
+     * `Samples/ShipGame_4_0/.../level1_spawns.xml` with four -- both are genuine
+     * `XmlSerializer` output shipped in the same official XNA Game Studio source tree. So the
+     * element names, their order, their text and the root's namespace declarations are the
+     * contract; the indentation is not. `Indent` emits the four-space form (tinyxml2's own
+     * fixed width, which `XmlWriterSettings::IndentChars` does not influence).
+     */
+    struct XmlSerializationOptions {
+        /** @brief Pretty-print with tinyxml2's fixed four-space indentation. */
+        bool Indent = false;
+        /** @brief Write `encoding="utf-8"` in the declaration. The authentic fixtures do not:
+         * they open with a bare `<?xml version="1.0"?>`, which is what .NET emits when
+         * serializing to a `TextWriter` rather than a `Stream`. */
+        bool WriteEncodingAttribute = false;
+        /** @brief Omit the XML declaration entirely. */
+        bool OmitXmlDeclaration = false;
+    };
 
     /**
      * @brief Provides methods for serializing objects to XML and deserializing XML to objects.
      *
      * C++ counterpart of .NET `System.Xml.Serialization.XmlSerializer`, scoped to what
      * `SAMPLES-DEC-008` actually needs: the closed set of save-data types reachable from
-     * ShipGame's `EntityList`/`LightList` and RolePlayingGame's `Session` (see
-     * `docs/XmlSerializationScope.md` for the full inventory and the evidence that none of them
-     * use `[XmlInclude]`/xsi:type polymorphism).
+     * ShipGame's `EntityList`/`LightList`, Spacewar's `Settings` and RolePlayingGame's
+     * `Session` (see `docs/XmlSerializationScope.md` for the inventory and the evidence that
+     * none of them use `[XmlInclude]`/xsi:type polymorphism).
      *
      * @note Real .NET discovers a type's serializable members and their order via reflection.
      * That is a permanent deviation here (CLAUDE.md), so a type opts in explicitly with
@@ -33,10 +61,8 @@ namespace System::Xml::Serialization {
      *
      * **Deliberately out of scope** (tracked in `docs/XmlSerializationScope.md`, not silently
      * missing): `[XmlInclude]`/xsi:type polymorphic dispatch, `[XmlArray]`/`[XmlArrayItem]`
-     * overrides, `[XmlAttribute]`-mapped members, circular-reference detection, and root-level
-     * `List<T>` where `T` is itself generic (XNA's `ArrayOfWorldEntryOfChest`-style name
-     * mangling). None of these are exercised by the reachable call sites in the three DEC-008
-     * samples' `Session.cs`/`EntityList.cs`/`LightList.cs`.
+     * overrides, `[XmlAttribute]`-mapped members and circular-reference detection. None is
+     * exercised by any reachable call site in the three samples.
      */
     template <typename T>
     class XmlSerializer {
@@ -45,31 +71,15 @@ namespace System::Xml::Serialization {
 
         /** @brief Serializes @p value to an XML document string, root element carrying the
          * `xsi`/`xsd` namespace declarations .NET's default `XmlSerializer` always writes. */
-        [[nodiscard]] std::string Serialize(const T& value) const {
+        [[nodiscard]] std::string Serialize(const T& value,
+                                             const XmlSerializationOptions& options = {}) const {
             System::Xml::XmlDocument doc;
-            doc.AppendChild(doc.CreateXmlDeclaration("1.0", "utf-8", ""));
-
-            if constexpr (detail::IsXmlListV<T>) {
-                using Item = typename T::value_type;
-                std::string rootName = std::string("ArrayOf") + SharpXmlRootName(static_cast<const Item*>(nullptr));
-                System::Xml::XmlElement* root = MakeRootElement(doc, rootName);
-                for (const Item& item : value) {
-                    WriteValue(doc, root, SharpXmlRootName(static_cast<const Item*>(nullptr)), item);
-                }
-            } else {
-                static_assert(detail::XmlComposite<T>,
-                              "XmlSerializer<T>::Serialize: T must be SHARP_XML_SERIALIZABLE, or "
-                              "a std::vector of one.");
-                System::Xml::XmlElement* root = MakeRootElement(doc, SharpXmlRootName(static_cast<const T*>(nullptr)));
-                WriteMembers(doc, root, value);
-            }
-
-            return doc.getOuterXmlProperty();
+            BuildDocument(doc, value);
+            return Render(doc, options);
         }
 
         /** @brief Parses @p xml produced by (or wire-compatible with) `Serialize`, back into a
-         * @p T. @throws System::Xml::XmlException on malformed XML or a missing required
-         * element. */
+         * @p T. @throws System::Xml::XmlException on malformed XML. */
         [[nodiscard]] T Deserialize(const std::string& xml) const {
             System::Xml::XmlDocument doc;
             doc.LoadXml(xml);
@@ -80,15 +90,7 @@ namespace System::Xml::Serialization {
 
             T result{};
             if constexpr (detail::IsXmlListV<T>) {
-                using Item = typename T::value_type;
-                const char* itemName = SharpXmlRootName(static_cast<const Item*>(nullptr));
-                for (System::Xml::XmlNode* child = root->getFirstChildProperty(); child != nullptr;
-                     child = child->getNextSiblingProperty()) {
-                    if (child->getNameProperty() != itemName) continue;
-                    Item item{};
-                    ReadMembers(static_cast<System::Xml::XmlElement*>(child), item);
-                    result.push_back(std::move(item));
-                }
+                ReadList(root, result);
             } else {
                 static_assert(detail::XmlComposite<T>,
                               "XmlSerializer<T>::Deserialize: T must be SHARP_XML_SERIALIZABLE, "
@@ -99,6 +101,56 @@ namespace System::Xml::Serialization {
         }
 
     private:
+        // --- document assembly ---------------------------------------------------------------
+
+        static void BuildDocument(System::Xml::XmlDocument& doc, const T& value) {
+            if constexpr (detail::IsXmlListV<T>) {
+                using Item = typename T::value_type;
+                std::string rootName = std::string("ArrayOf") + ItemElementName<Item>();
+                System::Xml::XmlElement* root = MakeRootElement(doc, rootName);
+                for (const Item& item : value) {
+                    WriteValue(doc, root, ItemElementName<Item>(), item);
+                }
+            } else {
+                static_assert(detail::XmlComposite<T>,
+                              "XmlSerializer<T>::Serialize: T must be SHARP_XML_SERIALIZABLE, or "
+                              "a std::vector of one.");
+                System::Xml::XmlElement* root =
+                    MakeRootElement(doc, SharpXmlRootName(static_cast<const T*>(nullptr)));
+                WriteMembers(doc, root, value);
+            }
+        }
+
+        /**
+         * @brief Renders the built tree.
+         *
+         * The indented path goes through `XmlWriter`, whose `Save` does not emit the
+         * declaration node, so the declaration is prepended here; the compact path uses
+         * `OuterXml`, which does. Both produce the same declaration text for the same options,
+         * which `XmlSerializerFormattingTests` pins.
+         */
+        [[nodiscard]] static std::string Render(System::Xml::XmlDocument& doc,
+                                                 const XmlSerializationOptions& options) {
+            std::string declaration;
+            if (!options.OmitXmlDeclaration) {
+                declaration = options.WriteEncodingAttribute ? "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+                                                              : "<?xml version=\"1.0\"?>";
+            }
+
+            if (!options.Indent) {
+                return declaration + doc.getOuterXmlProperty();
+            }
+
+            System::Xml::XmlWriterSettings settings;
+            settings.Indent = true;
+            std::unique_ptr<System::Xml::XmlWriter> writer(
+                System::Xml::XmlWriter::CreateToString(settings));
+            doc.Save(*writer);
+            std::string body = writer->ToString();
+            if (declaration.empty()) return body;
+            return declaration + "\n" + body;
+        }
+
         [[nodiscard]] static System::Xml::XmlElement* MakeRootElement(System::Xml::XmlDocument& doc,
                                                                         const std::string& name) {
             System::Xml::XmlElement* root = doc.CreateElement(name);
@@ -106,6 +158,17 @@ namespace System::Xml::Serialization {
             root->SetAttribute("xmlns:xsd", "http://www.w3.org/2001/XMLSchema");
             doc.AppendChild(root);
             return root;
+        }
+
+        /** @brief The element name each item of a list gets: the registered root name for a
+         * composite, or the XSD primitive name (`string`, `int`, `boolean`, ...) otherwise. */
+        template <typename Item>
+        [[nodiscard]] static constexpr const char* ItemElementName() {
+            if constexpr (detail::XmlComposite<Item>) {
+                return SharpXmlRootName(static_cast<const Item*>(nullptr));
+            } else {
+                return detail::XmlPrimitiveElementName<Item>();
+            }
         }
 
         // --- write side --------------------------------------------------------------------
@@ -118,7 +181,7 @@ namespace System::Xml::Serialization {
                 parent->AppendChild(wrapper);
                 using Item = typename Value::value_type;
                 for (const Item& item : value) {
-                    WriteValue(doc, wrapper, SharpXmlRootName(static_cast<const Item*>(nullptr)), item);
+                    WriteValue(doc, wrapper, ItemElementName<Item>(), item);
                 }
             } else if constexpr (detail::XmlComposite<Value>) {
                 System::Xml::XmlElement* element = doc.CreateElement(elementName);
@@ -142,18 +205,37 @@ namespace System::Xml::Serialization {
 
         // --- read side -----------------------------------------------------------------------
 
+        /** @brief The first *element* child of @p parent named @p name, or nullptr. Text and
+         * whitespace nodes are skipped by name comparison, which is what lets an indented
+         * fixture (every authentic one is indented) parse identically to a compact one. */
+        [[nodiscard]] static System::Xml::XmlElement* FindChildElement(System::Xml::XmlNode* parent,
+                                                                        const std::string& name) {
+            for (System::Xml::XmlNode* child = parent->getFirstChildProperty(); child != nullptr;
+                 child = child->getNextSiblingProperty()) {
+                if (child->getNameProperty() == name) {
+                    return static_cast<System::Xml::XmlElement*>(child);
+                }
+            }
+            return nullptr;
+        }
+
+        template <typename List>
+        static void ReadList(System::Xml::XmlNode* parent, List& out) {
+            using Item = typename List::value_type;
+            const std::string itemName = ItemElementName<Item>();
+            for (System::Xml::XmlNode* child = parent->getFirstChildProperty(); child != nullptr;
+                 child = child->getNextSiblingProperty()) {
+                if (child->getNameProperty() != itemName) continue;
+                Item item{};
+                ReadInto(static_cast<System::Xml::XmlElement*>(child), item);
+                out.push_back(std::move(item));
+            }
+        }
+
         template <typename Value>
         static void ReadInto(System::Xml::XmlElement* element, Value& out) {
             if constexpr (detail::IsXmlListV<Value>) {
-                using Item = typename Value::value_type;
-                const char* itemName = SharpXmlRootName(static_cast<const Item*>(nullptr));
-                for (System::Xml::XmlNode* child = element->getFirstChildProperty(); child != nullptr;
-                     child = child->getNextSiblingProperty()) {
-                    if (child->getNameProperty() != itemName) continue;
-                    Item item{};
-                    ReadInto(static_cast<System::Xml::XmlElement*>(child), item);
-                    out.push_back(std::move(item));
-                }
+                ReadList(element, out);
             } else if constexpr (detail::XmlComposite<Value>) {
                 ReadMembers(element, out);
             } else {
@@ -161,6 +243,16 @@ namespace System::Xml::Serialization {
             }
         }
 
+        /**
+         * @brief Reads every registered member that is present.
+         *
+         * **A missing element leaves the member at its default and is not an error**, which is
+         * .NET's own behaviour: `XmlSerializer` only reports a missing member when it is
+         * declared required by a schema, and none of the sample save types declare anything of
+         * the kind. Throwing here instead would reject a real save file written by an older
+         * build of the same game -- exactly the compatibility this module exists to provide.
+         * `XmlSerializerTests.Deserialize_MissingElement_LeavesTheMemberAtItsDefault` pins it.
+         */
         template <typename Composite>
         static void ReadMembers(System::Xml::XmlElement* element, Composite& out) {
             auto members = SharpXmlMembers(static_cast<const Composite*>(nullptr));
@@ -168,19 +260,9 @@ namespace System::Xml::Serialization {
                 [&](const auto&... member) {
                     (
                         [&] {
-                            System::Xml::XmlNode* found = nullptr;
-                            for (System::Xml::XmlNode* child = element->getFirstChildProperty(); child != nullptr;
-                                 child = child->getNextSiblingProperty()) {
-                                if (child->getNameProperty() == member.name) {
-                                    found = child;
-                                    break;
-                                }
-                            }
-                            if (found == nullptr) {
-                                throw System::Xml::XmlException(std::string("XmlSerializer::Deserialize: missing element <") +
-                                                                 member.name + ">.");
-                            }
-                            ReadInto(static_cast<System::Xml::XmlElement*>(found), out.*(member.ptr));
+                            System::Xml::XmlElement* found = FindChildElement(element, member.name);
+                            if (found == nullptr) return;
+                            ReadInto(found, out.*(member.ptr));
                         }(),
                         ...);
                 },

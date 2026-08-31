@@ -16,6 +16,7 @@
 
 #include "System/Xml/Serialization/XmlSerializer.hpp"
 
+using System::Xml::Serialization::XmlSerializationOptions;
 using System::Xml::Serialization::XmlSerializer;
 
 namespace {
@@ -115,7 +116,7 @@ TEST(XmlSerializerTests, SaveGameDescription_SerializesToExactExpectedWire) {
     std::string xml = serializer.Serialize(value);
 
     const std::string expected =
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+        "<?xml version=\"1.0\"?>"
         "<SaveGameDescription xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" "
         "xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
         "<FileName>save1.sav</FileName>"
@@ -147,7 +148,7 @@ TEST(XmlSerializerTests, NegativeControl_SwappedFieldOrder_FailsTheExactWireAsse
     std::string xml = serializer.Serialize(value);
 
     const std::string wireCorrectOrder =
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+        "<?xml version=\"1.0\"?>"
         "<SaveGameDescription xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" "
         "xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
         "<FileName>save1.sav</FileName>"
@@ -179,7 +180,7 @@ TEST(XmlSerializerTests, Entity_FlattensMatrixToSixteenOrderedElements) {
     std::string xml = serializer.Serialize(entity);
 
     const std::string expected =
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+        "<?xml version=\"1.0\"?>"
         "<Entity xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" "
         "xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
         "<name>carrier_01</name>"
@@ -235,7 +236,7 @@ TEST(XmlSerializerTests, RootLevelList_NamesRootArrayOfItemType) {
     std::string xml = serializer.Serialize(entries);
 
     const std::string expected =
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+        "<?xml version=\"1.0\"?>"
         "<ArrayOfModifiedChestEntry xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" "
         "xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
         "<ModifiedChestEntry><chestName>chest_north</chestName><isTaken>true</isTaken></ModifiedChestEntry>"
@@ -258,15 +259,262 @@ TEST(XmlSerializerTests, RootLevelList_EmptyListRoundTrips) {
 }
 
 // ===============================================================================================
-// A missing required element is a load failure, not a silently default-valued field -- matching
-// .NET's own behavior for a non-optional member (RolePlayingGame's save types declare no
-// `[XmlElement(IsNullable=...)]`/optional annotations, so every member here is required).
+// .NET's own missing-member semantics: absent element -> member keeps its default. Throwing
+// would reject a save file written by an older build of the same game, which is the exact
+// compatibility this module exists to provide.
 // ===============================================================================================
 
-TEST(XmlSerializerTests, Deserialize_MissingElement_ThrowsXmlException) {
+TEST(XmlSerializerTests, Deserialize_MissingElement_LeavesTheMemberAtItsDefault) {
     XmlSerializer<SaveGameDescriptionData> serializer;
     const std::string xmlMissingDescription =
         "<SaveGameDescription><FileName>a</FileName><ChapterName>b</ChapterName></SaveGameDescription>";
 
-    EXPECT_THROW(serializer.Deserialize(xmlMissingDescription), System::Xml::XmlException);
+    SaveGameDescriptionData value = serializer.Deserialize(xmlMissingDescription);
+
+    EXPECT_EQ(value.FileName, "a");
+    EXPECT_EQ(value.ChapterName, "b");
+    EXPECT_EQ(value.Description, "");  // absent, so untouched -- not an error
+}
+
+TEST(XmlSerializerTests, Deserialize_UnknownElement_IsIgnored) {
+    XmlSerializer<SaveGameDescriptionData> serializer;
+    const std::string xmlWithExtra =
+        "<SaveGameDescription><FileName>a</FileName><Unexpected>x</Unexpected>"
+        "<ChapterName>b</ChapterName><Description>c</Description></SaveGameDescription>";
+
+    SaveGameDescriptionData value = serializer.Deserialize(xmlWithExtra);
+
+    EXPECT_EQ(value.FileName, "a");
+    EXPECT_EQ(value.ChapterName, "b");
+    EXPECT_EQ(value.Description, "c");
+}
+
+// ===============================================================================================
+// Item 1: List<primitive>. RolePlayingGame's PartySaveData carries both a List<string> and a
+// List<int>, and .NET names their items by the XSD type ("string", "int"), not the C# keyword.
+// ===============================================================================================
+
+namespace {
+
+struct PartySaveDataLike {
+    std::vector<std::string> monsterKillNames;
+    std::vector<std::int32_t> monsterKillCounts;
+    std::int32_t partyGold = 0;
+
+    SHARP_XML_SERIALIZABLE(PartySaveDataLike, "PartySaveData",
+                            SHARP_XML_M(PartySaveDataLike, monsterKillNames),
+                            SHARP_XML_M(PartySaveDataLike, monsterKillCounts),
+                            SHARP_XML_M(PartySaveDataLike, partyGold))
+};
+
+}  // namespace
+
+TEST(XmlSerializerTests, PrimitiveLists_UseXsdItemNames) {
+    PartySaveDataLike party;
+    party.monsterKillNames = {"Skeleton", "Bandit"};
+    party.monsterKillCounts = {3, 7};
+    party.partyGold = 1250;
+
+    XmlSerializer<PartySaveDataLike> serializer;
+    std::string xml = serializer.Serialize(party);
+
+    const std::string expected =
+        "<?xml version=\"1.0\"?>"
+        "<PartySaveData xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" "
+        "xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
+        "<monsterKillNames><string>Skeleton</string><string>Bandit</string></monsterKillNames>"
+        "<monsterKillCounts><int>3</int><int>7</int></monsterKillCounts>"
+        "<partyGold>1250</partyGold>"
+        "</PartySaveData>";
+    EXPECT_EQ(xml, expected);
+
+    PartySaveDataLike back = serializer.Deserialize(xml);
+    EXPECT_EQ(back.monsterKillNames, party.monsterKillNames);
+    EXPECT_EQ(back.monsterKillCounts, party.monsterKillCounts);
+    EXPECT_EQ(back.partyGold, party.partyGold);
+}
+
+// ===============================================================================================
+// Item 2: enums serialize as their member NAME. RolePlayingGame's PlayerPosition.Direction is
+// the reachable case; a numeric cast would produce <Direction>2</Direction> and fail to load in
+// the original game.
+// ===============================================================================================
+
+namespace {
+
+enum class DirectionLike { North, East, South, West };
+
+SHARP_XML_ENUM(DirectionLike, SHARP_XML_E(DirectionLike, North), SHARP_XML_E(DirectionLike, East),
+                SHARP_XML_E(DirectionLike, South), SHARP_XML_E(DirectionLike, West))
+
+struct PointLike {
+    std::int32_t X = 0;
+    std::int32_t Y = 0;
+    SHARP_XML_SERIALIZABLE(PointLike, "Point", SHARP_XML_M(PointLike, X), SHARP_XML_M(PointLike, Y))
+    bool operator==(const PointLike&) const = default;
+};
+
+struct PlayerPositionLike {
+    PointLike TilePosition;
+    DirectionLike Direction = DirectionLike::South;
+
+    SHARP_XML_SERIALIZABLE(PlayerPositionLike, "PlayerPosition",
+                            SHARP_XML_M(PlayerPositionLike, TilePosition),
+                            SHARP_XML_M(PlayerPositionLike, Direction))
+};
+
+}  // namespace
+
+TEST(XmlSerializerTests, Enum_SerializesAsMemberName) {
+    PlayerPositionLike position;
+    position.TilePosition = {12, -4};
+    position.Direction = DirectionLike::West;
+
+    XmlSerializer<PlayerPositionLike> serializer;
+    std::string xml = serializer.Serialize(position);
+
+    const std::string expected =
+        "<?xml version=\"1.0\"?>"
+        "<PlayerPosition xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" "
+        "xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
+        "<TilePosition><X>12</X><Y>-4</Y></TilePosition>"
+        "<Direction>West</Direction>"
+        "</PlayerPosition>";
+    EXPECT_EQ(xml, expected);
+
+    PlayerPositionLike back = serializer.Deserialize(xml);
+    EXPECT_TRUE(back.TilePosition == position.TilePosition);
+    EXPECT_EQ(back.Direction, DirectionLike::West);
+}
+
+TEST(XmlSerializerTests, Enum_EveryEnumeratorRoundTrips) {
+    XmlSerializer<PlayerPositionLike> serializer;
+    for (DirectionLike direction :
+         {DirectionLike::North, DirectionLike::East, DirectionLike::South, DirectionLike::West}) {
+        PlayerPositionLike position;
+        position.Direction = direction;
+        EXPECT_EQ(serializer.Deserialize(serializer.Serialize(position)).Direction, direction);
+    }
+}
+
+TEST(XmlSerializerTests, Enum_UnknownName_Throws) {
+    XmlSerializer<PlayerPositionLike> serializer;
+    EXPECT_THROW(serializer.Deserialize("<PlayerPosition><Direction>Sideways</Direction></PlayerPosition>"),
+                  System::Xml::XmlException);
+}
+
+// ===============================================================================================
+// Item 6: an inherited member is registered exactly like a declared one. RolePlayingGame's
+// WorldEntry<T> : MapEntry<T> : ContentEntry<T> chain is the reachable case, and .NET emits the
+// base members first -- which is what listing them first here produces.
+// ===============================================================================================
+
+namespace {
+
+struct ContentEntryLike {
+    std::string ContentName;
+};
+
+struct MapEntryLike : ContentEntryLike {
+    PointLike MapPosition;
+    DirectionLike Direction = DirectionLike::South;
+};
+
+struct WorldEntryOfChestLike : MapEntryLike {
+    std::string MapContentName;
+
+    // Base members first, then the derived one -- .NET's own order for an inheritance chain.
+    SHARP_XML_SERIALIZABLE(WorldEntryOfChestLike, "WorldEntryOfChest",
+                            SHARP_XML_M(WorldEntryOfChestLike, ContentName),
+                            SHARP_XML_M(WorldEntryOfChestLike, MapPosition),
+                            SHARP_XML_M(WorldEntryOfChestLike, Direction),
+                            SHARP_XML_M(WorldEntryOfChestLike, MapContentName))
+};
+
+}  // namespace
+
+TEST(XmlSerializerTests, InheritedMembers_SerializeBaseFirstThenDerived) {
+    WorldEntryOfChestLike entry;
+    entry.ContentName = "Chests/GoldChest";
+    entry.MapPosition = {3, 9};
+    entry.Direction = DirectionLike::North;
+    entry.MapContentName = "Maps/Village";
+
+    XmlSerializer<WorldEntryOfChestLike> serializer;
+    std::string xml = serializer.Serialize(entry);
+
+    const std::string expected =
+        "<?xml version=\"1.0\"?>"
+        "<WorldEntryOfChest xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" "
+        "xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
+        "<ContentName>Chests/GoldChest</ContentName>"
+        "<MapPosition><X>3</X><Y>9</Y></MapPosition>"
+        "<Direction>North</Direction>"
+        "<MapContentName>Maps/Village</MapContentName>"
+        "</WorldEntryOfChest>";
+    EXPECT_EQ(xml, expected);
+}
+
+// The generic-instantiation naming that earlier looked like it would need name-mangling
+// machinery: because the root name is a registered string, a root-level list of
+// WorldEntry<Chest> already produces .NET's ArrayOfWorldEntryOfChest with no extra mechanism.
+// This is one of RolePlayingGame's real Session.cs call sites.
+TEST(XmlSerializerTests, RootLevelListOfGenericInstantiation_NamesArrayOfWorldEntryOfChest) {
+    std::vector<WorldEntryOfChestLike> entries(1);
+    entries[0].ContentName = "Chests/GoldChest";
+    entries[0].MapContentName = "Maps/Village";
+
+    XmlSerializer<std::vector<WorldEntryOfChestLike>> serializer;
+    std::string xml = serializer.Serialize(entries);
+
+    EXPECT_NE(xml.find("<ArrayOfWorldEntryOfChest "), std::string::npos);
+    EXPECT_NE(xml.find("<WorldEntryOfChest>"), std::string::npos);
+
+    std::vector<WorldEntryOfChestLike> back = serializer.Deserialize(xml);
+    ASSERT_EQ(back.size(), 1u);
+    EXPECT_EQ(back[0].ContentName, "Chests/GoldChest");
+    EXPECT_EQ(back[0].MapContentName, "Maps/Village");
+}
+
+// ===============================================================================================
+// Items 4 and 5: declaration form and indentation.
+// ===============================================================================================
+
+TEST(XmlSerializerFormattingTests, DeclarationDefaultsToNoEncodingAttribute) {
+    SaveGameDescriptionData value{"a", "b", "c"};
+    XmlSerializer<SaveGameDescriptionData> serializer;
+
+    // The authentic fixtures open with a bare declaration; that is the default here.
+    EXPECT_TRUE(serializer.Serialize(value).starts_with("<?xml version=\"1.0\"?>"));
+
+    XmlSerializationOptions withEncoding;
+    withEncoding.WriteEncodingAttribute = true;
+    EXPECT_TRUE(serializer.Serialize(value, withEncoding)
+                     .starts_with("<?xml version=\"1.0\" encoding=\"utf-8\"?>"));
+
+    XmlSerializationOptions omitted;
+    omitted.OmitXmlDeclaration = true;
+    EXPECT_TRUE(serializer.Serialize(value, omitted).starts_with("<SaveGameDescription"));
+}
+
+TEST(XmlSerializerFormattingTests, IndentedOutputRoundTripsToTheSameValues) {
+    EntityListData list;
+    EntityData entity;
+    entity.name = "spawn0";
+    entity.transform = MatrixData::Identity();
+    list.entities = {entity};
+
+    XmlSerializer<EntityListData> serializer;
+    XmlSerializationOptions indented;
+    indented.Indent = true;
+    std::string xml = serializer.Serialize(list, indented);
+
+    EXPECT_NE(xml.find("\n"), std::string::npos);
+    EXPECT_NE(xml.find("    <entities>"), std::string::npos);
+
+    // Whitespace must not change what is read back -- this is what makes the authentic,
+    // hand-indented fixtures loadable.
+    EntityListData back = serializer.Deserialize(xml);
+    ASSERT_EQ(back.entities.size(), 1u);
+    EXPECT_TRUE(back.entities[0] == entity);
 }

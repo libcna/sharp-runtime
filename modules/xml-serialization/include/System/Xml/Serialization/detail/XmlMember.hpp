@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <array>
 #include <tuple>
 #include <type_traits>
 #include <vector>
@@ -19,6 +20,12 @@ namespace System::Xml::Serialization::detail {
      * site that registers the type, by `SHARP_XML_M` below. That is the same shape
      * `JsonSerializer`'s ADL customization points already use for `nlohmann`'s `to_json`/
      * `from_json` -- a per-type opt-in the compiler checks, not a stub.
+     *
+     * @note A pointer-to-member may name an **inherited** member (`&Derived::BaseField`), so a
+     * C# inheritance chain such as RolePlayingGame's `WorldEntry<T> : MapEntry<T> :
+     * ContentEntry<T>` is registered by listing the base members first and the derived members
+     * after -- which is exactly the element order .NET emits for such a chain. No separate
+     * base-class mechanism is needed, and `XmlSerializerInheritanceTests` pins that.
      */
     template <typename Class, typename Member>
     struct XmlMember {
@@ -30,6 +37,13 @@ namespace System::Xml::Serialization::detail {
     [[nodiscard]] constexpr XmlMember<Class, Member> MakeMember(const char* name, Member Class::*ptr) {
         return XmlMember<Class, Member>{name, ptr};
     }
+
+    /** @brief One `name <-> enumerator` pair, as registered by `SHARP_XML_E`. */
+    template <typename Enum>
+    struct XmlEnumEntry {
+        const char* name;
+        Enum value;
+    };
 
     /**
      * @brief True for `T = std::vector<U>`, false otherwise.
@@ -64,6 +78,12 @@ namespace System::Xml::Serialization::detail {
         { SharpXmlMembers(value) };
     };
 
+    /** @brief Detects an enum registered with `SHARP_XML_ENUM`. */
+    template <typename T>
+    concept XmlEnum = std::is_enum_v<T> && requires(const T* value) {
+        { SharpXmlEnumEntries(value) };
+    };
+
 }  // namespace System::Xml::Serialization::detail
 
 /**
@@ -81,9 +101,14 @@ namespace System::Xml::Serialization::detail {
  * element name it uses when serialized as a top-level type, and the ordered list of members
  * (build each with `SHARP_XML_M`) walked for both serialize and deserialize.
  *
- * Place inside the class body. Must be public (or the class must `friend` this expansion,
- * which it does implicitly by being a member) so the two hook functions are visible to ADL
- * from `System::Xml::Serialization`.
+ * Place inside the class body. A friend function cannot be *defined* inside a local class, so
+ * a registered type must live at namespace or class scope, never inside a function body.
+ *
+ * The root name is an explicit string rather than anything derived from the C++ type name.
+ * That is what makes a C# generic instantiation expressible: `WorldEntry<Chest>` registers as
+ * `"WorldEntryOfChest"`, and a root-level `std::vector` of it then serializes as
+ * `<ArrayOfWorldEntryOfChest>` with no name-mangling machinery -- .NET's own naming, spelled
+ * out once instead of guessed from C++ RTTI (which is neither stable nor .NET-shaped).
  */
 #define SHARP_XML_SERIALIZABLE(TypeName, rootElementName, ...)                 \
     friend constexpr const char* SharpXmlRootName(const TypeName*) {           \
@@ -91,4 +116,26 @@ namespace System::Xml::Serialization::detail {
     }                                                                          \
     friend constexpr auto SharpXmlMembers(const TypeName*) {                   \
         return std::make_tuple(__VA_ARGS__);                                   \
+    }
+
+/**
+ * @def SHARP_XML_E
+ * @brief One enumerator of a `SHARP_XML_ENUM` registration. The XML text is the enumerator's
+ * own name, which is what .NET writes for an enum member with no `[XmlEnum(Name=...)]`.
+ */
+#define SHARP_XML_E(EnumType, value) \
+    ::System::Xml::Serialization::detail::XmlEnumEntry<EnumType> { #value, EnumType::value }
+
+/**
+ * @def SHARP_XML_ENUM
+ * @brief Opts an enum into XmlSerializer by listing its enumerators (build each with
+ * `SHARP_XML_E`). Place at namespace scope, in the enum's own namespace, so ADL finds it.
+ *
+ * .NET serializes an enum as its member *name*, not its numeric value
+ * (`Direction.South` -> `<Direction>South</Direction>`), which is why a name table is required
+ * and a numeric cast would be wrong.
+ */
+#define SHARP_XML_ENUM(EnumType, ...)                                    \
+    inline constexpr auto SharpXmlEnumEntries(const EnumType*) {         \
+        return std::array{__VA_ARGS__};                                  \
     }
