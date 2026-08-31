@@ -27,6 +27,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -341,8 +342,13 @@ TEST(RolePlayingGameSaveTests, TwoGenericInstantiationsWithIdenticalShapesStayDi
     System::Xml::XmlDocument doc;
     doc.LoadXml(xml);
 
-    System::Xml::XmlNodeList* chestRoots = doc.GetElementsByTagName("ArrayOfWorldEntryOfChest");
-    System::Xml::XmlNodeList* npcRoots = doc.GetElementsByTagName("ArrayOfWorldEntryOfPlayer");
+    // GetElementsByTagName hands the caller an owned XmlNodeList. Held in unique_ptr because it
+    // is not owned by the document -- AddressSanitizer's leak check caught the raw-pointer
+    // version of this test, which is exactly what it is there for.
+    const std::unique_ptr<System::Xml::XmlNodeList> chestRoots(
+        doc.GetElementsByTagName("ArrayOfWorldEntryOfChest"));
+    const std::unique_ptr<System::Xml::XmlNodeList> npcRoots(
+        doc.GetElementsByTagName("ArrayOfWorldEntryOfPlayer"));
     ASSERT_NE(chestRoots, nullptr);
     ASSERT_NE(npcRoots, nullptr);
     ASSERT_EQ(chestRoots->getCountProperty(), 1);

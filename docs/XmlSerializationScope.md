@@ -171,6 +171,16 @@ through `XmlConvert::ToString` → `ToSingle`/`ToDouble` and compared **bit patt
 round-tripped exactly. This is why the module adds no float-formatting logic of its own: the
 capability already existed, tested and audited, in `modules/xml`.
 
+## Sanitizers
+
+Built with `-fsanitize=address,undefined` in `build-asan/` and run with
+`ASAN_OPTIONS=detect_leaks=1`: **38/38 pass, no leaks, no undefined behaviour.**
+
+The first run reported 64 bytes leaked in 4 allocations, and the traces put every one of them in
+the *test*, not the module: `XmlDocument::GetElementsByTagName` hands back an owned
+`XmlNodeList*` that the test dropped on the floor. Wrapped in `unique_ptr` and re-run clean.
+The serializer's own traversal allocates nothing it does not hand to the document.
+
 ## Test corpus
 
 `modules/xml-serialization/tests/System/Xml/Serialization/`:

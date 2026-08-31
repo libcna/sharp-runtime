@@ -133,6 +133,52 @@ struct WeaponInfoData {
     bool operator==(const WeaponInfoData&) const = default;
 };
 
+struct Vector4Data {
+    float X = 0, Y = 0, Z = 0, W = 0;
+    SHARP_XML_SERIALIZABLE(Vector4Data, "Vector4", SHARP_XML_M(Vector4Data, X),
+                            SHARP_XML_M(Vector4Data, Y), SHARP_XML_M(Vector4Data, Z),
+                            SHARP_XML_M(Vector4Data, W))
+    bool operator==(const Vector4Data&) const = default;
+};
+
+// Settings.ShipLighting -- five Vector4s and a float, inside a C# ARRAY field
+// (`ShipLighting[] ShipLights`). .NET gives an array and a List<T> the identical wire form, so
+// a port maps either to std::vector and nothing further is needed; the fixture below is the
+// proof, since ShipLights really is `ShipLighting[]` in Settings.cs.
+struct ShipLightingData {
+    Vector4Data Ambient;
+    Vector4Data DirectionalDirection;
+    Vector4Data DirectionalColor;
+    Vector4Data PointPosition;
+    Vector4Data PointColor;
+    float PointFactor = 0;
+
+    SHARP_XML_SERIALIZABLE(ShipLightingData, "ShipLighting", SHARP_XML_M(ShipLightingData, Ambient),
+                            SHARP_XML_M(ShipLightingData, DirectionalDirection),
+                            SHARP_XML_M(ShipLightingData, DirectionalColor),
+                            SHARP_XML_M(ShipLightingData, PointPosition),
+                            SHARP_XML_M(ShipLightingData, PointColor),
+                            SHARP_XML_M(ShipLightingData, PointFactor))
+    bool operator==(const ShipLightingData&) const = default;
+};
+
+// Microsoft.Xna.Framework.Input.Keys, restricted to the sixteen enumerators settings.xml
+// actually names. The real enum has around 150; a port registers as many as it needs, and the
+// point here is that the fixture's values map by NAME, which is how .NET writes an enum.
+enum class KeysData {
+    A, D, Delete, Down, E, Insert, Left, LeftControl, LeftShift,
+    Q, Right, RightControl, RightShift, S, Up, W,
+};
+
+SHARP_XML_ENUM(KeysData, SHARP_XML_E(KeysData, A), SHARP_XML_E(KeysData, D),
+                SHARP_XML_E(KeysData, Delete), SHARP_XML_E(KeysData, Down),
+                SHARP_XML_E(KeysData, E), SHARP_XML_E(KeysData, Insert),
+                SHARP_XML_E(KeysData, Left), SHARP_XML_E(KeysData, LeftControl),
+                SHARP_XML_E(KeysData, LeftShift), SHARP_XML_E(KeysData, Q),
+                SHARP_XML_E(KeysData, Right), SHARP_XML_E(KeysData, RightControl),
+                SHARP_XML_E(KeysData, RightShift), SHARP_XML_E(KeysData, S),
+                SHARP_XML_E(KeysData, Up), SHARP_XML_E(KeysData, W))
+
 // Only the members needed to prove the shape; unlisted ones are simply not registered, which
 // exercises the same "ignore what you were not told about" path a real partial load takes.
 struct SettingsData {
@@ -144,6 +190,10 @@ struct SettingsData {
     Vector2Data SunPosition;
     std::vector<PlayerShipInfoData> Ships;
     std::vector<WeaponInfoData> Weapons;
+    std::vector<ShipLightingData> ShipLights;
+    KeysData Player1Start = KeysData::A;
+    KeysData Player2Start = KeysData::A;
+    KeysData Player2RightTrigger = KeysData::A;
 
     SHARP_XML_SERIALIZABLE(SettingsData, "Settings", SHARP_XML_M(SettingsData, MediaPath),
                             SHARP_XML_M(SettingsData, WindowTitle),
@@ -151,7 +201,10 @@ struct SettingsData {
                             SHARP_XML_M(SettingsData, FrictionFactor),
                             SHARP_XML_M(SettingsData, ShipRecoveryTime),
                             SHARP_XML_M(SettingsData, SunPosition), SHARP_XML_M(SettingsData, Ships),
-                            SHARP_XML_M(SettingsData, Weapons))
+                            SHARP_XML_M(SettingsData, Weapons), SHARP_XML_M(SettingsData, ShipLights),
+                            SHARP_XML_M(SettingsData, Player1Start),
+                            SHARP_XML_M(SettingsData, Player2Start),
+                            SHARP_XML_M(SettingsData, Player2RightTrigger))
 };
 
 // --- fixture plumbing --------------------------------------------------------------------------
@@ -451,6 +504,22 @@ TEST(XnaRealFixtureTests, SpacewarSettings_LoadsShipsAndWeapons) {
     ASSERT_EQ(settings.Ships.size(), 2u) << "Spacewar is a two-player game";
     ASSERT_EQ(settings.Weapons.size(), 5u) << "settings.xml ships five weapon definitions";
 
+    // ShipLighting[] -- a C# array field, five Vector4s deep, with the leading-dot float
+    // spelling (<X>.4</X>) the file really uses.
+    ASSERT_EQ(settings.ShipLights.size(), 2u);
+    EXPECT_FLOAT_EQ(settings.ShipLights[0].Ambient.X, 0.4f);
+    EXPECT_FLOAT_EQ(settings.ShipLights[0].Ambient.W, 1.0f);
+    EXPECT_FLOAT_EQ(settings.ShipLights[0].DirectionalColor.X, 0.639f);
+    EXPECT_FLOAT_EQ(settings.ShipLights[0].DirectionalColor.Z, 0.937f);
+    EXPECT_FLOAT_EQ(settings.ShipLights[0].PointFactor, 0.0001f);
+    EXPECT_FLOAT_EQ(settings.ShipLights[1].Ambient.X, 0.3f);
+
+    // Keys enumerators, by name, from Microsoft's own file. Three distinct values, so a reader
+    // that returned a constant fails.
+    EXPECT_EQ(settings.Player1Start, KeysData::LeftControl);
+    EXPECT_EQ(settings.Player2Start, KeysData::RightControl);
+    EXPECT_EQ(settings.Player2RightTrigger, KeysData::Delete);
+
     SettingsData again = serializer.Deserialize(serializer.Serialize(settings));
     EXPECT_EQ(again.WindowTitle, settings.WindowTitle);
     ASSERT_EQ(again.Ships.size(), settings.Ships.size());
@@ -461,6 +530,13 @@ TEST(XnaRealFixtureTests, SpacewarSettings_LoadsShipsAndWeapons) {
     for (std::size_t i = 0; i < settings.Weapons.size(); ++i) {
         EXPECT_TRUE(again.Weapons[i] == settings.Weapons[i]) << "weapon " << i;
     }
+    ASSERT_EQ(again.ShipLights.size(), settings.ShipLights.size());
+    for (std::size_t i = 0; i < settings.ShipLights.size(); ++i) {
+        EXPECT_TRUE(again.ShipLights[i] == settings.ShipLights[i]) << "ship lighting " << i;
+    }
+    EXPECT_EQ(again.Player1Start, settings.Player1Start);
+    EXPECT_EQ(again.Player2Start, settings.Player2Start);
+    EXPECT_EQ(again.Player2RightTrigger, settings.Player2RightTrigger);
 }
 
 // Every EntityList-shaped file the ShipGame content tree ships, in one sweep: a per-file failure
