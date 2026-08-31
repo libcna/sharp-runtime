@@ -52,6 +52,7 @@ set(sharp_runtime_module_directories
     security-cryptography-random
     xml
     xml-linq
+    xml-serialization
 )
 
 foreach(module_directory IN LISTS sharp_runtime_module_directories)
