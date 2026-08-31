@@ -14,10 +14,10 @@ Measured 2026-08-31 on branch **`xml`** (branched from `next` at `4a49afb0`), no
 
 | | |
 |---|---|
-| full suite | **17,914 across 38 executables: 17,914 passed, 0 failed** |
-| of which `Xml.Serialization` | **38** |
+| full suite | **17,922 across 38 executables: 17,922 passed, 0 failed** |
+| of which `Xml.Serialization` | **46** |
 | graph | **42 / 98** (was 41 / 96) |
-| ASAN + UBSAN, `detect_leaks=1` | 38/38, no leaks, no undefined behaviour |
+| ASAN + UBSAN, `detect_leaks=1` | 46/46, no leaks, no undefined behaviour |
 | gate scripts (`test/*.py`) | 11 / 11 OK |
 
 New module `modules/xml-serialization` (`Xml.Serialization`, header-only `INTERFACE`, public

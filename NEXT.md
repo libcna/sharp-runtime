@@ -5,7 +5,7 @@
 
 > **BRANCH `xml` — `SAMPLES-DEC-008` ENGINE COMPLETE, 2026-08-31.** `modules/xml-serialization`
 > implements `System.Xml.Serialization` for the closed set of types the three blocked
-> `cna-samples` ports reach. Suite **17,914 / 38 executables, 0 failed** (+38, all in the new
+> `cna-samples` ports reach. Suite **17,922 / 38 executables, 0 failed** (+46, all in the new
 > module); graph **42 / 98**; ASAN+UBSAN with leak detection clean; 11/11 gate scripts OK.
 >
 > Verified against the authentic `XmlSerializer` output shipped in the XNA Game Studio tree —
