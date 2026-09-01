@@ -2,13 +2,17 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <typeinfo>
+#include <utility>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IFormatProvider.hpp"
 #include "System/InvalidOperationException.hpp"
@@ -22,10 +26,10 @@ namespace System::Globalization {
  * @brief Provides information about a specific culture (locale).
  *
  * C++ counterpart of .NET System.Globalization.CultureInfo.
- * This port has no real locale/ICU database (unlike real .NET's CultureData), so only two
- * cultures are meaningfully modeled: the invariant culture (name "") and "en-US" (the fixed
- * result of the LCID constructor). For any other culture name, name-derived properties
- * (EnglishName, NativeName, DisplayName) fall back to the name itself, and
+ * This port has no locale/ICU formatting database (unlike real .NET's CultureData), so named
+ * cultures still use invariant number and date/time data. A small identity-metadata table covers
+ * the culture names required by current consumers; for any other culture name, name-derived
+ * properties (EnglishName, NativeName, DisplayName) fall back to the name itself, and
  * TwoLetterISOLanguageName is derived heuristically from the name's leading subtag --
  * documented on each property rather than silently claiming full parity.
  * **CurrentCulture and CurrentUICulture are per-thread since #2409**, with .NET's process-wide
@@ -40,6 +44,22 @@ class CultureInfo : public System::IFormatProvider {
     bool isReadOnly_;
     NumberFormatInfo numberFormat_;
     DateTimeFormatInfo dateTimeFormat_;
+
+    /** @brief Returns known English identity metadata without claiming formatting data. */
+    [[nodiscard]] static std::string_view LookupEnglishName(const std::string_view name) {
+        static constexpr std::array<std::pair<std::string_view, std::string_view>, 6> names{{
+            {"en-US", "English (United States)"},
+            {"en-GB", "English (United Kingdom)"},
+            {"da-DK", "Danish (Denmark)"},
+            {"fr-FR", "French (France)"},
+            {"ja-JP", "Japanese (Japan)"},
+            {"ko-KR", "Korean (Korea)"},
+        }};
+        for (const auto& [cultureName, englishName] : names) {
+            if (cultureName == name) return englishName;
+        }
+        return {};
+    }
 
     /**
      * @brief Rejects a culture name that is not a well-formed BCP 47 tag (#2410, SA-15.2).
@@ -211,10 +231,10 @@ public:
     /**
      * @brief Gets the full localized culture name.
      *
-     * C++ counterpart of .NET CultureInfo.DisplayName. This port has no real locale
-     * database (CultureData); the invariant culture and "en-US" (the two cultures this
-     * port meaningfully models) get their real .NET values, and any other culture name
-     * falls back to Name itself rather than a fabricated display string.
+     * C++ counterpart of .NET CultureInfo.DisplayName. This port has no full locale
+     * database (CultureData); cultures in the identity-metadata table get their English
+     * display name, and any other culture name falls back to Name rather than a fabricated
+     * display string.
      * @return The display name.
      */
     [[nodiscard]] std::string getDisplayNameProperty() const { return getEnglishNameProperty(); }
@@ -228,7 +248,8 @@ public:
      */
     [[nodiscard]] std::string getEnglishNameProperty() const {
         if (name_.empty()) return "Invariant Language (Invariant Country)";
-        if (name_ == "en-US") return "English (United States)";
+        const std::string_view known = LookupEnglishName(name_);
+        if (!known.empty()) return std::string(known);
         return name_;
     }
 
@@ -574,8 +595,9 @@ private:
     //                        thread chose the invariant culture" are different facts, and only
     //                        the first may fall through to the process-wide default.
     //  * `defaultThread*_` -- the process-wide fallback, .NET's `DefaultThreadCurrentCulture`.
-    //                        An `atomic<shared_ptr<const CultureInfo>>` rather than a plain
-    //                        static: it is genuinely shared, so it must be swapped atomically,
+    //                        A synchronized shared-pointer slot rather than an unsynchronized
+    //                        plain static: it is genuinely shared, so it must be swapped
+    //                        atomically,
     //                        and `CultureInfo` holds `NumberFormatInfo` and `DateTimeFormatInfo`
     //                        BY VALUE, so a per-read deep copy would be paid on every formatting
     //                        call. A pointer swap costs a refcount bump.
@@ -584,10 +606,38 @@ private:
     //                        thread's store could drop the last reference while the caller still
     //                        held the reference, which would have moved the race one level down
     //                        rather than removing it.
+    using CulturePointer = std::shared_ptr<const CultureInfo>;
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
+    using SharedCultureSlot = std::atomic<CulturePointer>;
+#else
+    // libc++ configurations without C++20's atomic<shared_ptr> specialization still need the
+    // same race-free contract. Keep that compatibility inside the slot instead of weakening the
+    // public culture semantics or using deprecated free shared_ptr atomic functions.
+    class SharedCultureSlot
+    {
+    public:
+        [[nodiscard]] CulturePointer load(std::memory_order) const
+        {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            return value_;
+        }
+
+        void store(CulturePointer value, std::memory_order)
+        {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            value_ = std::move(value);
+        }
+
+    private:
+        mutable std::mutex mutex_;
+        CulturePointer value_;
+    };
+#endif
+
     static thread_local std::optional<CultureInfo> currentCulture_;
     static thread_local std::optional<CultureInfo> currentUICulture_;
-    static std::atomic<std::shared_ptr<const CultureInfo>> defaultThreadCurrentCulture_;
-    static std::atomic<std::shared_ptr<const CultureInfo>> defaultThreadCurrentUICulture_;
+    static SharedCultureSlot defaultThreadCurrentCulture_;
+    static SharedCultureSlot defaultThreadCurrentUICulture_;
     static thread_local std::shared_ptr<const CultureInfo> currentCultureHold_;
     static thread_local std::shared_ptr<const CultureInfo> currentUICultureHold_;
 };
@@ -597,8 +647,8 @@ private:
 // (`s_currentThreadCulture ?? s_DefaultThreadCurrentCulture ?? s_userDefaultCulture`).
 inline thread_local std::optional<CultureInfo> CultureInfo::currentCulture_{};
 inline thread_local std::optional<CultureInfo> CultureInfo::currentUICulture_{};
-inline std::atomic<std::shared_ptr<const CultureInfo>> CultureInfo::defaultThreadCurrentCulture_{};
-inline std::atomic<std::shared_ptr<const CultureInfo>> CultureInfo::defaultThreadCurrentUICulture_{};
+inline CultureInfo::SharedCultureSlot CultureInfo::defaultThreadCurrentCulture_{};
+inline CultureInfo::SharedCultureSlot CultureInfo::defaultThreadCurrentUICulture_{};
 inline thread_local std::shared_ptr<const CultureInfo> CultureInfo::currentCultureHold_{};
 inline thread_local std::shared_ptr<const CultureInfo> CultureInfo::currentUICultureHold_{};
 
