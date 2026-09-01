@@ -13,7 +13,7 @@
 
 namespace System
 {
-    class TimeSpan;
+    struct TimeSpan;
 
     /**
      * @brief Provides utility methods similar to selected members of .NET System.String.
