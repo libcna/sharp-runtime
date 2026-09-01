@@ -415,6 +415,9 @@ TEST(StringTests, Format_TwoStrings) {
 TEST(StringTests, Format_TwoDoubles) {
     EXPECT_EQ(String::Format("({0:F1},{1:F1})", 1.25, 3.75), "(1.2,3.8)");
 }
+TEST(StringTests, Format_TwoSinglesRetainSinglePrecisionSemantics) {
+    EXPECT_EQ(String::Format("Pos={0},{1}", 0.1f, 59.4f), "Pos=0.1,59.4");
+}
 TEST(StringTests, Format_BoolTrue) {
     EXPECT_EQ(String::Format("{0}", true), "True");
 }

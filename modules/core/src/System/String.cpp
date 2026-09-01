@@ -414,6 +414,13 @@ namespace System
         const FormatArg args[] = {argOf(arg0), argOf(arg1)};
         return formatCore(format, args, 2);
     }
+
+    std::string String::Format(const std::string& format, float arg0, float arg1)
+    {
+        const FormatArg args[] = {argOf(arg0), argOf(arg1)};
+        return formatCore(format, args, 2);
+    }
+
     std::string String::Format(const std::string& format, bool arg0)
     {
         return Format(format, arg0 ? std::string("True") : std::string("False"));

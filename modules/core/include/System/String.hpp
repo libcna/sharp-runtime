@@ -656,6 +656,18 @@ namespace System
         static std::string Format(const std::string& format, const std::string& arg0, const std::string& arg1);
         /** @brief Formats a string with two double arguments (supports `{0:F2}` specifiers). */
         static std::string Format(const std::string& format, double arg0, double arg1);
+        /**
+         * @brief Formats a string with two single-precision arguments.
+         *
+         * Each value retains System.Single formatting semantics instead of being widened to
+         * System.Double before composite formatting.
+         *
+         * @param format The composite format string.
+         * @param arg0 The value substituted for format item zero.
+         * @param arg1 The value substituted for format item one.
+         * @return The formatted string.
+         */
+        static std::string Format(const std::string& format, float arg0, float arg1);
         /** @brief Formats a string with a double arg0 and string arg1. */
         static std::string Format(const std::string& format, double arg0, const std::string& arg1);
         /** @brief Formats a string with a string arg0 and double arg1. */
