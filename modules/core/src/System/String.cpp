@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/String.hpp"
+#include "System/TimeSpan.hpp"
 #include "System/detail/CompositeFormat.hpp"
 #include "System/detail/FloatTextFormat.hpp"
 #include "System/Double.hpp"
@@ -154,13 +155,14 @@ namespace System
         // format item. `text` points at the caller's own std::string parameter, which outlives
         // the call; nothing here owns or copies it.
         struct FormatArg {
-            enum class Kind { Int, Long, Float, Double, Text };
+            enum class Kind { Int, Long, Float, Double, Text, TimeSpan };
             Kind                 kind = Kind::Int;
             SharpRuntime::intcs  i    = 0;
             SharpRuntime::longcs l    = 0;
             float                f    = 0.0f;
             double               d    = 0.0;
             const std::string*   text = nullptr;
+            const System::TimeSpan* timeSpan = nullptr;
         };
 
         FormatArg argOf(SharpRuntime::intcs v)   { FormatArg a; a.kind = FormatArg::Kind::Int;    a.i = v; return a; }
@@ -172,6 +174,7 @@ namespace System
         FormatArg argOf(float v)                 { FormatArg a; a.kind = FormatArg::Kind::Float;  a.f = v; return a; }
         FormatArg argOf(double v)                { FormatArg a; a.kind = FormatArg::Kind::Double; a.d = v; return a; }
         FormatArg argOf(const std::string& v)    { FormatArg a; a.kind = FormatArg::Kind::Text;   a.text = &v; return a; }
+        FormatArg argOf(const System::TimeSpan& v) { FormatArg a; a.kind = FormatArg::Kind::TimeSpan; a.timeSpan = &v; return a; }
 
         // Largest specifier number accepted. This is .NET's own bound: ParseFormatSpecifier
         // (Common/src/System/Number.Formatting.Common.cs:93-105) throws
@@ -343,6 +346,9 @@ namespace System
                 case FormatArg::Kind::Double: return fmtDouble(arg.d, spec);
                 case FormatArg::Kind::Long:   return std::to_string(arg.l);
                 case FormatArg::Kind::Text:   return *arg.text;
+                case FormatArg::Kind::TimeSpan:
+                    return spec.empty() ? arg.timeSpan->ToString()
+                                        : arg.timeSpan->ToString(std::string(spec));
             }
             return {};
         }
@@ -722,6 +728,12 @@ namespace System
     std::string String::Format(const std::string& format, SharpRuntime::longcs arg0)
     {
         return Format(format, std::to_string(arg0));
+    }
+
+    std::string String::Format(const std::string& format, const TimeSpan& arg0)
+    {
+        const FormatArg args[] = {argOf(arg0)};
+        return formatCore(format, args, 1);
     }
 
     std::string String::Format(const std::string& format, double arg0, const std::string& arg1)

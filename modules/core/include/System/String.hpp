@@ -13,6 +13,8 @@
 
 namespace System
 {
+    class TimeSpan;
+
     /**
      * @brief Provides utility methods similar to selected members of .NET System.String.
      *
@@ -642,6 +644,8 @@ namespace System
         static std::string Format(const std::string& format, char arg0);
         /** @brief Formats a string replacing `{0}` with @p arg0 (long integer). */
         static std::string Format(const std::string& format, SharpRuntime::longcs arg0);
+        /** @brief Formats a string replacing `{0}` with a TimeSpan argument. */
+        static std::string Format(const std::string& format, const TimeSpan& arg0);
         /** @brief Formats a string with two integer arguments (`{0}` and `{1}`). */
         static std::string Format(const std::string& format, SharpRuntime::intcs arg0, SharpRuntime::intcs arg1);
         /** @brief Formats a string with an integer arg0 and string arg1. */

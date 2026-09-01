@@ -372,6 +372,34 @@ namespace System {
             return s;
         };
 
+        if (format == "g" || format == "G") {
+            const bool longForm = format == "G";
+            std::string result;
+            if (negative) result += '-';
+
+            if (longForm || days != 0) {
+                result += std::to_string(days);
+                result += ':';
+            }
+
+            result += longForm ? pad(hours, 2) : std::to_string(hours);
+            result += ':';
+            result += pad(minutes, 2);
+            result += ':';
+            result += pad(seconds, 2);
+
+            if (longForm) {
+                result += '.';
+                result += pad(static_cast<long long>(magnitude), 7);
+            } else if (magnitude != 0) {
+                std::string fraction = pad(static_cast<long long>(magnitude), 7);
+                while (!fraction.empty() && fraction.back() == '0') fraction.pop_back();
+                result += '.';
+                result += fraction;
+            }
+            return result;
+        }
+
         std::string result;
         if (negative) result += '-';
         size_t i = 0;

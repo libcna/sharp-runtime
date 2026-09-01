@@ -438,9 +438,15 @@ namespace System {
         [[nodiscard]] std::string ToString() const;
 
         /**
-         * Returns the TimeSpan formatted according to @p format.
-         * Tokens: d (days), hh/h (hours), mm/m (minutes), ss/s (seconds), f–fffffff (fractional seconds).
-         * Literal text may be enclosed in single quotes.
+         * @brief Returns this TimeSpan formatted according to @p format.
+         *
+         * The standard `g` and `G` specifiers use the runtime's invariant decimal separator.
+         * Custom tokens are `d` (days), `hh`/`h` (hours), `mm`/`m` (minutes), `ss`/`s`
+         * (seconds), and `f` through `fffffff` (fractional seconds). Literal text may be
+         * enclosed in single quotes.
+         *
+         * @param format Standard or custom TimeSpan format string.
+         * @return The formatted duration.
          */
         [[nodiscard]] std::string ToString(const std::string& format) const;
 
