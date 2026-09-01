@@ -23,6 +23,7 @@ set(sharp_runtime_module_directories
     component-model
     diagnostics
     globalization
+    resources
     numerics
     runtime
     text

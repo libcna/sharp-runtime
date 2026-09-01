@@ -22,6 +22,7 @@ export SHARP_RUNTIME_BUILD_JOBS="$BUILD_JOBS"
 
 MATRIX=(
     "Core.Base:core_base.cpp"
+    "Resources:resources.cpp"
     "Collections.Blocking:blocking_collection.cpp"
     "Text.Json:text_json.cpp"
     "Net.Http.Headers:net_http_headers.cpp"

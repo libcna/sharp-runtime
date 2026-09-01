@@ -19,6 +19,7 @@
 #include "System/Globalization/DateTimeFormatInfo.hpp"
 #include "System/Globalization/NumberFormatInfo.hpp"
 #include <string>
+#include <utility>
 
 using System::Globalization::CompareInfo;
 using System::Globalization::CompareOptions;
@@ -349,6 +350,19 @@ TEST(CultureInfoBatch27Test, EnglishName_Invariant) {
 TEST(CultureInfoBatch27Test, EnglishName_EnUS) {
     CultureInfo ci(1033);
     EXPECT_EQ(ci.getEnglishNameProperty(), "English (United States)");
+}
+
+TEST(CultureInfoBatch27Test, EnglishName_KnownConsumerCultures) {
+    const std::pair<const char*, const char*> cases[] = {
+        {"en-GB", "English (United Kingdom)"},
+        {"da-DK", "Danish (Denmark)"},
+        {"fr-FR", "French (France)"},
+        {"ja-JP", "Japanese (Japan)"},
+        {"ko-KR", "Korean (Korea)"},
+    };
+    for (const auto& [name, englishName] : cases) {
+        EXPECT_EQ(CultureInfo(name).getEnglishNameProperty(), englishName) << name;
+    }
 }
 
 TEST(CultureInfoBatch27Test, EnglishName_UnknownCulture_FallsBackToName) {

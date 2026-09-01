@@ -4,6 +4,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
+#include "System/String.hpp"
 #include "System/TimeSpan.hpp"
 
 using System::TimeSpan;
@@ -387,6 +388,31 @@ TEST(TimeSpanTests, ToStringFormat_Fractional) {
     TimeSpan ts = TimeSpan::FromMilliseconds(1500); // 1.5s
     std::string s = ts.ToString("ss'.'fff");
     EXPECT_EQ(s, "01.500");
+}
+
+TEST(TimeSpanTests, ToStringFormat_GeneralShortAndLongMatchDotNetInvariantShape) {
+    const TimeSpan zero = TimeSpan::Zero;
+    const TimeSpan hours = TimeSpan::FromSeconds(3723);
+    const TimeSpan days(1, 2, 3, 4);
+    const TimeSpan negative = -TimeSpan(0, 5, 6, 7);
+    const TimeSpan fraction(TimeSpan::TicksPerSecond + 1'230'000);
+
+    EXPECT_EQ(zero.ToString("g"), "0:00:00");
+    EXPECT_EQ(zero.ToString("G"), "0:00:00:00.0000000");
+    EXPECT_EQ(hours.ToString("g"), "1:02:03");
+    EXPECT_EQ(hours.ToString("G"), "0:01:02:03.0000000");
+    EXPECT_EQ(days.ToString("g"), "1:2:03:04");
+    EXPECT_EQ(days.ToString("G"), "1:02:03:04.0000000");
+    EXPECT_EQ(negative.ToString("g"), "-5:06:07");
+    EXPECT_EQ(negative.ToString("G"), "-0:05:06:07.0000000");
+    EXPECT_EQ(fraction.ToString("g"), "0:00:01.123");
+    EXPECT_EQ(fraction.ToString("G"), "0:00:00:01.1230000");
+}
+
+TEST(TimeSpanTests, StringFormatUsesTimeSpanFormatSpecifier) {
+    const TimeSpan duration = TimeSpan::FromSeconds(3723);
+    EXPECT_EQ(System::String::Format("Completed in {0:g}", duration),
+              "Completed in 1:02:03");
 }
 
 // --- TryParse ---

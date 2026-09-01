@@ -8,7 +8,7 @@ This file is generated from the CMake component registrations. Run
 `python3 scripts/generate_component_catalog.py` after changing module
 metadata, or use `--check` to verify that the committed catalogue is current.
 
-The graph contains **42 physical modules** and **98 direct production dependency edges**.
+The graph contains **43 physical modules** and **100 direct production dependency edges**.
 
 For each row, the component name and representative public header form a
 minimal consumer example using the template below:
@@ -40,6 +40,7 @@ for maintainers and are not part of the consumer include surface.
 | `ComponentModel` | `modules/component-model` | interface | `Core.Base` | — | — | — | `System/ComponentModel/AsyncCompletedEventArgs.hpp` |
 | `Diagnostics` | `modules/diagnostics` | static | `Core.Base` | — | — | — | `System/Diagnostics/CodeAnalysis/CodeAnalysisAttributes.hpp` |
 | `Globalization` | `modules/globalization` | static | `Core.Base` | — | — | — | `System/Globalization/Calendar.hpp` |
+| `Resources` | `modules/resources` | static | `Globalization` | `Core.Base` | — | — | `System/Resources/ResourceManager.hpp` |
 | `Numerics` | `modules/numerics` | static | `Buffers`, `Collections.Core`, `Core.Base` | — | — | — | `System/Numerics/BigInteger.hpp` |
 | `Runtime` | `modules/runtime` | static | `Collections.Core`, `Core.Base` | — | — | — | `System/Runtime/AmbiguousImplementationException.hpp` |
 | `Text` | `modules/text` | static | `Buffers`, `Core.Base` | — | — | — | `System/Text/ASCIIEncoding.hpp` |
@@ -81,4 +82,4 @@ prefer the narrow physical component from the table above.
 | `Core` | `modules/core` | compatibility umbrella | `Console`, `Core.Base`, `TimeZone`, `Uri` | `SharpRuntime/Experimental/Property.hpp` |
 | `Collections` | `modules/collections` | compatibility umbrella | `Collections.Async`, `Collections.Blocking`, `Collections.Core`, `Collections.ObjectModel` | `System/Collections/ArrayList.hpp` |
 | `Xml.XPath` | `modules/xml` | alias of Xml | `Xml` | `System/Xml/ConformanceLevel.hpp` |
-| `All` | CMake aggregate | compatibility umbrella | `Buffers`, `Collections.Async`, `Collections.Blocking`, `Collections.Core`, `Collections.ObjectModel`, `ComponentModel`, `Console`, `Core.Base`, `Diagnostics`, `Globalization`, `IO`, `IO.Compression`, `IO.Compression.Zip`, `IO.Hashing`, `IO.IsolatedStorage`, `Net`, `Net.Http`, `Net.Http.Headers`, `Net.Http.Json`, `Net.Mime`, `Net.NetworkInformation`, `Net.Security`, `Net.Sockets`, `Net.WebSockets`, `Numerics`, `Runtime`, `Security`, `Security.Cryptography`, `Security.Cryptography.Random`, `Storage`, `Text`, `Text.Json`, `Text.RegularExpressions`, `Threading`, `Threading.Channels`, `Threading.Tasks`, `TimeZone`, `Timers`, `Uri`, `Xml`, `Xml.Linq`, `Xml.Serialization` | `SharpRuntime/Experimental/Property.hpp` |
+| `All` | CMake aggregate | compatibility umbrella | `Buffers`, `Collections.Async`, `Collections.Blocking`, `Collections.Core`, `Collections.ObjectModel`, `ComponentModel`, `Console`, `Core.Base`, `Diagnostics`, `Globalization`, `IO`, `IO.Compression`, `IO.Compression.Zip`, `IO.Hashing`, `IO.IsolatedStorage`, `Net`, `Net.Http`, `Net.Http.Headers`, `Net.Http.Json`, `Net.Mime`, `Net.NetworkInformation`, `Net.Security`, `Net.Sockets`, `Net.WebSockets`, `Numerics`, `Resources`, `Runtime`, `Security`, `Security.Cryptography`, `Security.Cryptography.Random`, `Storage`, `Text`, `Text.Json`, `Text.RegularExpressions`, `Threading`, `Threading.Channels`, `Threading.Tasks`, `TimeZone`, `Timers`, `Uri`, `Xml`, `Xml.Linq`, `Xml.Serialization` | `SharpRuntime/Experimental/Property.hpp` |

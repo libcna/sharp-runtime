@@ -748,6 +748,13 @@ TEST(StringTests, Format_IntAndLong) {
 TEST(StringTests, Format_IntAndDouble) {
     EXPECT_EQ(String::Format("{0}: {1:F2}", static_cast<SharpRuntime::intcs>(3), 3.14159), "3: 3.14");
 }
+TEST(StringTests, Format_IntAndFloat) {
+    EXPECT_EQ(String::Format("Time: {0:00}:{1:00.0}",
+                             static_cast<SharpRuntime::intcs>(3), 59.4f),
+              "Time: 03:59.4");
+    EXPECT_EQ(String::Format("{0}:{1}", static_cast<SharpRuntime::intcs>(1), 59.4f),
+              "1:59.4");
+}
 TEST(StringTests, Format_DoubleAndInt) {
     EXPECT_EQ(String::Format("{0:F1}/{1}", 2.5, static_cast<SharpRuntime::intcs>(10)), "2.5/10");
 }

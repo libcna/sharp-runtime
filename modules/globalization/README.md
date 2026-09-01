@@ -18,5 +18,4 @@ locale database:
   claim that the rest of IDNA Nameprep is implemented.
 - `Calendar` is an abstract base; callers must select a concrete calendar implementation.
 
-See the [generated component catalogue](../../docs/ComponentCatalog.md) for
-authoritative dependency metadata.
+See `docs/ComponentCatalog.md` for authoritative dependency metadata.
