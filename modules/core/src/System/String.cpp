@@ -879,6 +879,12 @@ namespace System
         return formatCore(format, args, 2);
     }
 
+    std::string String::Format(const std::string& format, SharpRuntime::intcs arg0, float arg1)
+    {
+        const FormatArg args[] = {argOf(arg0), argOf(arg1)};
+        return formatCore(format, args, 2);
+    }
+
     std::string String::Format(const std::string& format, double arg0, SharpRuntime::intcs arg1)
     {
         const FormatArg args[] = {argOf(arg0), argOf(arg1)};

@@ -666,6 +666,8 @@ namespace System
         static std::string Format(const std::string& format, SharpRuntime::intcs arg0, SharpRuntime::longcs arg1);
         /** @brief Formats a string with an intcs arg0 and double arg1. */
         static std::string Format(const std::string& format, SharpRuntime::intcs arg0, double arg1);
+        /** @brief Formats a string with an intcs arg0 and single-precision float arg1. */
+        static std::string Format(const std::string& format, SharpRuntime::intcs arg0, float arg1);
         /** @brief Formats a string with a double arg0 and intcs arg1. */
         static std::string Format(const std::string& format, double arg0, SharpRuntime::intcs arg1);
         /** @brief Formats a string with three integer arguments. */
