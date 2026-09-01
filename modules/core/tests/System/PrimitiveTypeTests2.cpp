@@ -513,6 +513,16 @@ TEST(SingleTests, ParseInvalidThrows) {
     EXPECT_THROW(Single::Parse(std::string("abc")), System::FormatException);
 }
 
+TEST(SingleTests, ParseWithFormatProviderUsesInvariantGrammar) {
+    class Provider final : public System::IFormatProvider {
+    public:
+        [[nodiscard]] void* GetFormat(const std::type_info&) const override { return nullptr; }
+    } provider;
+
+    EXPECT_FLOAT_EQ(Single::Parse("123.5", &provider), 123.5f);
+    EXPECT_THROW(Single::Parse("not-a-number", &provider), System::FormatException);
+}
+
 TEST(SingleTests, TryParseValid) {
     float result = 0.0f;
     EXPECT_TRUE(Single::TryParse(std::string("2.5"), result));
@@ -523,6 +533,19 @@ TEST(SingleTests, TryParseInvalid) {
     float result = 99.0f;
     EXPECT_FALSE(Single::TryParse(std::string("bad"), result));
     EXPECT_NEAR(result, 0.0f, 1e-6f);
+}
+
+TEST(SingleTests, TryParseWithFormatProviderUsesInvariantGrammar) {
+    class Provider final : public System::IFormatProvider {
+    public:
+        [[nodiscard]] void* GetFormat(const std::type_info&) const override { return nullptr; }
+    } provider;
+
+    float result = 0.0f;
+    EXPECT_TRUE(Single::TryParse("-42.25", &provider, result));
+    EXPECT_FLOAT_EQ(result, -42.25f);
+    EXPECT_FALSE(Single::TryParse("bad", &provider, result));
+    EXPECT_FLOAT_EQ(result, 0.0f);
 }
 
 TEST(SingleTests, ToStringContainsDigits) {

@@ -20,6 +20,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ArithmeticException.hpp"
 #include "System/FormatException.hpp"
+#include "System/IFormatProvider.hpp"
 #include "System/MathF.hpp"
 #include "System/detail/FloatParseGrammar.hpp"
 #include "System/NotSupportedException.hpp"
@@ -1000,10 +1001,44 @@ public:
     }
 
     /**
+     * @brief Converts the string representation of a number using a format provider.
+     *
+     * C++ counterpart of .NET Single.Parse(string, IFormatProvider). The current floating-point
+     * parser implements the invariant numeric grammar; @p provider is accepted so callers can
+     * preserve an explicit InvariantCulture contract.
+     *
+     * @param s The string representation to parse.
+     * @param provider The format provider, or nullptr.
+     * @return The parsed single-precision value.
+     * @throws System::FormatException if the string is not a valid floating-point literal.
+     */
+    [[nodiscard]] static float Parse(const std::string& s, const IFormatProvider* provider) {
+        (void)provider;
+        return Parse(s);
+    }
+
+    /**
      * @brief Tries to convert a string to a float without throwing.
      * C++ counterpart of .NET Single.TryParse(string, out float).
      */
     static bool TryParse(const std::string& s, float& result) noexcept {
+        return tryParseCore(s, result);
+    }
+
+    /**
+     * @brief Tries to convert a string using a format provider without throwing.
+     *
+     * C++ counterpart of .NET Single.TryParse(string, IFormatProvider, out float). The current
+     * floating-point parser implements the invariant numeric grammar; @p provider is accepted so
+     * callers can preserve an explicit InvariantCulture contract.
+     *
+     * @param s The string representation to parse.
+     * @param provider The format provider, or nullptr.
+     * @param result Receives the parsed value on success or zero on failure.
+     * @return true when parsing succeeds; otherwise false.
+     */
+    static bool TryParse(const std::string& s, const IFormatProvider* provider, float& result) noexcept {
+        (void)provider;
         return tryParseCore(s, result);
     }
 
