@@ -14,9 +14,9 @@ Measured 2026-08-31 on branch **`xml`** (branched from `next` at `4a49afb0`), no
 
 | | |
 |---|---|
-| full suite | **17,922 across 38 executables: 17,922 passed, 0 failed** |
+| full suite | **17,934 across 39 executables: 17,934 passed, 0 failed** (merged with `next` at `1f5bbbc2`) |
 | of which `Xml.Serialization` | **46** |
-| graph | **42 / 98** (was 41 / 96) |
+| graph | **43 / 100** (was 41 / 96; `Resources` arrived on `next` in parallel) |
 | ASAN + UBSAN, `detect_leaks=1` | 46/46, no leaks, no undefined behaviour |
 | gate scripts (`test/*.py`) | 11 / 11 OK |
 
