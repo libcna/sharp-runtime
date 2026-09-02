@@ -5,5 +5,5 @@ sharp_runtime_register_module(
     NAME Xml.Serialization
     TARGET sharp_runtime_xml_serialization
     TYPE INTERFACE
-    PUBLIC_DEPENDENCIES Core.Base Xml
+    PUBLIC_DEPENDENCIES Collections.Core Xml
 )

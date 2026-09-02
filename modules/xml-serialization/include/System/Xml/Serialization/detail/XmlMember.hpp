@@ -6,7 +6,13 @@
 #include <array>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 #include <vector>
+
+namespace System::Collections::Generic {
+    template <typename T>
+    class List;
+}
 
 namespace System::Xml::Serialization::detail {
 
@@ -59,8 +65,32 @@ namespace System::Xml::Serialization::detail {
     template <typename U, typename A>
     struct IsXmlList<std::vector<U, A>> : std::true_type {};
 
+    template <typename U>
+    struct IsXmlList<System::Collections::Generic::List<U>> : std::true_type {};
+
     template <typename T>
     inline constexpr bool IsXmlListV = IsXmlList<T>::value;
+
+    template <typename T>
+    struct XmlListTraits;
+
+    template <typename U, typename A>
+    struct XmlListTraits<std::vector<U, A>> {
+        using Item = U;
+
+        static void Append(std::vector<U, A>& list, U value) {
+            list.push_back(std::move(value));
+        }
+    };
+
+    template <typename U>
+    struct XmlListTraits<System::Collections::Generic::List<U>> {
+        using Item = U;
+
+        static void Append(System::Collections::Generic::List<U>& list, U value) {
+            list.Add(value);
+        }
+    };
 
     /**
      * @brief Detects a type that opted in via `SHARP_XML_SERIALIZABLE` -- i.e. one for which

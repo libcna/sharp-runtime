@@ -18,6 +18,7 @@
 
 using System::Xml::Serialization::XmlSerializationOptions;
 using System::Xml::Serialization::XmlSerializer;
+using System::Collections::Generic::List;
 
 namespace {
 
@@ -256,6 +257,25 @@ TEST(XmlSerializerTests, RootLevelList_EmptyListRoundTrips) {
 
     std::vector<ModifiedChestEntryData> back = serializer.Deserialize(serializer.Serialize(entries));
     EXPECT_TRUE(back.empty());
+}
+
+TEST(XmlSerializerTests, SystemList_UsesTheSameWireContractAsDotNetList) {
+    List<ModifiedChestEntryData> entries;
+    entries.Add({"chest_north", true});
+    entries.Add({"chest_south", false});
+    XmlSerializer<List<ModifiedChestEntryData>> serializer;
+
+    const std::string xml = serializer.Serialize(entries);
+    EXPECT_NE(xml.find("<ArrayOfModifiedChestEntry "), std::string::npos);
+    EXPECT_NE(xml.find("<ModifiedChestEntry><chestName>chest_north</chestName>"),
+              std::string::npos);
+
+    const List<ModifiedChestEntryData> roundTrip = serializer.Deserialize(xml);
+    ASSERT_EQ(roundTrip.getCountProperty(), 2);
+    const ModifiedChestEntryData expectedNorth{"chest_north", true};
+    const ModifiedChestEntryData expectedSouth{"chest_south", false};
+    EXPECT_TRUE(roundTrip.getItem(0) == expectedNorth);
+    EXPECT_TRUE(roundTrip.getItem(1) == expectedSouth);
 }
 
 // ===============================================================================================

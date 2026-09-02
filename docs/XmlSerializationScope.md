@@ -195,8 +195,10 @@ turns into wrong data. The writer escapes unconditionally, so this module never 
 ### 7. The consumer surface inherits a pedantic-mode blocker from `Xml`
 
 `test/consumer/xml_serialization.cpp` exercises the component the way `cna-samples` will: select
-`Xml.Serialization` alone, round-trip a value. Component resolution is correct — that selection
-pulls exactly `Core.Base, Uri, Diagnostics, TimeZone, Xml, Xml.Serialization` and nothing more.
+`Xml.Serialization` alone, round-trip a value. The fixture now uses the translated
+`System::Collections::Generic::List<T>` shape as well as the serializer. Component resolution is
+correct — that selection pulls `Collections.Core` plus the existing `Core.Base`, `Uri`,
+`Diagnostics`, `TimeZone`, `Xml` and `Xml.Serialization` closure.
 
 It does **not** build under the consumer harness's `-Wpedantic -Werror`, and the cause is
 inherited: `XmlSerializer.hpp` reaches `XmlConvert.hpp`, which reaches `System/Decimal.hpp`,

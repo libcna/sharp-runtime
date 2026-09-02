@@ -70,7 +70,7 @@ for maintainers and are not part of the consumer include surface.
 | `Security.Cryptography.Random` | `modules/security-cryptography-random` | static | `Core.Base` | — | — | `bcrypt` on Windows (private) | `System/Security/Cryptography/RNGCryptoServiceProvider.hpp` |
 | `Xml` | `modules/xml` | static | `Core.Base`, `Uri` | `Diagnostics`, `TimeZone` | `TimeZone`, `Xml.Linq` | vendored tinyxml2 (public) | `System/Xml/ConformanceLevel.hpp` |
 | `Xml.Linq` | `modules/xml-linq` | static | `Core.Base`, `Xml` | — | — | — | `System/Xml/Linq/Extensions.hpp` |
-| `Xml.Serialization` | `modules/xml-serialization` | interface | `Core.Base`, `Xml` | — | — | — | `System/Xml/Serialization/XmlSerializer.hpp` |
+| `Xml.Serialization` | `modules/xml-serialization` | interface | `Collections.Core`, `Xml` | — | — | — | `System/Xml/Serialization/XmlSerializer.hpp` |
 
 ## Compatibility components
 

@@ -16,11 +16,10 @@
 //
 // Verified separately, with `-Wall -Wextra -Werror` and without `-Wpedantic`: this file
 // compiles clean, links against the selected component closure, and returns 0. The component
-// resolution is also right -- asking for `Xml.Serialization` alone pulls exactly
-// `Core.Base, Uri, Diagnostics, TimeZone, Xml, Xml.Serialization` and nothing more.
+// resolution is also right -- asking for `Xml.Serialization` alone pulls its explicit
+// `Collections.Core` dependency together with the existing Xml closure.
 #include <cstdlib>
 #include <string>
-#include <vector>
 
 #include "System/Xml/Serialization/XmlSerializer.hpp"
 
@@ -33,7 +32,7 @@ struct Entity {
 };
 
 struct EntityList {
-    std::vector<Entity> entities;
+    System::Collections::Generic::List<Entity> entities;
     SHARP_XML_SERIALIZABLE(EntityList, "EntityList", SHARP_XML_M(EntityList, entities))
 };
 
@@ -41,14 +40,15 @@ struct EntityList {
 
 int main() {
     EntityList list;
-    list.entities.push_back({"spawn0", 1.5f});
+    list.entities.Add({"spawn0", 1.5f});
 
     System::Xml::Serialization::XmlSerializer<EntityList> serializer;
     const std::string xml = serializer.Serialize(list);
     const EntityList back = serializer.Deserialize(xml);
 
-    const bool ok = back.entities.size() == 1 && back.entities[0].name == "spawn0" &&
-                    back.entities[0].x == 1.5f &&
+    const bool ok = back.entities.getCountProperty() == 1 &&
+                    back.entities.getItem(0).name == "spawn0" &&
+                    back.entities.getItem(0).x == 1.5f &&
                     xml.find("<EntityList xmlns:xsi=") != std::string::npos;
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

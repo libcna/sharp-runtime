@@ -8,6 +8,7 @@
 #include <tuple>
 #include <vector>
 
+#include "System/Collections/Generic/List.hpp"
 #include "System/Xml/Serialization/detail/XmlLeafConvert.hpp"
 #include "System/Xml/Serialization/detail/XmlMember.hpp"
 #include "System/Xml/XmlDocument.hpp"
@@ -116,7 +117,7 @@ namespace System::Xml::Serialization {
         void SerializeInto(System::Xml::XmlDocument& doc, System::Xml::XmlElement* parent,
                             const T& value) const {
             if constexpr (detail::IsXmlListV<T>) {
-                using Item = typename T::value_type;
+                using Item = typename detail::XmlListTraits<T>::Item;
                 System::Xml::XmlElement* root =
                     doc.CreateElement(std::string("ArrayOf") + ItemElementName<Item>());
                 AddSchemaNamespaces(root);
@@ -162,7 +163,8 @@ namespace System::Xml::Serialization {
          * own nodes without duplicating the `ArrayOf` rule. */
         [[nodiscard]] static std::string RootElementName() {
             if constexpr (detail::IsXmlListV<T>) {
-                return std::string("ArrayOf") + ItemElementName<typename T::value_type>();
+                return std::string("ArrayOf") +
+                       ItemElementName<typename detail::XmlListTraits<T>::Item>();
             } else {
                 return SharpXmlRootName(static_cast<const T*>(nullptr));
             }
@@ -173,7 +175,7 @@ namespace System::Xml::Serialization {
 
         static void BuildDocument(System::Xml::XmlDocument& doc, const T& value) {
             if constexpr (detail::IsXmlListV<T>) {
-                using Item = typename T::value_type;
+                using Item = typename detail::XmlListTraits<T>::Item;
                 std::string rootName = std::string("ArrayOf") + ItemElementName<Item>();
                 System::Xml::XmlElement* root = MakeRootElement(doc, rootName);
                 for (const Item& item : value) {
@@ -253,7 +255,7 @@ namespace System::Xml::Serialization {
             if constexpr (detail::IsXmlListV<Value>) {
                 System::Xml::XmlElement* wrapper = doc.CreateElement(elementName);
                 parent->AppendChild(wrapper);
-                using Item = typename Value::value_type;
+                using Item = typename detail::XmlListTraits<Value>::Item;
                 for (const Item& item : value) {
                     WriteValue(doc, wrapper, ItemElementName<Item>(), item);
                 }
@@ -295,14 +297,14 @@ namespace System::Xml::Serialization {
 
         template <typename List>
         static void ReadList(System::Xml::XmlNode* parent, List& out) {
-            using Item = typename List::value_type;
+            using Item = typename detail::XmlListTraits<List>::Item;
             const std::string itemName = ItemElementName<Item>();
             for (System::Xml::XmlNode* child = parent->getFirstChildProperty(); child != nullptr;
                  child = child->getNextSiblingProperty()) {
                 if (child->getNameProperty() != itemName) continue;
                 Item item{};
                 ReadInto(static_cast<System::Xml::XmlElement*>(child), item);
-                out.push_back(std::move(item));
+                detail::XmlListTraits<List>::Append(out, std::move(item));
             }
         }
 

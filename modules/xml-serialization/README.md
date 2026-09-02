@@ -15,5 +15,10 @@ and `SHARP_XML_M` — a compile-time customization point in the same shape
 Scope, evidence, deviations and the golden-fixture corpus are documented in
 [`docs/XmlSerializationScope.md`](../../docs/XmlSerializationScope.md).
 
+Both `std::vector<T>` and `System::Collections::Generic::List<T>` map to the
+default .NET `List<T>` XML wire shape. This lets translated code retain its
+`System.Collections.Generic.List<T>` data model without a serializer-only STL
+substitute.
+
 See the [generated component catalogue](../../docs/ComponentCatalog.md) for
 authoritative dependency metadata.
