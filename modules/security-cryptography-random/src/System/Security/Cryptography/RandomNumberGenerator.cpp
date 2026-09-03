@@ -7,6 +7,8 @@
 #if defined(_WIN32)
 #include <windows.h>
 #include <bcrypt.h>
+#elif defined(__ANDROID__)
+#include <cstdlib>
 #else
 #include <cerrno>
 #include <cstring>
@@ -19,7 +21,7 @@ namespace {
 
     class OsRandomNumberGenerator : public RandomNumberGenerator {
     public:
-        // TWO ARMS, NOT FOUR, AND THAT IS THE REPAIR (#2398).
+        // THREE ARMS, NOT FOUR, AND THAT IS THE REPAIR (#2398 plus SAMPLE-152).
         //
         // This body used to have four: Windows, an EMSCRIPTEN arm that THREW
         // `PlatformNotSupportedException`, a Linux `getrandom()` arm, and a
@@ -39,11 +41,11 @@ namespace {
         // `__EMSCRIPTEN__` arm is `SystemJS_RandomBytes`
         // (`src/native/minipal/random.c:83-93`).
         //
-        // Collapsing to `Guid.cpp`'s two-arm shape does more than delete the throw.
+        // Collapsing to `Guid.cpp`'s shared platform shape does more than delete the throw.
         // `getrandom()` is Linux-only (undeclared on Apple/BSD; Emscripten declares
         // it but backs `getentropy` with `__wasi_random_get`), so the old file had
         // ONE arm per platform and the Linux gate compiled only one of them. With a
-        // single non-Windows arm, THE CODE EMSCRIPTEN TAKES IS THE CODE LINUX TAKES,
+        // shared Unix arm, THE CODE EMSCRIPTEN TAKES IS THE CODE LINUX TAKES,
         // so the full gate exercises it on every run -- an unverifiable platform arm
         // becomes a verified one, which is the point rather than a side effect.
         //
@@ -66,6 +68,10 @@ namespace {
             if (status < 0) {
                 throw CryptographicException("BCryptGenRandom failed.");
             }
+#elif defined(__ANDROID__)
+            // Bionic's CSPRNG is available at every supported Android API
+            // level; getentropy() is declared only from API 28 onward.
+            ::arc4random_buf(data.data(), data.size());
 #else
             constexpr size_t maxChunk = 256;
             size_t total = 0;

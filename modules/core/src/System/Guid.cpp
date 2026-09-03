@@ -18,6 +18,8 @@
 #if defined(_WIN32)
 #include <windows.h>
 #include <bcrypt.h>
+#elif defined(__ANDROID__)
+#include <cstdlib>
 #else
 #include <cerrno>
 #include <unistd.h>
@@ -412,6 +414,11 @@ namespace System {
                     length -= chunk;
                 }
             }
+#elif defined(__ANDROID__)
+            // Bionic provides arc4random_buf() at every Android API level.
+            // getentropy() is unavailable below API 28, while Sharp Runtime
+            // supports Android API 24.
+            ::arc4random_buf(buffer, length);
 #else
             // getentropy() rather than getrandom(): getrandom() is Linux-only
             // (undeclared on Apple/BSD, and Emscripten declares it but backs
