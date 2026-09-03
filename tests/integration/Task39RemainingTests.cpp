@@ -514,6 +514,20 @@ TEST(StoragePathsTests, GetIsolatedStorageRoot_NonEmpty) {
     EXPECT_FALSE(path.empty());
 }
 
+TEST(StoragePathsTests, HostOverrideSelectsAndCreatesExactRoot) {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::current_path() / "build-tmp" / "storage-paths-host-override";
+    std::error_code error;
+    fs::remove_all(root, error);
+
+    SharpRuntime::Storage::StoragePaths::SetIsolatedStorageRootOverride(root);
+    EXPECT_EQ(SharpRuntime::Storage::StoragePaths::GetIsolatedStorageRoot(), root);
+    EXPECT_TRUE(fs::is_directory(root));
+
+    SharpRuntime::Storage::StoragePaths::SetIsolatedStorageRootOverride({});
+    fs::remove_all(root, error);
+}
+
 // ===========================================================================
 // Experimental::Property
 // ===========================================================================

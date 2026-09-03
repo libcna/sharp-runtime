@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "SharpRuntime/Storage/StoragePaths.hpp"
 
 #include <filesystem>
+#include <mutex>
+#include <optional>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten.h>
@@ -14,8 +17,29 @@
 
 namespace SharpRuntime::Storage
 {
+    namespace
+    {
+        std::mutex rootOverrideMutex;
+        std::optional<std::filesystem::path> rootOverride;
+    }
+
     std::filesystem::path StoragePaths::GetIsolatedStorageRoot()
     {
+        std::filesystem::path configuredRoot;
+        {
+            const std::scoped_lock lock(rootOverrideMutex);
+            if (rootOverride.has_value())
+            {
+                configuredRoot = *rootOverride;
+            }
+        }
+
+        if (!configuredRoot.empty())
+        {
+            std::filesystem::create_directories(configuredRoot);
+            return configuredRoot;
+        }
+
 #if defined(__EMSCRIPTEN__)
         // On Emscripten, persist save data under /save which is mounted as
         // IDBFS by the application startup code so data survives page reloads.
@@ -44,5 +68,18 @@ namespace SharpRuntime::Storage
 #endif
         std::filesystem::create_directories(root);
         return root;
+    }
+
+    void StoragePaths::SetIsolatedStorageRootOverride(const std::filesystem::path& root)
+    {
+        const std::scoped_lock lock(rootOverrideMutex);
+        if (root.empty())
+        {
+            rootOverride.reset();
+        }
+        else
+        {
+            rootOverride = root;
+        }
     }
 }
