@@ -758,6 +758,24 @@ TEST(DirectoryInfoTests, GetFiles_NonExistent_ThrowsDirectoryNotFoundException) 
     EXPECT_THROW((void)di.GetFiles(), System::IO::DirectoryNotFoundException);
 }
 
+TEST(DirectoryInfoTests, GetFiles_SearchPattern_ReturnsMatchingFileInfoObjects) {
+    const std::string dir = tf("di_getfiles_pattern");
+    Directory::CreateDirectory(dir);
+    File::WriteAllText(dir + "/first.xnb", "xnb");
+    File::WriteAllText(dir + "/SECOND.XNB", "xnb");
+    File::WriteAllText(dir + "/ignored.wav", "wav");
+
+    const DirectoryInfo info(dir);
+    const auto files = info.GetFiles("*.xnb");
+
+    ASSERT_EQ(files.size(), 2u);
+    EXPECT_TRUE(files[0].getNameProperty() == "first.xnb" ||
+                files[1].getNameProperty() == "first.xnb");
+    EXPECT_TRUE(files[0].getNameProperty() == "SECOND.XNB" ||
+                files[1].getNameProperty() == "SECOND.XNB");
+    Directory::Delete(dir, true);
+}
+
 // ===========================================================================
 // BinaryWriter + BinaryReader
 // ===========================================================================

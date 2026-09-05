@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "System/Collections/Generic/List.hpp"
+#include "System/IO/StreamReader.hpp"
 #include "System/Xml/Serialization/detail/XmlLeafConvert.hpp"
 #include "System/Xml/Serialization/detail/XmlMember.hpp"
 #include "System/Xml/XmlDocument.hpp"
@@ -99,6 +100,19 @@ namespace System::Xml::Serialization {
                 ReadMembers(root, result);
             }
             return result;
+        }
+
+        /**
+         * @brief Deserializes an XML document read from the stream's current position.
+         *
+         * @param stream Readable stream containing the XML document.
+         * @return Deserialized value.
+         * @throws System::ArgumentException if the stream is not readable.
+         * @throws System::Xml::XmlException if the XML is malformed.
+         */
+        [[nodiscard]] T Deserialize(System::IO::Stream& stream) const {
+            System::IO::StreamReader reader(&stream, true);
+            return Deserialize(reader.ReadToEnd());
         }
 
         /**

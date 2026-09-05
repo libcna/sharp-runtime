@@ -1,10 +1,10 @@
 # `System.Xml.Serialization` — scope, evidence, and known deviations
 
 Ticket: `SAMPLES-DEC-008`. Module: `modules/xml-serialization` (`Xml.Serialization`, header-only,
-`INTERFACE`, depends on `Core.Base` and `Xml`).
+`INTERFACE`, depends on `Collections.Core`, `IO`, and `Xml`).
 
-This module exists to unblock three `cna-samples` ports — `SAMPLE-014` (Spacewar),
-`SAMPLE-066` (ShipGame) and `SAMPLE-070` (RolePlayingGame) — which the owner marked blocked on
+This module exists to unblock four `cna-samples` ports — `SAMPLE-014` (Spacewar),
+`SAMPLE-062` (NetRumble), `SAMPLE-066` (ShipGame), and `SAMPLE-070` (RolePlayingGame) — which the owner marked blocked on
 2026-08-28 with an explicit instruction not to add another hand-written per-sample XML parser.
 It is a shared, generic engine, not a parser for any one sample.
 
@@ -53,6 +53,7 @@ inside a local class, so a type declared inside a function body will not compile
 | `INF`/`-INF`/`NaN` schema tokens, not .NET's `Infinity` spelling | XML Schema's `float` lexical space |
 | Markup escaping (`&`, `<`, `>`, quotes) and non-ASCII text | a quest named `Smith & Son` must not corrupt a save |
 | **Nested serialization into a caller's document** (`SerializeInto`/`DeserializeFrom`/`RootElementName`) | **16 of the 20** `Session.cs` call sites serialize into an already-open `XmlWriter` |
+| Deserialization from a readable `Stream` at its current position without taking ownership | NetRumble's `ParticleEffect.Load(ContentManager, String)` opens each particle XML with `File.OpenRead` and passes the stream to `XmlSerializer.Deserialize` |
 
 ## The dominant call-site shape: nesting, not standalone documents
 
@@ -99,12 +100,12 @@ Each of these is **absent by evidence, not by omission**:
   belongs to the **Content Pipeline** writers (`CharacterWriter.cs`,
   `FightingCharacterWriter.cs` in `RolePlayingGameProcessors`), which build `.xnb` at build time
   and never reach `XmlSerializer`.
-- **`[XmlArray]` / `[XmlArrayItem]` naming overrides.** No occurrences in the three samples.
+- **`[XmlArray]` / `[XmlArrayItem]` naming overrides.** No occurrences in the four samples.
 - **`[XmlAttribute]`-mapped members.** Every reachable member is element-mapped.
 - **Circular-reference detection.** The reachable save graphs are trees and lists, with content
   referenced by asset *name* rather than by object identity.
 
-If any of these turns up in a fourth sample, it is new work with its own ticket — not a silent
+If any of these turns up in a fifth sample, it is new work with its own ticket — not a silent
 gap here.
 
 ## Known deviations

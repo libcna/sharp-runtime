@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include "System/Xml/Serialization/XmlSerializer.hpp"
+#include "System/IO/MemoryStream.hpp"
 
 using System::Xml::Serialization::XmlSerializationOptions;
 using System::Xml::Serialization::XmlSerializer;
@@ -34,6 +35,23 @@ struct SaveGameDescriptionData {
                             SHARP_XML_M(SaveGameDescriptionData, ChapterName),
                             SHARP_XML_M(SaveGameDescriptionData, Description))
 };
+
+TEST(XmlSerializerStreamTests, DeserializeReadsFromCurrentStreamPositionAndLeavesStreamOpen) {
+    const std::string xml = "prefix<?xml version=\"1.0\"?><SaveGameDescription>"
+                            "<FileName>slot1</FileName><ChapterName>One</ChapterName>"
+                            "<Description>Ready</Description></SaveGameDescription>";
+    System::IO::MemoryStream stream(
+        reinterpret_cast<const SharpRuntime::bytecs*>(xml.data()),
+        static_cast<SharpRuntime::intcs>(xml.size()), false);
+    stream.setPositionProperty(6);
+
+    const SaveGameDescriptionData value = XmlSerializer<SaveGameDescriptionData>{}.Deserialize(stream);
+
+    EXPECT_EQ(value.FileName, "slot1");
+    EXPECT_EQ(value.ChapterName, "One");
+    EXPECT_EQ(value.Description, "Ready");
+    EXPECT_TRUE(stream.getCanReadProperty());
+}
 
 // --- ShipGame's Entity/EntityList: ShipGame/ShipGame/EntityList.cs ----------------------------
 

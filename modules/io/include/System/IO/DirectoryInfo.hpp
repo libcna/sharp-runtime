@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <string>
 #include <vector>
+#include "System/IO/Directory.hpp"
 #include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/FileInfo.hpp"
 #include "System/IO/FileSystemInfo.hpp"
@@ -154,6 +155,24 @@ namespace System::IO {
             forEachEntry([&](const std::filesystem::directory_entry& entry) {
                 if (isRegularFile(entry)) result.emplace_back(entry.path().string());
             });
+            return result;
+        }
+
+        /**
+         * @brief Returns FileInfo objects for files whose names match the search pattern.
+         *
+         * @param searchPattern Pattern containing the same wildcard syntax accepted by
+         *        Directory::GetFiles.
+         * @return Matching files in the directory.
+         * @throws System::IO::DirectoryNotFoundException if the directory does not exist.
+         * @throws System::UnauthorizedAccessException if enumeration is denied.
+         * @throws System::IO::IOException for another filesystem enumeration failure.
+         */
+        [[nodiscard]] std::vector<FileInfo> GetFiles(const std::string& searchPattern) const {
+            std::vector<FileInfo> result;
+            for (const std::string& path : Directory::GetFiles(fullPath_.string(), searchPattern)) {
+                result.emplace_back(path);
+            }
             return result;
         }
 
