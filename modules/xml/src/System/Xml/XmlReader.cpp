@@ -33,7 +33,9 @@ struct XmlEvent {
 // ---------------------------------------------------------------------------
 
 struct XmlReaderState {
-    tinyxml2::XMLDocument              doc;
+    // PEDANTIC_WHITESPACE keeps whitespace-only text nodes, which .NET reports as Whitespace
+    // nodes and includes in ReadElementContentAsString(): `<Tab>\t</Tab>` reads a tab, not "".
+    tinyxml2::XMLDocument              doc{true, tinyxml2::PEDANTIC_WHITESPACE};
     std::vector<XmlEvent>              events;
     int                                pos       = -1;  // before first Read()
     int                                attrIndex = -1;  // attribute cursor (-1 = on element)
@@ -103,8 +105,11 @@ static void buildEvents(tinyxml2::XMLNode* node, std::vector<XmlEvent>& out,
     }
     if (auto* txt = node->ToText()) {
         XmlEvent e;
-        e.type  = txt->CData() ? XmlNodeType::CDATA : XmlNodeType::Text;
         e.value = txt->Value() ? txt->Value() : "";
+        const bool whitespaceOnly = !txt->CData() &&
+            e.value.find_first_not_of(" \t\r\n") == std::string::npos;
+        e.type  = txt->CData() ? XmlNodeType::CDATA
+                : whitespaceOnly ? XmlNodeType::Whitespace : XmlNodeType::Text;
         e.scope = scope; e.depth = depth; e.lineNumber = node->GetLineNum();
         out.push_back(std::move(e));
         return;
@@ -400,7 +405,9 @@ std::string XmlReader::ReadElementContentAsString() {
             --depth;
         } else if (ev.type == XmlNodeType::Element) {
             if (!ev.isEmptyElement) ++depth; // self-closing elements have no matching EndElement
-        } else if (depth == 0 && (ev.type == XmlNodeType::Text || ev.type == XmlNodeType::CDATA)) {
+        } else if (depth == 0 && (ev.type == XmlNodeType::Text || ev.type == XmlNodeType::CDATA ||
+                                  ev.type == XmlNodeType::Whitespace ||
+                                  ev.type == XmlNodeType::SignificantWhitespace)) {
             result += ev.value;
         }
         Read();

@@ -148,6 +148,28 @@ TEST(XmlReaderNavigationTests, LineInfoReportsTheStartLineOfEveryNode) {
     EXPECT_EQ(r->getLineNumberProperty(), 6);
 }
 
+TEST(XmlReaderNavigationTests, WhitespaceOnlyTextIsReportedAndReadAsContent) {
+    // .NET keeps whitespace-only element content: `<Tab>\t</Tab>` reads a tab. tinyxml2 dropped
+    // such nodes before PEDANTIC_WHITESPACE; in that mode it keeps an element's whitespace-only
+    // content (reported here as a Whitespace node) while still dropping indentation between
+    // elements, so the reader never sees a node between `<r>` and `<Tab>`.
+    auto r = Open("<r>\n  <Tab>\t</Tab>\n  <Space> </Space>\n  <Empty></Empty>\n</r>");
+    r->ReadStartElement("r");
+    ASSERT_TRUE(r->IsStartElement("Tab"));
+    r->Read();
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::Whitespace);
+    EXPECT_EQ(r->getValueProperty(), "\t");
+    r = Open("<r>\n  <Tab>\t</Tab>\n  <Space> </Space>\n  <Empty></Empty>\n</r>");
+    r->ReadStartElement("r");
+    ASSERT_TRUE(r->IsStartElement("Tab"));
+    EXPECT_EQ(r->ReadElementContentAsString(), "\t");
+    ASSERT_TRUE(r->IsStartElement("Space"));
+    EXPECT_EQ(r->ReadElementContentAsString(), " ");
+    ASSERT_TRUE(r->IsStartElement("Empty"));
+    EXPECT_EQ(r->ReadElementContentAsString(), "");
+    EXPECT_EQ(r->MoveToContent(), XmlNodeType::EndElement);
+}
+
 TEST(XmlReaderNavigationTests, SettingsProhibitDtdByDefault) {
     XmlReaderSettings settings;
     EXPECT_EQ(settings.DtdProcessing, DtdProcessing::Prohibit);
