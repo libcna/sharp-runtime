@@ -4,6 +4,7 @@
 #include "System/Xml/XmlReader.hpp"
 #include <tinyxml2/tinyxml2.h>
 #include "System/Xml/XmlException.hpp"
+#include "System/Xml/XmlReaderSettings.hpp"
 #include <cctype>
 #include <stack>
 
@@ -19,6 +20,12 @@ struct XmlEvent {
     std::string                              value;
     bool                                     isEmptyElement = false;
     std::vector<std::pair<std::string,std::string>> attributes;
+    /// The element this event belongs to: the element itself for Element/EndElement, the
+    /// enclosing element for everything else (null at document level). Namespace lookups
+    /// walk its parent chain; the document that owns it lives as long as the reader.
+    const tinyxml2::XMLElement*              scope        = nullptr;
+    int                                      depth        = 0;
+    int                                      lineNumber   = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -50,11 +57,13 @@ static void splitTargetAndData(const std::string& raw, std::string& target, std:
     data = raw.substr(i);
 }
 
-static void buildEvents(tinyxml2::XMLNode* node, std::vector<XmlEvent>& out) {
+static void buildEvents(tinyxml2::XMLNode* node, std::vector<XmlEvent>& out,
+                        const tinyxml2::XMLElement* scope, int depth) {
     if (auto* decl = node->ToDeclaration()) {
         std::string target, data;
         splitTargetAndData(decl->Value() ? decl->Value() : "", target, data);
         XmlEvent e;
+        e.scope = scope; e.depth = depth; e.lineNumber = node->GetLineNum();
         bool isRealDeclaration = target.size() == 3 &&
             (target[0] == 'x' || target[0] == 'X') &&
             (target[1] == 'm' || target[1] == 'M') &&
@@ -70,18 +79,24 @@ static void buildEvents(tinyxml2::XMLNode* node, std::vector<XmlEvent>& out) {
         e.type          = XmlNodeType::Element;
         e.name          = el->Name() ? el->Name() : "";
         e.isEmptyElement = el->ClosingType() == tinyxml2::XMLElement::CLOSED;
+        e.scope = el; e.depth = depth; e.lineNumber = el->GetLineNum();
         for (const tinyxml2::XMLAttribute* a = el->FirstAttribute(); a; a = a->Next())
             e.attributes.emplace_back(a->Name() ? a->Name() : "",
                                       a->Value() ? a->Value() : "");
+        const bool isEmpty = e.isEmptyElement;
         out.push_back(std::move(e));
 
         for (tinyxml2::XMLNode* child = el->FirstChild(); child; child = child->NextSibling())
-            buildEvents(child, out);
+            buildEvents(child, out, el, depth + 1);
 
-        if (!e.isEmptyElement) {
+        if (!isEmpty) {
             XmlEvent ee;
             ee.type = XmlNodeType::EndElement;
             ee.name = el->Name() ? el->Name() : "";
+            ee.scope = el; ee.depth = depth;
+            // tinyxml2 keeps the start tag's line only; the end tag is reported on the line
+            // of the element's last child when it has one.
+            ee.lineNumber = el->LastChild() ? el->LastChild()->GetLineNum() : el->GetLineNum();
             out.push_back(std::move(ee));
         }
         return;
@@ -90,6 +105,7 @@ static void buildEvents(tinyxml2::XMLNode* node, std::vector<XmlEvent>& out) {
         XmlEvent e;
         e.type  = txt->CData() ? XmlNodeType::CDATA : XmlNodeType::Text;
         e.value = txt->Value() ? txt->Value() : "";
+        e.scope = scope; e.depth = depth; e.lineNumber = node->GetLineNum();
         out.push_back(std::move(e));
         return;
     }
@@ -97,6 +113,7 @@ static void buildEvents(tinyxml2::XMLNode* node, std::vector<XmlEvent>& out) {
         XmlEvent e;
         e.type  = XmlNodeType::Comment;
         e.value = cmt->Value() ? cmt->Value() : "";
+        e.scope = scope; e.depth = depth; e.lineNumber = node->GetLineNum();
         out.push_back(std::move(e));
         return;
     }
@@ -109,6 +126,7 @@ static void buildEvents(tinyxml2::XMLNode* node, std::vector<XmlEvent>& out) {
         std::string raw = unk->Value() ? unk->Value() : "";
         XmlEvent e;
         e.type = XmlNodeType::DocumentType;
+        e.scope = scope; e.depth = depth; e.lineNumber = node->GetLineNum();
         if (raw.rfind("DOCTYPE", 0) == 0) {
             std::string keyword, rest;
             splitTargetAndData(raw, keyword, rest);
@@ -191,6 +209,61 @@ std::string XmlReader::getValueProperty() const {
     return ev.value;
 }
 
+std::string XmlReader::getLocalNameProperty() const {
+    const std::string name = getNameProperty();
+    const std::size_t colon = name.find(':');
+    return colon == std::string::npos ? name : name.substr(colon + 1);
+}
+
+std::string XmlReader::getPrefixProperty() const {
+    const std::string name = getNameProperty();
+    const std::size_t colon = name.find(':');
+    return colon == std::string::npos ? std::string() : name.substr(0, colon);
+}
+
+SharpRuntime::intcs XmlReader::getDepthProperty() const {
+    if (!hasCurrentNode(state_.get()))
+        return 0;
+    const auto& ev = state_->events[static_cast<size_t>(state_->pos)];
+    return ev.depth + (state_->attrIndex >= 0 ? 1 : 0);
+}
+
+bool XmlReader::getHasAttributesProperty() const {
+    return getAttributeCountProperty() > 0;
+}
+
+SharpRuntime::intcs XmlReader::getAttributeCountProperty() const {
+    if (!hasCurrentNode(state_.get()))
+        return 0;
+    const auto& ev = state_->events[static_cast<size_t>(state_->pos)];
+    if (ev.type != XmlNodeType::Element) return 0;
+    return static_cast<SharpRuntime::intcs>(ev.attributes.size());
+}
+
+bool XmlReader::HasLineInfo() const { return true; }
+
+SharpRuntime::intcs XmlReader::getLineNumberProperty() const {
+    if (!hasCurrentNode(state_.get()))
+        return 0;
+    return state_->events[static_cast<size_t>(state_->pos)].lineNumber;
+}
+
+SharpRuntime::intcs XmlReader::getLinePositionProperty() const { return 0; }
+
+std::optional<std::string> XmlReader::LookupNamespace(const std::string& prefix) const {
+    if (prefix == "xml") return std::string("http://www.w3.org/XML/1998/namespace");
+    if (prefix == "xmlns") return std::string("http://www.w3.org/2000/xmlns/");
+    if (!hasCurrentNode(state_.get()))
+        return std::nullopt;
+    const std::string wanted = prefix.empty() ? std::string("xmlns") : "xmlns:" + prefix;
+    for (const tinyxml2::XMLElement* el = state_->events[static_cast<size_t>(state_->pos)].scope;
+         el; el = el->Parent() ? el->Parent()->ToElement() : nullptr) {
+        if (const char* uri = el->Attribute(wanted.c_str()))
+            return std::string(uri);
+    }
+    return std::nullopt;
+}
+
 bool XmlReader::getIsEmptyElementProperty() const {
     if (!hasCurrentNode(state_.get()))
         return false;
@@ -225,6 +298,63 @@ bool XmlReader::MoveToElement() {
         return false;
     state_->attrIndex = -1;
     return state_->events[static_cast<size_t>(state_->pos)].type == XmlNodeType::Element;
+}
+
+bool XmlReader::MoveToFirstAttribute() {
+    if (!hasCurrentNode(state_.get()))
+        return false;
+    const auto& ev = state_->events[static_cast<size_t>(state_->pos)];
+    if (ev.type != XmlNodeType::Element || ev.attributes.empty()) return false;
+    state_->attrIndex = 0;
+    return true;
+}
+
+static bool isContentNode(XmlNodeType type) {
+    return type == XmlNodeType::Element || type == XmlNodeType::EndElement ||
+           type == XmlNodeType::Text || type == XmlNodeType::CDATA ||
+           type == XmlNodeType::EntityReference || type == XmlNodeType::EndEntity;
+}
+
+XmlNodeType XmlReader::MoveToContent() {
+    if (isClosed(state_.get())) return XmlNodeType::None;
+    if (state_->attrIndex >= 0) MoveToElement();
+    // Before the first Read() the reader is on no node; .NET's MoveToContent() advances to
+    // the first content node from there as well.
+    while (true) {
+        if (hasCurrentNode(state_.get())) {
+            const XmlNodeType type = state_->events[static_cast<size_t>(state_->pos)].type;
+            if (isContentNode(type)) return type;
+        }
+        if (!Read()) return XmlNodeType::None;
+    }
+}
+
+bool XmlReader::IsStartElement() {
+    return MoveToContent() == XmlNodeType::Element;
+}
+
+bool XmlReader::IsStartElement(const std::string& name) {
+    return MoveToContent() == XmlNodeType::Element && getNameProperty() == name;
+}
+
+void XmlReader::Skip() {
+    if (!hasCurrentNode(state_.get())) return;
+    if (state_->attrIndex >= 0) MoveToElement();
+    const bool container = state_->events[static_cast<size_t>(state_->pos)].type == XmlNodeType::Element &&
+                           !state_->events[static_cast<size_t>(state_->pos)].isEmptyElement;
+    Read();
+    if (!container) return;
+    int depth = 0;
+    while (hasCurrentNode(state_.get())) {
+        const auto& cur = state_->events[static_cast<size_t>(state_->pos)];
+        if (cur.type == XmlNodeType::Element && !cur.isEmptyElement) {
+            ++depth;
+        } else if (cur.type == XmlNodeType::EndElement) {
+            if (depth == 0) { Read(); return; }
+            --depth;
+        }
+        Read();
+    }
 }
 
 bool XmlReader::MoveToNextAttribute() {
@@ -287,6 +417,14 @@ void XmlReader::ReadStartElement() {
     Read();
 }
 
+void XmlReader::ReadStartElement(const std::string& name) {
+    if (MoveToContent() != XmlNodeType::Element || getNameProperty() != name)
+        throw XmlException("Element '" + name + "' was not found. Line " +
+                           std::to_string(getLineNumberProperty()) + ", position " +
+                           std::to_string(getLinePositionProperty()) + ".");
+    Read();
+}
+
 void XmlReader::ReadEndElement() {
     if (!hasCurrentNode(state_.get()) ||
         state_->events[static_cast<size_t>(state_->pos)].type != XmlNodeType::EndElement)
@@ -308,8 +446,39 @@ static XmlReader* createFromDoc(std::unique_ptr<XmlReaderState> st) {
                                  (st->doc.ErrorStr() ? st->doc.ErrorStr() : ""));
     // Walk all top-level nodes (declaration + root element)
     for (tinyxml2::XMLNode* n = st->doc.FirstChild(); n; n = n->NextSibling())
-        buildEvents(n, st->events);
+        buildEvents(n, st->events, nullptr, 0);
     return new XmlReader(std::move(st));
+}
+
+static void applySettings(XmlReaderState& st, const XmlReaderSettings& settings) {
+    std::vector<XmlEvent> kept;
+    kept.reserve(st.events.size());
+    for (auto& ev : st.events) {
+        switch (ev.type) {
+        case XmlNodeType::DocumentType:
+            if (settings.ProhibitDtd || settings.DtdProcessing == DtdProcessing::Prohibit)
+                throw XmlException("For security reasons DTD is prohibited in this XML document. "
+                                   "To enable DTD processing set the DtdProcessing property on "
+                                   "XmlReaderSettings to Parse and pass the settings into "
+                                   "XmlReader.Create method.");
+            if (settings.DtdProcessing == DtdProcessing::Ignore) continue;
+            break;
+        case XmlNodeType::Comment:
+            if (settings.IgnoreComments) continue;
+            break;
+        case XmlNodeType::ProcessingInstruction:
+            if (settings.IgnoreProcessingInstructions) continue;
+            break;
+        case XmlNodeType::Whitespace:
+        case XmlNodeType::SignificantWhitespace:
+            if (settings.IgnoreWhitespace) continue;
+            break;
+        default:
+            break;
+        }
+        kept.push_back(std::move(ev));
+    }
+    st.events = std::move(kept);
 }
 
 XmlReader* XmlReader::Create(const std::string& inputUri) {
@@ -334,6 +503,12 @@ XmlReader* XmlReader::Create(const std::string& inputUri) {
     else
         st->doc.Parse(inputUri.c_str());
     return createFromDoc(std::move(st));
+}
+
+XmlReader* XmlReader::Create(const std::string& inputUri, const XmlReaderSettings& settings) {
+    std::unique_ptr<XmlReader> reader(Create(inputUri));
+    applySettings(*reader->state_, settings);
+    return reader.release();
 }
 
 XmlReader* XmlReader::CreateFromString(const std::string& xmlContent) {

@@ -8,6 +8,7 @@
 #include "System/Xml/XmlConvert.hpp"
 #include "System/Xml/XmlException.hpp"
 #include "System/Xml/detail/XmlLexicalSanitizer.hpp"
+#include <cstdio>
 #include <stack>
 
 namespace System::Xml {
@@ -252,17 +253,174 @@ void XmlWriter::WriteDocType(const std::string& name, const std::string& publicI
     state_->nodeStack.top()->InsertEndChild(dt);
 }
 
+// ---------------------------------------------------------------------------
+// Text form. The document is kept as a tinyxml2 DOM while it is being written, but it is
+// NOT printed with tinyxml2's XMLPrinter: measured, that printer indents with a fixed four
+// spaces whatever XmlWriterSettings::IndentChars says, spells an empty element "<a/>" where
+// .NET writes "<a />", writes the declaration's encoding as "UTF-8" where .NET writes
+// "utf-8", ends the document with a newline .NET does not write, and keeps indenting the
+// children of an element after text has been written into it, which .NET stops doing the
+// moment text is written (XmlEncodedRawTextWriterIndent: WriteString sets mixedContent, and
+// WriteStartElement / WriteEndElement indent only while it is clear, restoring the parent's
+// flag on the way out). The emitter below reproduces those rules from XmlWriterSettings alone,
+// so a document written by this class matches what .NET's XmlWriter.Create(…, settings)
+// emits for the same sequence of calls.
+// ---------------------------------------------------------------------------
+namespace {
+
+void AppendAttributeValue(std::string& out, const char* value) {
+    for (const char* p = value ? value : ""; *p; ++p) {
+        switch (*p) {
+        case '&':  out += "&amp;"; break;
+        case '<':  out += "&lt;"; break;
+        case '>':  out += "&gt;"; break;
+        case '"':  out += "&quot;"; break;
+        case '\r': out += "&#xD;"; break;
+        case '\n': out += "&#xA;"; break;
+        case '\t': out += "&#x9;"; break;
+        default:   out += *p; break;
+        }
+    }
+}
+
+void AppendText(std::string& out, const char* value, const XmlWriterSettings& settings) {
+    for (const char* p = value ? value : ""; *p; ++p) {
+        switch (*p) {
+        case '&': out += "&amp;"; break;
+        case '<': out += "&lt;"; break;
+        case '>': out += "&gt;"; break;
+        case '\r':
+            if (settings.NewLineHandling == NewLineHandling::Replace) {
+                out += settings.NewLineChars;
+                if (p[1] == '\n') ++p; // "\r\n" is one line break
+            } else if (settings.NewLineHandling == NewLineHandling::Entitize) {
+                out += "&#xD;";
+            } else {
+                out += '\r';
+            }
+            break;
+        case '\n':
+            if (settings.NewLineHandling == NewLineHandling::Replace) out += settings.NewLineChars;
+            else out += '\n';
+            break;
+        default: out += *p; break;
+        }
+    }
+}
+
+struct DotNetPrinter {
+    explicit DotNetPrinter(const XmlWriterSettings& s) : settings(s) {}
+
+    const XmlWriterSettings& settings;
+    std::string out;
+    int level = 0;
+    bool wroteAnything = false;
+
+    void Indent() {
+        if (!settings.Indent || !wroteAnything) return;
+        out += settings.NewLineChars;
+        for (int i = 0; i < level; ++i) out += settings.IndentChars;
+    }
+
+    void Node(const tinyxml2::XMLNode* node, bool& mixed) {
+        if (auto* el = node->ToElement()) {
+            if (!mixed) Indent();
+            out += '<';
+            out += el->Name() ? el->Name() : "";
+            for (const tinyxml2::XMLAttribute* a = el->FirstAttribute(); a; a = a->Next()) {
+                out += ' ';
+                out += a->Name() ? a->Name() : "";
+                out += "=\"";
+                AppendAttributeValue(out, a->Value());
+                out += '"';
+            }
+            wroteAnything = true;
+            if (!el->FirstChild()) { out += " />"; return; }
+            out += '>';
+            ++level;
+            bool childMixed = false;
+            for (const tinyxml2::XMLNode* c = el->FirstChild(); c; c = c->NextSibling())
+                Node(c, childMixed);
+            --level;
+            if (!childMixed) Indent();
+            out += "</";
+            out += el->Name() ? el->Name() : "";
+            out += '>';
+            return;
+        }
+        if (auto* txt = node->ToText()) {
+            mixed = true;
+            if (txt->CData()) {
+                out += "<![CDATA[";
+                out += txt->Value() ? txt->Value() : "";
+                out += "]]>";
+            } else {
+                AppendText(out, txt->Value(), settings);
+            }
+            wroteAnything = true;
+            return;
+        }
+        if (auto* cmt = node->ToComment()) {
+            if (!mixed) Indent();
+            out += "<!--";
+            out += cmt->Value() ? cmt->Value() : "";
+            out += "-->";
+            wroteAnything = true;
+            return;
+        }
+        if (auto* decl = node->ToDeclaration()) {
+            // Both the XML declaration and every other processing instruction parse as a
+            // tinyxml2 declaration; WriteStartDocument() leaves tinyxml2's default text, which
+            // is replaced by the declaration .NET writes for a UTF-8 document.
+            std::string text = decl->Value() ? decl->Value() : "";
+            const bool isDeclaration = text.rfind("xml ", 0) == 0 || text == "xml";
+            if (isDeclaration) {
+                if (settings.OmitXmlDeclaration) return;
+                text = "xml version=\"1.0\" encoding=\"utf-8\"";
+            } else if (!mixed) {
+                Indent();
+            }
+            out += "<?";
+            out += text;
+            out += "?>";
+            wroteAnything = true;
+            return;
+        }
+        if (auto* unk = node->ToUnknown()) {
+            if (!mixed) Indent();
+            out += "<!";
+            out += unk->Value() ? unk->Value() : "";
+            out += '>';
+            wroteAnything = true;
+            return;
+        }
+    }
+
+    std::string Print(const tinyxml2::XMLDocument& doc) {
+        bool mixed = false;
+        for (const tinyxml2::XMLNode* n = doc.FirstChild(); n; n = n->NextSibling())
+            Node(n, mixed);
+        return out;
+    }
+};
+
+} // namespace
+
 std::string XmlWriter::ToString() const {
     if (!state_) return {};
-    tinyxml2::XMLPrinter printer(nullptr, /*compact=*/!state_->settings.Indent);
-    state_->doc.Print(&printer);
-    return printer.CStr() ? printer.CStr() : "";
+    DotNetPrinter printer(state_->settings);
+    return printer.Print(state_->doc);
 }
 
 void XmlWriter::Flush() {
     if (!state_ || state_->filePath.empty()) return;
-    if (state_->doc.SaveFile(state_->filePath.c_str(), /*compact=*/!state_->settings.Indent) !=
-        tinyxml2::XML_SUCCESS)
+    DotNetPrinter printer(state_->settings);
+    const std::string text = printer.Print(state_->doc);
+    FILE* file = std::fopen(state_->filePath.c_str(), "wb");
+    if (!file)
+        throw XmlException("XmlWriter: failed to save file: " + state_->filePath);
+    const bool ok = std::fwrite(text.data(), 1, text.size(), file) == text.size();
+    if (std::fclose(file) != 0 || !ok)
         throw XmlException("XmlWriter: failed to save file: " + state_->filePath);
 }
 

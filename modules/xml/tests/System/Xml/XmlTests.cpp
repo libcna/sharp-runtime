@@ -474,7 +474,7 @@ TEST(XmlWriterTests, DefaultSettings_ProducesCompactOutput_NoIndentWhitespace) {
     w->WriteEndElement();
     w->WriteEndElement();
     std::string out = w->ToString();
-    EXPECT_EQ(out, "<root><child/></root>");
+    EXPECT_EQ(out, "<root><child /></root>");
 }
 
 // Regression tests for a wave-3 audit finding: WriteComment/WriteProcessingInstruction/

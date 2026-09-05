@@ -20,6 +20,9 @@
 // module already ships and that XmlDocument::CreateElement already uses — so the writer door
 // and the DOM door now report an identical diagnostic for identical input. It invents no name
 // grammar. See docs/SystemXmlNamespaceReviewPlan.md §4.3 and §20.4.
+// Empty elements in the expected literals below are spelled "<e />": the writer prints in
+// .NET's form (XmlWriter.cpp, "Text form"), which is how .NET's XmlWriter spells an element
+// with no content. The tests are about validation and lifecycle; the spelling is incidental.
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -142,7 +145,7 @@ TEST(XmlWriterValidationTests, WriteAttributeString_RejectedNameLeavesTheElement
     w->WriteAttributeString("good", "1");
     EXPECT_THROW(w->WriteAttributeString("1bad", "2"), XmlException);
     w->WriteEndElement();
-    EXPECT_EQ(w->ToString(), "<e good=\"1\"/>");
+    EXPECT_EQ(w->ToString(), "<e good=\"1\" />");
 }
 
 TEST(XmlWriterValidationTests, WriteElementString_InvalidName_ThrowsAndWritesNothing) {
@@ -165,14 +168,14 @@ TEST(XmlWriterValidationTests, WriteProcessingInstruction_InvalidTarget_Throws) 
 }
 
 TEST(XmlWriterValidationTests, WriteProcessingInstruction_TargetWithCloseSequence_NoLongerSpills) {
-    // Before the repair this emitted "<?a?>b d?><r/>": the "?>" inside the TARGET closed the
+    // Before the repair this emitted "<?a?>b d?><r />": the "?>" inside the TARGET closed the
     // instruction early and spilled "b d?>" into document-level text. The data was already
     // sanitized; the target had no door at all.
     auto w = NewWriter();
     EXPECT_THROW(w->WriteProcessingInstruction("a?>b", "d"), XmlException);
     w->WriteStartElement("r");
     w->WriteEndElement();
-    EXPECT_EQ(w->ToString(), "<r/>");
+    EXPECT_EQ(w->ToString(), "<r />");
 }
 
 TEST(XmlWriterValidationTests, WriteProcessingInstruction_ValidTarget_StillAccepted) {
@@ -214,7 +217,7 @@ TEST(XmlWriterValidationTests, WriteEndElement_OneTooMany_ThrowsInvalidOperation
     w->WriteStartElement("e");
     w->WriteEndElement();
     EXPECT_THROW(w->WriteEndElement(), InvalidOperationException);
-    EXPECT_EQ(w->ToString(), "<e/>"); // the balanced part survived intact
+    EXPECT_EQ(w->ToString(), "<e />"); // the balanced part survived intact
 }
 
 TEST(XmlWriterValidationTests, WriteEndElement_BalancedNesting_StillAccepted) {
@@ -224,7 +227,7 @@ TEST(XmlWriterValidationTests, WriteEndElement_BalancedNesting_StillAccepted) {
     w->WriteEndElement();
     w->WriteEndElement();
     EXPECT_THROW(w->WriteEndElement(), InvalidOperationException);
-    EXPECT_EQ(w->ToString(), "<a><b/></a>");
+    EXPECT_EQ(w->ToString(), "<a><b /></a>");
 }
 
 TEST(XmlWriterValidationTests, WriteAttributeString_WithNoElementOpen_ThrowsInvalidOperation) {
@@ -277,7 +280,7 @@ TEST(XmlWriterValidationTests, WriteAfterClose_DoesNotChangeTheEmittedDocument) 
     const std::string after = w->ToString();
     EXPECT_THROW(w->WriteStartElement("late"), InvalidOperationException);
     EXPECT_EQ(w->ToString(), after);
-    EXPECT_EQ(after, "<e/>");
+    EXPECT_EQ(after, "<e />");
 }
 
 TEST(XmlWriterValidationTests, CloseIsIdempotentAndToStringStaysUsable) {
@@ -289,7 +292,7 @@ TEST(XmlWriterValidationTests, CloseIsIdempotentAndToStringStaysUsable) {
     ASSERT_NO_THROW(w->Close());
     ASSERT_NO_THROW(w->Close());
     ASSERT_NO_THROW(w->Flush());
-    EXPECT_EQ(w->ToString(), "<e/>");
+    EXPECT_EQ(w->ToString(), "<e />");
 }
 
 TEST(XmlWriterValidationTests, CloseAfterAFailedCloseDoesNotThrowAgain) {
@@ -316,7 +319,7 @@ TEST(XmlWriterValidationTests, XmlTextWriter_InheritsBothRepairs) {
     closed.WriteEndElement();
     closed.Close();
     EXPECT_THROW(closed.WriteStartElement("late"), InvalidOperationException);
-    EXPECT_EQ(closed.ToString(), "<e/>");
+    EXPECT_EQ(closed.ToString(), "<e />");
 }
 
 // ===========================================================================
@@ -431,7 +434,7 @@ TEST(XmlWriterValidationTests, WriteDocType_SystemIdWithQuote_ReDelimitsAndRound
     ASSERT_NO_THROW(w->WriteDocType("r", "", "a\"b", ""));
     w->WriteStartElement("r");
     w->WriteEndElement();
-    EXPECT_EQ(w->ToString(), "<!DOCTYPE r SYSTEM 'a\"b'><r/>");
+    EXPECT_EQ(w->ToString(), "<!DOCTYPE r SYSTEM 'a\"b'><r />");
     ExpectDocTypeRoundTrip("", "a\"b");
 }
 
@@ -479,12 +482,12 @@ TEST(XmlWriterValidationTests, WriteDocType_ValidIdentifiers_ByteIdenticalOutput
     // character: '"' stays the preferred delimiter precisely so this holds.
     struct Case { const char* pub; const char* sys; const char* expected; };
     for (const Case& c : {
-             Case{"", "", "<!DOCTYPE r><r/>"},
-             Case{"", "about:legacy-compat", "<!DOCTYPE r SYSTEM \"about:legacy-compat\"><r/>"},
+             Case{"", "", "<!DOCTYPE r><r />"},
+             Case{"", "about:legacy-compat", "<!DOCTYPE r SYSTEM \"about:legacy-compat\"><r />"},
              Case{"-//W3C//DTD XHTML 1.0//EN", "http://www.w3.org/x.dtd",
-                  "<!DOCTYPE r PUBLIC \"-//W3C//DTD XHTML 1.0//EN\" \"http://www.w3.org/x.dtd\"><r/>"},
-             Case{"", "sys'tem", "<!DOCTYPE r SYSTEM \"sys'tem\"><r/>"},
-             Case{"pub'lic", "", "<!DOCTYPE r PUBLIC \"pub'lic\" \"\"><r/>"},
+                  "<!DOCTYPE r PUBLIC \"-//W3C//DTD XHTML 1.0//EN\" \"http://www.w3.org/x.dtd\"><r />"},
+             Case{"", "sys'tem", "<!DOCTYPE r SYSTEM \"sys'tem\"><r />"},
+             Case{"pub'lic", "", "<!DOCTYPE r PUBLIC \"pub'lic\" \"\"><r />"},
          }) {
         auto w = NewWriter();
         ASSERT_NO_THROW(w->WriteDocType("r", c.pub, c.sys, ""));
@@ -514,13 +517,13 @@ TEST(XmlWriterValidationTests, WriteDocType_InternalSubset_NotRepairedHere_Subst
     ASSERT_NO_THROW(w->WriteDocType("r", "", "", "<!ENTITY a \"b\">"));
     w->WriteStartElement("r");
     w->WriteEndElement();
-    EXPECT_EQ(w->ToString(), "<!DOCTYPE r [<!ENTITY a \"b\">]><r/>");
+    EXPECT_EQ(w->ToString(), "<!DOCTYPE r [<!ENTITY a \"b\">]><r />");
 
     auto w2 = NewWriter();
     ASSERT_NO_THROW(w2->WriteDocType("r", "", "", "]"));
     w2->WriteStartElement("r");
     w2->WriteEndElement();
-    EXPECT_EQ(w2->ToString(), "<!DOCTYPE r []]><r/>");
+    EXPECT_EQ(w2->ToString(), "<!DOCTYPE r []]><r />");
 }
 
 // --- the second producer: the DOM door ------------------------------------------------

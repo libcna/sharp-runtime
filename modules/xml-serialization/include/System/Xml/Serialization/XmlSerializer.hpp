@@ -30,8 +30,8 @@ namespace System::Xml::Serialization {
      * `Samples/ShipGame_4_0/.../level1_spawns.xml` with four -- both are genuine
      * `XmlSerializer` output shipped in the same official XNA Game Studio source tree. So the
      * element names, their order, their text and the root's namespace declarations are the
-     * contract; the indentation is not. `Indent` emits the four-space form (tinyxml2's own
-     * fixed width, which `XmlWriterSettings::IndentChars` does not influence).
+     * contract; the indentation is not. `Indent` emits the four-space form this serializer has
+     * always written, set explicitly through `XmlWriterSettings::IndentChars`.
      */
     struct XmlSerializationOptions {
         /** @brief Pretty-print with tinyxml2's fixed four-space indentation. */
@@ -213,6 +213,7 @@ namespace System::Xml::Serialization {
 
             System::Xml::XmlWriterSettings settings;
             settings.Indent = true;
+            settings.IndentChars = "    ";
             std::unique_ptr<System::Xml::XmlWriter> writer(
                 System::Xml::XmlWriter::CreateToString(settings));
             doc.Save(*writer);

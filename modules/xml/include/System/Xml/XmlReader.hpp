@@ -3,16 +3,19 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include <utility>
 
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Xml/ReadState.hpp"
 #include "System/Xml/XmlNodeType.hpp"
 
 namespace System::Xml {
 
     struct XmlReaderState; ///< Opaque tinyxml2 state; defined in XmlReader.cpp.
+    class XmlReaderSettings;
 
     /**
      * @brief Represents a reader that provides fast, non-cached, forward-only access to XML data.
@@ -43,6 +46,25 @@ namespace System::Xml {
          *  is on no node (including after @c Close()). */
         [[nodiscard]] std::string getNameProperty() const;
 
+        /** @brief Returns the local part of the current node's name — the text after the
+         *  namespace prefix's colon, or the whole name when it has no prefix. */
+        [[nodiscard]] std::string getLocalNameProperty() const;
+
+        /** @brief Returns the namespace prefix of the current node's name, or @c "" when the
+         *  name has none. */
+        [[nodiscard]] std::string getPrefixProperty() const;
+
+        /** @brief Returns the depth of the current node: 0 for the document's top-level nodes,
+         *  one more for each enclosing element; an attribute is one deeper than its element. */
+        [[nodiscard]] SharpRuntime::intcs getDepthProperty() const;
+
+        /** @brief Returns @c true when the current element has at least one attribute. */
+        [[nodiscard]] bool getHasAttributesProperty() const;
+
+        /** @brief Returns the number of attributes on the current element, or 0 on any other
+         *  node. */
+        [[nodiscard]] SharpRuntime::intcs getAttributeCountProperty() const;
+
         /** @brief Returns the text value of the current node (Text/CDATA/Comment), or @c ""
          *  when the reader is on no node (including after @c Close()). */
         [[nodiscard]] std::string getValueProperty() const;
@@ -72,6 +94,67 @@ namespace System::Xml {
          *         reader is on no node, including after @c Close().
          */
         bool MoveToElement();
+
+        /**
+         * @brief Moves the cursor to the first attribute of the current element.
+         *
+         * @return @c true if the element has an attribute; @c false on any other node.
+         */
+        bool MoveToFirstAttribute();
+
+        /**
+         * @brief Skips comments, processing instructions, the XML declaration, document type
+         *        nodes and whitespace until the reader is on a content node (element,
+         *        end element, text or CDATA) or at end of file; an attribute cursor is moved
+         *        back to its element first.
+         *
+         * @return The node type the reader stopped on; @c XmlNodeType::None at end of file.
+         */
+        XmlNodeType MoveToContent();
+
+        /**
+         * @brief Calls @c MoveToContent() and tells whether it stopped on a start element.
+         *
+         * @return @c true when the current content node is an element.
+         */
+        bool IsStartElement();
+
+        /**
+         * @brief Calls @c MoveToContent() and tells whether it stopped on a start element
+         *        with the given qualified name.
+         *
+         * @param name  The qualified name to match.
+         * @return @c true when the current content node is an element named @p name.
+         */
+        bool IsStartElement(const std::string& name);
+
+        /**
+         * @brief Skips the current node and, for a non-empty element, all of its children,
+         *        leaving the reader on the node that follows; on an attribute the element
+         *        is skipped. Does nothing when the reader is on no node.
+         */
+        void Skip();
+
+        /**
+         * @brief Resolves a namespace prefix in the scope of the current node, exactly as the
+         *        @c xmlns declarations on it and its ancestors define it.
+         *
+         * @param prefix  The prefix to resolve; @c "" asks for the default namespace.
+         * @return The namespace URI, or @c std::nullopt when the prefix is not declared in
+         *         scope. The @c xml and @c xmlns prefixes resolve to their fixed URIs.
+         */
+        [[nodiscard]] std::optional<std::string> LookupNamespace(const std::string& prefix) const;
+
+        /** @brief Always @c true: the parser records the line every node starts on. These three
+         *  members are the @c IXmlLineInfo contract, offered directly because this reader keeps
+         *  no vtable (the class is pinned to a single owning pointer). */
+        [[nodiscard]] bool HasLineInfo() const;
+
+        /** @brief Returns the 1-based line the current node starts on, or 0 on no node. */
+        [[nodiscard]] SharpRuntime::intcs getLineNumberProperty() const;
+
+        /** @brief Returns 0: the parser does not record the column a node starts in. */
+        [[nodiscard]] SharpRuntime::intcs getLinePositionProperty() const;
 
         /**
          * @brief Moves to the next attribute of the current element.
@@ -106,6 +189,16 @@ namespace System::Xml {
         void ReadStartElement();
 
         /**
+         * @brief Checks, after @c MoveToContent(), that the current node is a start element
+         *        with the given qualified name and advances past it.
+         *
+         * @param name  The qualified name the element must have.
+         * @throws XmlException when the current content node is not that element, with the
+         *         message @c "Element 'name' was not found. Line L, position P."
+         */
+        void ReadStartElement(const std::string& name);
+
+        /**
          * @brief Verifies that the current node is an end-element and advances the reader.
          *
          * @throws XmlException if the current node is not an end-element, which includes a
@@ -137,6 +230,20 @@ namespace System::Xml {
          * @throws XmlException on parse error.
          */
         static XmlReader* Create(const std::string& inputUri);
+
+        /**
+         * @brief Creates an XmlReader as the one-argument overload does, applying @p settings:
+         *        @c DtdProcessing::Prohibit rejects a document that carries a DOCTYPE,
+         *        @c DtdProcessing::Ignore drops the node, and @c IgnoreComments,
+         *        @c IgnoreProcessingInstructions and @c IgnoreWhitespace drop those nodes.
+         *
+         * @param inputUri  File path or raw XML text.
+         * @param settings  The reader settings to apply.
+         * @return Heap-allocated XmlReader; caller owns the pointer.
+         * @throws XmlException on parse error, or on a DOCTYPE when DTD processing is
+         *         prohibited ("For security reasons DTD is prohibited in this XML document. …").
+         */
+        static XmlReader* Create(const std::string& inputUri, const XmlReaderSettings& settings);
 
         /**
          * @brief Creates an XmlReader that parses @p xmlContent as raw XML.

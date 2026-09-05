@@ -4,6 +4,7 @@
 #pragma once
 
 #include <string>
+#include "System/Environment.hpp"
 
 #include "System/Xml/ConformanceLevel.hpp"
 #include "System/Xml/NewLineHandling.hpp"
@@ -34,7 +35,10 @@ namespace System::Xml {
         /** @brief How line breaks are normalized. Not currently consulted (tinyxml2 controls output line breaks). */
         System::Xml::NewLineHandling NewLineHandling = System::Xml::NewLineHandling::Replace;
         /** @brief The character string to use for line breaks. Not currently consulted. */
-        std::string NewLineChars = "\r\n";
+        /** @brief The line terminator written between indented nodes and, under
+         *  @c NewLineHandling::Replace, in place of every line break in text: .NET's
+         *  @c Environment.NewLine, so "\n" here and "\r\n" on Windows. */
+        std::string NewLineChars = System::Environment::NewLine;
         /** @brief Whether to indent elements. Consulted by @c XmlWriter::ToString()/Flush(): @c false
          *  (the default) emits compact output with no inserted whitespace; @c true pretty-prints
          *  via tinyxml2's own indentation (which does not consult @c IndentChars). */
