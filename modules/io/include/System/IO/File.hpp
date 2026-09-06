@@ -4,6 +4,8 @@
 #pragma once
 
 #include <string>
+
+#include "System/IO/FileStream.hpp"
 #include <vector>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -33,6 +35,27 @@ namespace System::IO {
         static void                      Move(const std::string& src, const std::string& dst);
 
         /** Opens a file, reads all text, then closes the file. */
+        /**
+         * @brief Creates or overwrites a file and returns a read/write stream over it.
+         *
+         * C++ counterpart of .NET `File.Create(string)`.
+         *
+         * @param path Path of the file to create.
+         * @return A stream opened with `FileMode::Create` and `FileAccess::ReadWrite`.
+         */
+        [[nodiscard]] static FileStream          Create(const std::string& path);
+
+        /**
+         * @brief Opens an existing file for reading.
+         *
+         * C++ counterpart of .NET `File.OpenRead(string)`.
+         *
+         * @param path Path of the file to open.
+         * @return A stream opened with `FileMode::Open` and `FileAccess::Read`.
+         * @throws FileNotFoundException if the file does not exist.
+         */
+        [[nodiscard]] static FileStream          OpenRead(const std::string& path);
+
         [[nodiscard]] static std::string         ReadAllText(const std::string& path);
         /** Creates a new file, writes the specified string, then closes the file. */
         static void                              WriteAllText(const std::string& path, const std::string& contents);

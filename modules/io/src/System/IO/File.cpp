@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/File.hpp"
+#include "System/IO/FileMode.hpp"
+#include "System/IO/FileAccess.hpp"
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/IOException.hpp"
 #include "System/ArgumentException.hpp"
@@ -122,6 +124,14 @@ namespace System::IO {
         std::ofstream f(path, std::ios::app);
         if (!f) throw IOException("Failed to open file for appending: " + path);
         f << contents;
+    }
+
+    FileStream File::Create(const std::string& path) {
+        return FileStream(path, FileMode::Create, FileAccess::ReadWrite);
+    }
+
+    FileStream File::OpenRead(const std::string& path) {
+        return FileStream(path, FileMode::Open, FileAccess::Read);
     }
 
 } // namespace System::IO

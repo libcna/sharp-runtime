@@ -1157,3 +1157,40 @@ TEST(DriveInfoTests, TotalSize_NonExistentPath_ReturnsZero) {
     DriveInfo d("/no/such/path/xyz_abc_123");
     EXPECT_EQ(d.getTotalSizeProperty(), 0);
 }
+
+// SAMPLE-066: .NET's File.Create and File.OpenRead, which ShipGame's EntityList.Save/Load and
+// LightList.Save/Load call directly. Neither existed, so a port had to open the FileStream by
+// hand and no longer read as the original does.
+
+TEST(FileOpenTests, Create_ReturnsAWritableStreamAndOverwritesAnExistingFile) {
+    const std::string path = tf("file_create.txt");
+    System::IO::File::WriteAllText(path, "the old contents, longer than the new");
+
+    {
+        System::IO::FileStream stream = System::IO::File::Create(path);
+        const std::string payload = "fresh";
+        stream.Write(reinterpret_cast<const SharpRuntime::bytecs*>(payload.data()), 0,
+                     static_cast<SharpRuntime::intcs>(payload.size()));
+        stream.Close();
+    }
+
+    EXPECT_EQ(System::IO::File::ReadAllText(path), "fresh")
+        << "File.Create must truncate, not append to, an existing file";
+}
+
+TEST(FileOpenTests, OpenRead_ReadsBackWhatIsThere) {
+    const std::string path = tf("file_openread.txt");
+    System::IO::File::WriteAllText(path, "spawn0");
+
+    System::IO::FileStream stream = System::IO::File::OpenRead(path);
+    std::vector<SharpRuntime::bytecs> buffer(6);
+    const SharpRuntime::intcs read = stream.Read(buffer.data(), 0, 6);
+    stream.Close();
+
+    ASSERT_EQ(read, 6);
+    EXPECT_EQ(std::string(buffer.begin(), buffer.end()), "spawn0");
+}
+
+TEST(FileOpenTests, OpenRead_OnAMissingFileThrows) {
+    EXPECT_ANY_THROW((void)System::IO::File::OpenRead(tf("file_openread_missing.txt")));
+}
