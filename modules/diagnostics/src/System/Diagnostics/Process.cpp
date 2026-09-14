@@ -4,7 +4,6 @@
 #include "System/Diagnostics/Process.hpp"
 #include <atomic>
 #include <mutex>
-#include <poll.h>
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
@@ -16,6 +15,7 @@
 #include <sstream>
 
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#  include <poll.h>
 #  include <sys/wait.h>
 #  include <sys/types.h>
 #  include <unistd.h>
