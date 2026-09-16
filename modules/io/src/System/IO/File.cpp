@@ -2,6 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/File.hpp"
+#include "Utf8Path.hpp"
+
+#include <optional>
 #include "System/IO/FileMode.hpp"
 #include "System/IO/FileAccess.hpp"
 #include "System/IO/FileNotFoundException.hpp"
@@ -23,7 +26,9 @@ namespace System::IO {
     bool File::Exists(const std::string& path) {
         if (path.empty()) return false;
         std::error_code ec;
-        bool isFile = std::filesystem::is_regular_file(path, ec);
+        const std::optional<std::filesystem::path> native = Detail::TryNativePath(path);
+        if (!native) return false;
+        bool isFile = std::filesystem::is_regular_file(*native, ec);
         return !ec && isFile;
     }
 
@@ -72,7 +77,7 @@ namespace System::IO {
 
     std::string File::ReadAllText(const std::string& path) {
         if (!Exists(path)) throw FileNotFoundException("Unable to find the specified file.", path);
-        std::ifstream f(path);
+        std::ifstream f(Detail::NativePath(path));
         if (!f) throw IOException("Failed to open file: " + path);
         std::ostringstream ss;
         ss << f.rdbuf();
@@ -80,14 +85,14 @@ namespace System::IO {
     }
 
     void File::WriteAllText(const std::string& path, const std::string& contents) {
-        std::ofstream f(path, std::ios::trunc);
+        std::ofstream f(Detail::NativePath(path), std::ios::trunc);
         if (!f) throw IOException("Failed to open file for writing: " + path);
         f << contents;
     }
 
     std::vector<std::string> File::ReadAllLines(const std::string& path) {
         if (!Exists(path)) throw FileNotFoundException("Unable to find the specified file.", path);
-        std::ifstream f(path);
+        std::ifstream f(Detail::NativePath(path));
         if (!f) throw IOException("Failed to open file: " + path);
         std::vector<std::string> lines;
         std::string line;
@@ -96,14 +101,14 @@ namespace System::IO {
     }
 
     void File::WriteAllLines(const std::string& path, const std::vector<std::string>& lines) {
-        std::ofstream f(path, std::ios::trunc);
+        std::ofstream f(Detail::NativePath(path), std::ios::trunc);
         if (!f) throw IOException("Failed to open file for writing: " + path);
         for (const auto& line : lines) f << line << '\n';
     }
 
     std::vector<SharpRuntime::bytecs> File::ReadAllBytes(const std::string& path) {
         if (!Exists(path)) throw FileNotFoundException("Unable to find the specified file.", path);
-        std::ifstream f(path, std::ios::binary | std::ios::ate);
+        std::ifstream f(Detail::NativePath(path), std::ios::binary | std::ios::ate);
         if (!f) throw IOException("Failed to open file: " + path);
         auto size = f.tellg();
         f.seekg(0);
@@ -114,14 +119,14 @@ namespace System::IO {
 
     void File::WriteAllBytes(const std::string& path,
                              const std::vector<SharpRuntime::bytecs>& bytes) {
-        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        std::ofstream f(Detail::NativePath(path), std::ios::binary | std::ios::trunc);
         if (!f) throw IOException("Failed to open file for writing: " + path);
         f.write(reinterpret_cast<const char*>(bytes.data()),
                 static_cast<std::streamsize>(bytes.size()));
     }
 
     void File::AppendAllText(const std::string& path, const std::string& contents) {
-        std::ofstream f(path, std::ios::app);
+        std::ofstream f(Detail::NativePath(path), std::ios::app);
         if (!f) throw IOException("Failed to open file for appending: " + path);
         f << contents;
     }

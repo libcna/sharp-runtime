@@ -2,6 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/FileStream.hpp"
+#include "Utf8Path.hpp"
+
+#include <optional>
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -26,7 +29,9 @@ namespace System::IO
         // compatibility, throw DirectoryNotFoundException instead of FileNotFoundException when
         // the parent folder does not exist."
         bool ParentDirectoryExists(const std::string& path) {
-            std::filesystem::path parent = std::filesystem::path(path).parent_path();
+            const std::optional<std::filesystem::path> native = Detail::TryNativePath(path);
+            if (!native) return false;
+            std::filesystem::path parent = native->parent_path();
             if (parent.empty()) return true; // relative path with no directory component
             std::error_code ec;
             bool isDir = std::filesystem::is_directory(parent, ec);
@@ -65,7 +70,10 @@ namespace System::IO
         ValidateModeAndAccess(mode, access);
 
         std::error_code ec;
-        bool exists = std::filesystem::is_regular_file(path, ec) && !ec;
+        // The path is UTF-8 (Utf8Path.hpp). Everything below opens and stats THIS value, never
+        // the narrow string: the narrow overloads convert through the ANSI code page on Windows.
+        const std::filesystem::path nativePath = Detail::NativePath(path);
+        bool exists = std::filesystem::is_regular_file(nativePath, ec) && !ec;
 
         // Existence preconditions that std::fstream's open-mode flags can't express directly.
         if (mode == FileMode::CreateNew && exists) {
@@ -104,7 +112,7 @@ namespace System::IO
                 break; // existence already verified above
         }
 
-        file_.open(path, iosMode);
+        file_.open(nativePath, iosMode);
         if (!file_.is_open()) {
             if (!ParentDirectoryExists(path)) {
                 throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
@@ -118,7 +126,7 @@ namespace System::IO
         // Query length independently of the stream's own read position/access, matching
         // .NET's FileStream.Length (available regardless of CanRead).
         std::error_code sizeEc;
-        auto size = std::filesystem::file_size(path, sizeEc);
+        auto size = std::filesystem::file_size(nativePath, sizeEc);
         length_ = sizeEc ? 0 : static_cast<intcs>(size);
     }
 
@@ -223,7 +231,7 @@ namespace System::IO
             f.flush();
         }
         std::error_code ec;
-        auto size = std::filesystem::file_size(path_, ec);
+        auto size = std::filesystem::file_size(Detail::NativePath(path_), ec);
         return ec ? length_ : static_cast<intcs>(size);
     }
 
