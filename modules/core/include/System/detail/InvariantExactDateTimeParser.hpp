@@ -600,9 +600,10 @@ namespace System::detail {
             // belongs to neither family, so putting it in either would have made its admission
             // depend on which block happened to run.
             if (options.allowZoneToken && (c == 'K' || c == 'z')) {
-                const int run = static_cast<int>(runLength(i));
-                if (c == 'z' && run > 3) return false;
-                if (c == 'K' && run > 1) return false;
+                // Named apart from the enclosing `run` (same value): MSVC C4456 under /WX.
+                const int zoneRun = static_cast<int>(runLength(i));
+                if (c == 'z' && zoneRun > 3) return false;
+                if (c == 'K' && zoneRun > 1) return false;
                 if (fields.hasOffset || fields.zoneIsUtc) return false;   // at most once
 
                 // `K` ALONE MATCHES THE EMPTY STRING, and that is .NET's rule rather than
@@ -612,13 +613,13 @@ namespace System::detail {
                 if (c == 'K' && cursor.take('Z')) {
                     fields.zoneIsUtc = true;
                     fields.hasOffset = true;
-                    i += run;
+                    i += zoneRun;
                     continue;
                 }
                 const bool signPresent = !cursor.atEnd() &&
                                          (cursor.peek() == '+' || cursor.peek() == '-');
                 if (!signPresent) {
-                    if (c == 'K') { i += run; continue; }   // Unspecified: nothing to read
+                    if (c == 'K') { i += zoneRun; continue; }   // Unspecified: nothing to read
                     return false;
                 }
                 const bool negative = cursor.peek() == '-';
@@ -627,9 +628,9 @@ namespace System::detail {
                 int hours = 0;
                 // `z` is one or two digits, `zz` and `zzz` exactly two -- .NET's ParseDigits width
                 // rule, the same one the date tokens use.
-                if (!cursor.takeNumber(c == 'z' && run == 1 ? 1 : 2, hours)) return false;
+                if (!cursor.takeNumber(c == 'z' && zoneRun == 1 ? 1 : 2, hours)) return false;
                 int minutes = 0;
-                if (c == 'K' || run == 3) {
+                if (c == 'K' || zoneRun == 3) {
                     // `zzz` and `K` carry `:mm`; `z` and `zz` do not, which is the whole
                     // difference between them and is easy to collapse into one arm by accident.
                     if (!cursor.take(':')) return false;
@@ -638,7 +639,7 @@ namespace System::detail {
                 if (hours > 14 || minutes > 59) return false;
                 fields.hasOffset = true;
                 fields.offsetMinutes = (negative ? -1 : 1) * (hours * 60 + minutes);
-                i += run;
+                i += zoneRun;
                 continue;
             }
 
