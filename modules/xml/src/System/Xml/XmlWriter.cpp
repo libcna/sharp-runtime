@@ -11,6 +11,7 @@
 #include "System/Xml/XmlException.hpp"
 #include "System/Xml/detail/XmlLexicalSanitizer.hpp"
 #include <cstdio>
+#include <fstream>
 #include <stack>
 
 namespace System::Xml {
@@ -466,11 +467,17 @@ void XmlWriter::Flush() {
     if (!state_ || state_->filePath.empty()) return;
     DotNetPrinter printer(state_->settings);
     const std::string text = printer.Print(state_->doc);
-    FILE* file = std::fopen(state_->filePath.c_str(), "wb");
+    // std::ofstream rather than std::fopen: binary mode keeps the printer's own newlines, the
+    // stream closes itself on every path out of here including the throw, and MSVC does not
+    // deprecate it. cl.exe reports std::fopen as C4996 ("consider fopen_s"), and this repository
+    // compiles with /W4 /WX, so the standard C call was a hard build failure on MSVC -- the first
+    // thing a native Windows build of a CNA consumer hit.
+    std::ofstream file(state_->filePath, std::ios::binary | std::ios::trunc);
     if (!file)
         throw XmlException("XmlWriter: failed to save file: " + state_->filePath);
-    const bool ok = std::fwrite(text.data(), 1, text.size(), file) == text.size();
-    if (std::fclose(file) != 0 || !ok)
+    file.write(text.data(), static_cast<std::streamsize>(text.size()));
+    file.close();
+    if (!file)
         throw XmlException("XmlWriter: failed to save file: " + state_->filePath);
 }
 
