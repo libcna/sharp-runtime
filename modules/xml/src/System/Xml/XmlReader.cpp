@@ -2,6 +2,16 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Xml/XmlReader.hpp"
+
+#include <cstdio>
+
+#if defined(_WIN32)
+// Contained in this translation unit: <windows.h> in a header is what produced the ERROR and
+// min/max macro collisions recorded in CNA as WINNATIVE-F5 and F11.
+#  define WIN32_LEAN_AND_MEAN
+#  define NOMINMAX
+#  include <windows.h>
+#endif
 #include <algorithm>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Convert.hpp"
@@ -572,6 +582,35 @@ static void applySettings(XmlReaderState& st, const XmlReaderSettings& settings)
     st.events = std::move(kept);
 }
 
+namespace {
+    // tinyxml2 opens with fopen/fopen_s, which on Windows is the process ANSI code page -- so an
+    // .xml under a directory that code page cannot spell simply reported
+    // XML_ERROR_FILE_NOT_FOUND. Its FILE* overload takes the file already open, which keeps every
+    // one of tinyxml2's own error codes and BOM/encoding rules intact while letting the OPEN
+    // happen through a wide path.
+    void loadXmlFile(tinyxml2::XMLDocument& doc, const std::string& utf8Path) {
+#if defined(_WIN32)
+        const int needed = ::MultiByteToWideChar(CP_UTF8, 0, utf8Path.c_str(),
+                                                 static_cast<int>(utf8Path.size()), nullptr, 0);
+        if (needed > 0) {
+            std::wstring wide(static_cast<std::size_t>(needed), L'\0');
+            if (::MultiByteToWideChar(CP_UTF8, 0, utf8Path.c_str(),
+                                      static_cast<int>(utf8Path.size()), wide.data(), needed) > 0) {
+                FILE* file = nullptr;
+                if (::_wfopen_s(&file, wide.c_str(), L"rb") == 0 && file != nullptr) {
+                    doc.LoadFile(file);
+                    std::fclose(file);
+                    return;
+                }
+            }
+        }
+        // Fall through so tinyxml2 reports its own XML_ERROR_FILE_NOT_FOUND rather than a
+        // silently empty document.
+#endif
+        doc.LoadFile(utf8Path.c_str());
+    }
+}
+
 XmlReader* XmlReader::Create(const std::string& inputUri) {
     auto st = std::make_unique<XmlReaderState>();
     // Heuristic: treat as file path if it ends with .xml or contains a path separator --
@@ -590,7 +629,7 @@ XmlReader* XmlReader::Create(const std::string& inputUri) {
                    (inputUri.size() >= 4 &&
                     inputUri.substr(inputUri.size() - 4) == ".xml"));
     if (isFile)
-        st->doc.LoadFile(inputUri.c_str());
+        loadXmlFile(st->doc, inputUri);
     else
         st->doc.Parse(inputUri.c_str());
     return createFromDoc(std::move(st));
