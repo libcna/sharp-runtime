@@ -44,6 +44,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstring>
+#include <cwchar>
 #include <sstream>
 #include <vector>
 
@@ -114,19 +115,35 @@ namespace {
         // getenv("") is unspecified by POSIX. Real .NET returns null for an empty name, which
         // this runtime represents as an unsuccessful lookup and an empty public return value.
         if (name.empty()) return false;
-// _dupenv_s is an MSVC CRT extension. MinGW-w64 targets Windows but does not export it, so
-// `defined(_WIN32)` selects a branch that cannot link there -- a CNA D3D11 cross-build fails with
-// "undefined reference to `__imp__dupenv_s'". getenv is the correct fallback for that toolchain.
-#if defined(_MSC_VER)
-        char* rawValue = nullptr;
-        std::size_t valueLength = 0;
-        if (_dupenv_s(&rawValue, &valueLength, name.c_str()) != 0 || rawValue == nullptr) {
-            std::free(rawValue);
-            return false;
+#if defined(_WIN32)
+        // Read the Win32 process environment block, as .NET does on Windows. The CRT's copy
+        // (getenv/_dupenv_s, which this used to read) cannot hold a present-but-empty variable --
+        // _wputenv_s deletes on "" -- so #2313's distinction was unreadable here, and it is
+        // narrowed through the ANSI code page besides. SetEnvironmentVariable below keeps the CRT
+        // copy consistent for the C getenv callers that still read it.
+        const std::wstring wideName = wideFromUtf8(name);
+        ::SetLastError(ERROR_SUCCESS);
+        DWORD needed = ::GetEnvironmentVariableW(wideName.c_str(), nullptr, 0);
+        if (needed == 0) {
+            if (::GetLastError() == ERROR_ENVVAR_NOT_FOUND) return false;
+            value.clear();
+            return true;
         }
-        value.assign(rawValue);
-        std::free(rawValue);
-        return true;
+        for (;;) {
+            std::wstring buffer(needed, L'\0');
+            ::SetLastError(ERROR_SUCCESS);
+            const DWORD written = ::GetEnvironmentVariableW(wideName.c_str(), buffer.data(), needed);
+            if (written == 0) {
+                if (::GetLastError() == ERROR_ENVVAR_NOT_FOUND) return false;
+                value.clear();
+                return true;
+            }
+            if (written < needed) {
+                value = utf8FromWide(buffer.data(), static_cast<int>(written));
+                return true;
+            }
+            needed = written; // grew between the two calls; retry with the reported size
+        }
 #else
         const char* rawValue = std::getenv(name.c_str());
         if (rawValue == nullptr) return false;
@@ -294,26 +311,30 @@ void Environment::SetEnvironmentVariable(const std::string& name,
     // (`Environment.Variables.Unix.cs:19-33`). This port used to delete on an empty string, which
     // made a PRESENT-BUT-EMPTY variable inexpressible; POSIX can express it and now so can this.
 #if defined(_WIN32)
-    // Win32 SetEnvironmentVariable deletes on a NULL lpValue, and _putenv_s deletes on "" -- so
-    // the empty-value case has to go through the API that can distinguish them.
-    // Two stores, and they are not the same store. SetEnvironmentVariable writes the Win32
-    // process environment block; getenv/_dupenv_s -- which is what tryGetEnvironmentVariable
-    // above reads, and what CNA's own getenv callers read -- reads the CRT's copy, which the
-    // Win32 call does not touch. Writing only one of them meant a variable set here was
-    // invisible to a read from here, in the same process.
+    // Two stores, and every write keeps them in agreement. SetEnvironmentVariableW writes the Win32
+    // process environment block, which the getter above reads and which can hold a present-but-
+    // empty value. _wputenv_s writes the CRT's copy, which C getenv callers read -- CNA's
+    // GraphicsDevice among them -- and which cannot: it deletes on "".
     //
-    // _wputenv_s updates both, so it is the normal route. It cannot express present-but-empty
-    // (it deletes on ""), so that one case still goes through the wide Win32 call alone, and is
-    // then visible to a Win32 read but not to a CRT read -- a limitation of the CRT environment,
-    // recorded rather than papered over.
+    // This used to write an empty value to the Win32 block ONLY. The CRT copy then kept whatever
+    // it held before, so a caller that set "DIRECTX11" and cleared it with "" left every later
+    // getenv reading "DIRECTX11": CNA's CNA_DEBUG_FAIL_RENDERER_INIT, cleared exactly that way in
+    // a test TearDown, made every subsequent GraphicsDevice in the process fail to initialise --
+    // 1 214 failures in one native Windows run. A stale value is worse than either absent or
+    // empty, so an empty value now removes the CRT entry first and then stores the empty value in
+    // the Win32 block: getenv sees no variable, the getter sees a present empty one, and neither
+    // can see the old value.
     const std::wstring wideName = wideFromUtf8(name);
     if (!value.has_value()) {
-        ::SetEnvironmentVariableW(wideName.c_str(), nullptr);
         ::_wputenv_s(wideName.c_str(), L"");
+        ::SetEnvironmentVariableW(wideName.c_str(), nullptr);
     } else if (value->empty()) {
+        ::_wputenv_s(wideName.c_str(), L"");
         ::SetEnvironmentVariableW(wideName.c_str(), L"");
     } else {
-        ::_wputenv_s(wideName.c_str(), wideFromUtf8(*value).c_str());
+        const std::wstring wideValue = wideFromUtf8(*value);
+        ::_wputenv_s(wideName.c_str(), wideValue.c_str());
+        ::SetEnvironmentVariableW(wideName.c_str(), wideValue.c_str());
     }
 #else
     if (!value.has_value())
@@ -747,13 +768,16 @@ std::string Environment::getProcessPathProperty() {
 std::map<std::string, std::string> Environment::GetEnvironmentVariables() {
     std::map<std::string, std::string> result;
 #if defined(_WIN32)
-    LPCH envBlock = GetEnvironmentStringsA();
+    // The wide block, converted to UTF-8: GetEnvironmentStringsA narrows through the ANSI code
+    // page and turns any character it cannot spell into '?', in names and values alike.
+    LPWCH envBlock = ::GetEnvironmentStringsW();
     if (envBlock) {
-        for (LPCH p = envBlock; *p; p += std::strlen(p) + 1) {
+        for (LPWCH p = envBlock; *p; p += std::wcslen(p) + 1) {
             std::string key, value;
-            if (splitEnvEntry(p, key, value)) result[key] = value;
+            if (splitEnvEntry(utf8FromWide(p, static_cast<int>(std::wcslen(p))), key, value))
+                result[key] = value;
         }
-        FreeEnvironmentStringsA(envBlock);
+        ::FreeEnvironmentStringsW(envBlock);
     }
 #else
     for (char** ep = environ; ep && *ep; ++ep) {

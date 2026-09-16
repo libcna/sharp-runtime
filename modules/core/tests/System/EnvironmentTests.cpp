@@ -223,6 +223,43 @@ TEST(EnvironmentTests, Fix2313_APlatformInstalledEmptyValueIsAlsoDistinguished) 
 }
 #endif // !_WIN32
 
+// A value cleared with "" must not survive in the store the C runtime reads. On Windows the setter
+// used to write an empty value to the Win32 environment block only, so the CRT copy that getenv
+// reads kept the previous value: CNA cleared CNA_DEBUG_FAIL_RENDERER_INIT exactly this way in a test
+// TearDown, and every GraphicsDevice created afterwards in that process was forced to fail. What
+// getenv returns for an empty value legitimately differs -- "" on POSIX, no variable on Windows,
+// whose CRT cannot hold an empty one -- but it must never be the old value.
+TEST(EnvironmentTests, ClearingWithAnEmptyValueLeavesNoStaleValueForGetenv) {
+    Environment::SetEnvironmentVariable("SHARP_STALE_CRT_VALUE", "DIRECTX11");
+    const char* before = std::getenv("SHARP_STALE_CRT_VALUE");
+    ASSERT_NE(before, nullptr) << "a value set here must be visible to getenv";
+    EXPECT_STREQ(before, "DIRECTX11");
+
+    Environment::SetEnvironmentVariable("SHARP_STALE_CRT_VALUE", "");
+    const char* after = std::getenv("SHARP_STALE_CRT_VALUE");
+    EXPECT_TRUE(after == nullptr || *after == '\0')
+        << "getenv still reads \"" << after << "\" after the variable was cleared";
+    EXPECT_EQ(std::optional<std::string>(""), Environment::GetEnvironmentVariable("SHARP_STALE_CRT_VALUE"))
+        << "the public getter still reports a present, empty variable (#2313)";
+
+    Environment::SetEnvironmentVariable("SHARP_STALE_CRT_VALUE", std::nullopt);
+    EXPECT_EQ(std::getenv("SHARP_STALE_CRT_VALUE"), nullptr);
+    EXPECT_EQ(std::nullopt, Environment::GetEnvironmentVariable("SHARP_STALE_CRT_VALUE"));
+}
+
+// Values outside the ANSI code page survive every route: the setter, the getter and the snapshot.
+// GetEnvironmentVariables used GetEnvironmentStringsA, which turns such characters into '?'.
+TEST(EnvironmentTests, NonAsciiValuesSurviveTheGetterAndTheSnapshot) {
+    const std::string value = "\xC5\xBElu\xC5\xA5ou\xC4\x8Dk\xC3\xBD \xE6\x97\xA5\xE6\x9C\xAC";
+    Environment::SetEnvironmentVariable("SHARP_UNICODE_VALUE", value);
+    EXPECT_EQ(std::optional<std::string>(value), Environment::GetEnvironmentVariable("SHARP_UNICODE_VALUE"));
+    const auto all = Environment::GetEnvironmentVariables();
+    const auto it = all.find("SHARP_UNICODE_VALUE");
+    ASSERT_NE(it, all.end());
+    EXPECT_EQ(it->second, value);
+    Environment::SetEnvironmentVariable("SHARP_UNICODE_VALUE", std::nullopt);
+}
+
 // ---------------------------------------------------------------------------
 // ExpandEnvironmentVariables
 // ---------------------------------------------------------------------------
