@@ -8,8 +8,12 @@
 #if defined(_WIN32)
 // Contained in this translation unit: <windows.h> in a header is what produced the ERROR and
 // min/max macro collisions recorded in CNA as WINNATIVE-F5 and F11.
-#  define WIN32_LEAN_AND_MEAN
-#  define NOMINMAX
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
 #  include <windows.h>
 #endif
 #include <algorithm>
