@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Environment.hpp"
 #include <cctype>
+#include <cstdlib>
+#include <iterator>
 #include <fstream>
 #ifdef _WIN32
 #include "System/ApplicationException.hpp"
@@ -77,6 +79,35 @@ namespace {
         value = entry.substr(eq + 1);
         return true;
     }
+
+#if defined(_WIN32)
+    // Every Win32 call in this file that returns a path or a name uses the wide entry point and
+    // converts here. The ANSI twins substitute '?' for anything the process code page cannot
+    // spell, which silently destroys the current directory, the executable path, a special folder
+    // and -- the case that matters most -- the user's own account name, for any user whose name is
+    // not representable there.
+    std::string utf8FromWide(const wchar_t* text, int length) {
+        if (text == nullptr || length == 0) return {};
+        const int needed = ::WideCharToMultiByte(CP_UTF8, 0, text, length, nullptr, 0, nullptr, nullptr);
+        if (needed <= 0) return {};
+        std::string out(static_cast<std::size_t>(needed), '\0');
+        if (::WideCharToMultiByte(CP_UTF8, 0, text, length, out.data(), needed, nullptr, nullptr) <= 0)
+            return {};
+        return out;
+    }
+
+    std::wstring wideFromUtf8(const std::string& text) {
+        if (text.empty()) return {};
+        const int needed = ::MultiByteToWideChar(CP_UTF8, 0, text.c_str(),
+                                                 static_cast<int>(text.size()), nullptr, 0);
+        if (needed <= 0) return {};
+        std::wstring out(static_cast<std::size_t>(needed), L'\0');
+        if (::MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()),
+                                  out.data(), needed) <= 0)
+            return {};
+        return out;
+    }
+#endif
 
     bool tryGetEnvironmentVariable(
             const std::string& name, std::string& value) {
@@ -177,12 +208,12 @@ std::string Environment::GetCurrentDirectory() {
 #if defined(_WIN32)
     // Win32's own documented two-call pattern: a zero-length call returns the required
     // buffer size INCLUDING the terminating NUL.
-    const DWORD needed = GetCurrentDirectoryA(0, nullptr);
+    const DWORD needed = GetCurrentDirectoryW(0, nullptr);
     if (needed == 0 || needed > kPathRetrievalCeiling) return "";
-    std::vector<char> buf(needed);
-    const DWORD written = GetCurrentDirectoryA(needed, buf.data());
+    std::vector<wchar_t> buf(needed);
+    const DWORD written = GetCurrentDirectoryW(needed, buf.data());
     if (written == 0 || written >= needed) return "";
-    return std::string(buf.data(), written);
+    return utf8FromWide(buf.data(), static_cast<int>(written));
 #else
     std::vector<char> buf(4096);
     for (;;) {
@@ -209,9 +240,9 @@ SharpRuntime::intcs Environment::getProcessorCountProperty() {
 
 std::string Environment::getMachineNameProperty() {
 #if defined(_WIN32)
-    char buf[MAX_COMPUTERNAME_LENGTH + 1];
-    DWORD size = sizeof(buf);
-    if (GetComputerNameA(buf, &size)) return std::string(buf);
+    wchar_t buf[MAX_COMPUTERNAME_LENGTH + 1];
+    DWORD size = static_cast<DWORD>(std::size(buf));
+    if (GetComputerNameW(buf, &size)) return utf8FromWide(buf, static_cast<int>(size));
     return "";
 #else
     // Real .NET's Unix MachineName truncates at the first '.' to strip the domain suffix
@@ -228,9 +259,11 @@ std::string Environment::getMachineNameProperty() {
 
 std::string Environment::getUserNameProperty() {
 #if defined(_WIN32)
-    char buf[256];
-    DWORD size = sizeof(buf);
-    if (GetUserNameA(buf, &size)) return std::string(buf);
+    wchar_t buf[256];
+    DWORD size = static_cast<DWORD>(std::size(buf));
+    // size comes back INCLUDING the terminating NUL, unlike GetComputerName's.
+    if (GetUserNameW(buf, &size) && size > 0)
+        return utf8FromWide(buf, static_cast<int>(size) - 1);
     return "";
 #elif defined(__EMSCRIPTEN__)
     const char* user = std::getenv("USER");
@@ -263,10 +296,25 @@ void Environment::SetEnvironmentVariable(const std::string& name,
 #if defined(_WIN32)
     // Win32 SetEnvironmentVariable deletes on a NULL lpValue, and _putenv_s deletes on "" -- so
     // the empty-value case has to go through the API that can distinguish them.
-    if (!value.has_value())
-        ::SetEnvironmentVariableA(name.c_str(), nullptr);
-    else
-        ::SetEnvironmentVariableA(name.c_str(), value->c_str());
+    // Two stores, and they are not the same store. SetEnvironmentVariable writes the Win32
+    // process environment block; getenv/_dupenv_s -- which is what tryGetEnvironmentVariable
+    // above reads, and what CNA's own getenv callers read -- reads the CRT's copy, which the
+    // Win32 call does not touch. Writing only one of them meant a variable set here was
+    // invisible to a read from here, in the same process.
+    //
+    // _wputenv_s updates both, so it is the normal route. It cannot express present-but-empty
+    // (it deletes on ""), so that one case still goes through the wide Win32 call alone, and is
+    // then visible to a Win32 read but not to a CRT read -- a limitation of the CRT environment,
+    // recorded rather than papered over.
+    const std::wstring wideName = wideFromUtf8(name);
+    if (!value.has_value()) {
+        ::SetEnvironmentVariableW(wideName.c_str(), nullptr);
+        ::_wputenv_s(wideName.c_str(), L"");
+    } else if (value->empty()) {
+        ::SetEnvironmentVariableW(wideName.c_str(), L"");
+    } else {
+        ::_wputenv_s(wideName.c_str(), wideFromUtf8(*value).c_str());
+    }
 #else
     if (!value.has_value())
         ::unsetenv(name.c_str());
@@ -489,10 +537,10 @@ std::string Environment::GetFolderPath(SpecialFolder folder, SpecialFolderOption
     // Windows resolves and applies the flags in one call: SpecialFolderOption's values ARE the
     // CSIDL flags, so they are simply OR-ed into the folder id, which is why this branch does not
     // repeat the POSIX verification below.
-    char buf[MAX_PATH];
+    wchar_t buf[MAX_PATH];
     const int csidl = static_cast<int>(folder) | static_cast<int>(option);
-    if (SHGetFolderPathA(nullptr, csidl, nullptr, SHGFP_TYPE_CURRENT, buf) == S_OK)
-        return std::string(buf);
+    if (SHGetFolderPathW(nullptr, csidl, nullptr, SHGFP_TYPE_CURRENT, buf) == S_OK)
+        return utf8FromWide(buf, -1);
     return "";
 #else
     const char* home = std::getenv("HOME");
@@ -646,7 +694,7 @@ void Environment::SetCurrentDirectory(const std::string& path) {
     // surfacing either failure.
     ArgumentException::ThrowIfNullOrEmpty(path, "value");
 #if defined(_WIN32)
-    if (!SetCurrentDirectoryA(path.c_str()))
+    if (!SetCurrentDirectoryW(wideFromUtf8(path).c_str()))
         throw System::IO::DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
 #else
     if (chdir(path.c_str()) != 0)
@@ -671,13 +719,13 @@ std::string Environment::getProcessPathProperty() {
     // defensive correctness on any platform that does not cap the answer for us, plus the
     // Windows zero-return handling, which was a real unconditional defect.
 #if defined(_WIN32)
-    std::vector<char> buf(4096);
+    std::vector<wchar_t> buf(4096);
     for (;;) {
         SetLastError(ERROR_SUCCESS);
-        const DWORD len = GetModuleFileNameA(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+        const DWORD len = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
         if (len == 0) return "";
         if (len < buf.size() && GetLastError() != ERROR_INSUFFICIENT_BUFFER)
-            return std::string(buf.data(), len);
+            return utf8FromWide(buf.data(), static_cast<int>(len));
         if (buf.size() >= kPathRetrievalCeiling) return "";
         buf.resize(buf.size() * 2);
     }
