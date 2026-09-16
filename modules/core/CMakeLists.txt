@@ -6,6 +6,15 @@ function(_sharp_runtime_setup_core_base target)
     # build artifacts, while the CMake target name remains unambiguous.
     set_target_properties("${target}" PROPERTIES OUTPUT_NAME sharp_runtime_core)
 
+    # System/Guid.cpp calls BCryptGenRandom on Windows (its cryptographically strong source for
+    # Guid.NewGuid), so this component needs bcrypt exactly the way Security.Cryptography.Random
+    # already does. Without it every Windows consumer fails at LINK time, after compiling
+    # everything -- "undefined reference to `BCryptGenRandom'" -- which is where the first native
+    # Windows build of a CNA application stopped.
+    if(WIN32)
+        target_link_libraries("${target}" PRIVATE bcrypt)
+    endif()
+
     # FINAL-STAB-001 i686 dependency boundary: without native __int128 the Decimal
     # implementation is outside the supported surface (its header hard-errors), so the
     # translation unit must leave the build exactly as it left the monolithic source list.
