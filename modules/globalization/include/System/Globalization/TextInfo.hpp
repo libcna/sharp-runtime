@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/Globalization/detail/CultureData.hpp"
 #include "System/Globalization/detail/InvariantCase.hpp"
 #include "System/InvalidOperationException.hpp"
 
@@ -21,18 +22,23 @@ using SharpRuntime::intcs;
  * This practical subset performs deterministic invariant Unicode simple casing using the pinned
  * UCD 16.0 tables. The retained culture name does not select culture-tailored casing: Turkish I,
  * context-sensitive sigma and multi-scalar expansions remain outside the supported contract.
- * ToTitleCase uses the same invariant mappings and Unicode category boundaries.
+ * ToTitleCase uses the same invariant mappings and Unicode category boundaries. The one field the
+ * culture name does select is `ListSeparator`, read from the culture data table
+ * (`System/Globalization/detail/CultureData.hpp`); an unlisted name gets the invariant `","`.
  */
 class TextInfo {
 public:
     /**
      * @brief Constructs a TextInfo for the given culture name.
      *
-     * C++ counterpart of .NET CultureInfo.TextInfo.
+     * C++ counterpart of .NET CultureInfo.TextInfo. The list separator is the culture data
+     * table's value for @p cultureName (`";"` for `de-DE` or `cs-CZ`, `","` for `en-US`), or
+     * `","` when the name is not listed.
      * @param cultureName The culture name (e.g. "en-US"); defaults to "en-US".
      */
     explicit TextInfo(const std::string& cultureName = "en-US")
-        : cultureName_(cultureName) {}
+        : cultureName_(cultureName),
+          listSeparator_(detail::CultureDataOrInvariant(cultureName).listSeparator) {}
 
     /**
      * @brief Gets the culture name associated with this TextInfo.

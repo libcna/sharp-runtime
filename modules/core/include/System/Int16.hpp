@@ -20,6 +20,7 @@
 #include "System/Globalization/NumberStyles.hpp"
 #include "System/OverflowException.hpp"
 #include "System/detail/IntegerNumberStylesParser.hpp"
+#include "System/detail/NumberFormatText.hpp"
 
 namespace System {
 
@@ -78,17 +79,19 @@ public:
      * 16-bit signed integer equivalent.
      *
      * C++ counterpart of .NET Int16.Parse(string, NumberStyles, IFormatProvider). @p provider
-     * is accepted for API-surface parity but ignored. Supports NumberStyles.Integer, .Number,
+     * selects the NumberFormatInfo whose separators, signs and currency
+     * symbol are honoured; the text is respelled to the invariant grammar first
+     * (System/detail/NumberFormatText.hpp). Supports NumberStyles.Integer, .Number,
      * .Currency, and .HexNumber (hex reinterpreted as a two's-complement bit pattern) -- see
      * include/System/detail/IntegerNumberStylesParser.hpp for the exact supported grammar.
      * @throws System::FormatException if the string is not in a correct format for @p style.
      * @throws System::OverflowException if the value exceeds Int16 range.
      */
-    static SharpRuntime::shortcs Parse(const std::string& s, System::Globalization::NumberStyles style,
+    static SharpRuntime::shortcs Parse(const std::string& input, System::Globalization::NumberStyles style,
                                         const IFormatProvider* provider) {
-        (void)provider;
+        const std::string s = System::detail::NumberFormatText::NormalizeForParsing(input, style, provider);
         SharpRuntime::shortcs result;
-        if (!TryParse(s, style, provider, result)) {
+        if (!TryParse(input, style, provider, result)) {
             using System::Globalization::NumberStyles;
             if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
                 uint64_t bits; bool tooManyDigits = false;
@@ -119,9 +122,9 @@ public:
      *
      * C++ counterpart of .NET Int16.TryParse(string, NumberStyles, IFormatProvider, out short).
      */
-    static bool TryParse(const std::string& s, System::Globalization::NumberStyles style,
+    static bool TryParse(const std::string& input, System::Globalization::NumberStyles style,
                           const IFormatProvider* provider, SharpRuntime::shortcs& result) {
-        (void)provider;
+        const std::string s = System::detail::NumberFormatText::NormalizeForParsing(input, style, provider);
         // #2269: .NET validates the style at every integer overload
         // (NumberFormatInfo.ValidateParseStyleInteger). An invalid style is an ARGUMENT error,
         // so this THROWS rather than returning false -- .NET's TryParse throws for it too.
@@ -152,6 +155,38 @@ public:
 
     /** @brief Converts the 16-bit signed integer @p value to its string representation. */
     static std::string ToString(SharpRuntime::shortcs value) { return std::to_string(value); }
+
+    /**
+     * @brief Converts @p value to its string representation using culture-specific format
+     *        information.
+     *
+     * C++ counterpart of .NET Int16.ToString(IFormatProvider): the negative sign of the
+     * NumberFormatInfo that @p provider supplies is honoured (System/detail/NumberFormatText.hpp).
+     * @param value The value to format.
+     * @param provider The format provider, or nullptr for the invariant spelling.
+     * @return The formatted text.
+     */
+    static std::string ToString(SharpRuntime::shortcs value, const IFormatProvider* provider) {
+        return System::detail::NumberFormatText::LocalizeFormatted(ToString(value), provider);
+    }
+
+    /**
+     * @brief Converts @p value to a string using a format specifier and culture-specific
+     *        format information.
+     *
+     * C++ counterpart of .NET Int16.ToString(string, IFormatProvider): `ToString(value, format)`
+     * with its negative sign, group separator and decimal separator respelled from the
+     * NumberFormatInfo that @p provider supplies.
+     * @param value The value to format.
+     * @param format The numeric format string.
+     * @param provider The format provider, or nullptr for the invariant spelling.
+     * @return The formatted text.
+     * @throws System::FormatException if @p format is not a valid specifier.
+     */
+    static std::string ToString(SharpRuntime::shortcs value, const std::string& format,
+                                const IFormatProvider* provider) {
+        return System::detail::NumberFormatText::LocalizeFormatted(ToString(value, format), provider);
+    }
 
     /** @brief Converts @p value to a string using format specifier ("X", "X4", "D", "D5", "G"). */
     static std::string ToString(SharpRuntime::shortcs value, const std::string& format) {

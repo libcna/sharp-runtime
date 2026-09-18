@@ -188,9 +188,15 @@ TEST(DefaultValueAttributeTests, Equals_UsesStoredTypeAndValue) {
     EXPECT_FALSE(first.Equals(differentType));
 }
 
-TEST(DefaultValueAttributeTests, TypeStringConstructor_RequiresTheDeferredTypeConverterSystem) {
-    EXPECT_THROW(DefaultValueAttribute(System::Type::From<int>(), std::string("42")),
-                 System::PlatformNotSupportedException);
+TEST(DefaultValueAttributeTests, TypeStringConstructor_UsesTheRegisteredInvariantConverter) {
+    const DefaultValueAttribute attribute(System::Type::From<SharpRuntime::intcs>(), std::string("42"));
+    ASSERT_TRUE(attribute.getValueProperty().has_value());
+    EXPECT_EQ(std::any_cast<SharpRuntime::intcs>(attribute.getValueProperty()), 42);
+}
+
+TEST(DefaultValueAttributeTests, TypeStringConstructor_StoresNullWhenConversionFails) {
+    const DefaultValueAttribute attribute(System::Type::From<SharpRuntime::intcs>(), std::string("not an integer"));
+    EXPECT_FALSE(attribute.getValueProperty().has_value());
 }
 
 TEST(DefaultValueAttributeTests, ValueHasType_AfterStringCtor) {

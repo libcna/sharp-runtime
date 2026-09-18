@@ -25,6 +25,9 @@
 #include "System/detail/FloatParseGrammar.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/detail/FloatTextFormat.hpp"
+#include "System/detail/FloatNumberStylesParser.hpp"
+#include "System/detail/NumberFormatText.hpp"
+#include "System/Globalization/NumberStyles.hpp"
 
 namespace System {
 
@@ -105,7 +108,7 @@ public:
      * C++ counterpart of .NET Single.IsPositive(float). .NET defines the generic-math predicate on
      * the RAW representation (`BitConverter.SingleToInt32Bits(value) >= 0`), so the sign bit alone
      * decides: a positive-sign NaN is positive and a negative-sign NaN is negative. Ticket #2230
-     * (SR-AUD-034) removed a `&& !std::isnan(value)` term that made `IsPositive(NaN)` false and put
+     * (SR-AUD-034) removed an explicit NaN-rejection term that made `IsPositive(NaN)` false and put
      * this overload out of step with `Single::IsNegative` and with both `Double` counterparts,
      * which already used the bare sign bit.
      */
@@ -585,7 +588,10 @@ public:
     [[nodiscard]] static float Atan2Pi(float y, float x) noexcept { return std::atan2(y, x) / Pi; }
 
     /** @brief Pair returned by SinCos. */
-    struct SinCosResult { float Sin; float Cos; };
+    struct SinCosResult {
+        /** @brief The sine result. */ float Sin;
+        /** @brief The cosine result. */ float Cos;
+    };
 
     /**
      * @brief Computes sine and cosine of @p x simultaneously.
@@ -596,7 +602,10 @@ public:
     }
 
     /** @brief Pair returned by SinCosPi. */
-    struct SinCosPiResult { float SinPi; float CosPi; };
+    struct SinCosPiResult {
+        /** @brief The sine-of-Pi result. */ float SinPi;
+        /** @brief The cosine-of-Pi result. */ float CosPi;
+    };
 
     /**
      * @brief Computes sine and cosine of @p x * Pi simultaneously.
@@ -983,6 +992,43 @@ private:
         return false;
     }
 
+    // .NET's default floating-point parse style (Number.Parsing: NumberStyles.Float |
+    // NumberStyles.AllowThousands), the grammar tryParseCore implements directly.
+    static System::Globalization::NumberStyles defaultParseStyle() noexcept {
+        return System::Globalization::NumberStyles::Float | System::Globalization::NumberStyles::AllowThousands;
+    }
+
+    // The style- and provider-aware entry: normalise the culture's spelling to the invariant one,
+    // apply the style grammar, then reuse tryParseCore on the canonical text (which is how the
+    // overflow-to-infinity and underflow-to-zero rules stay in exactly one place). The NaN and
+    // infinity symbols are matched afterwards, on the trimmed text and case-insensitively, the
+    // way Number.TryParseFloat does it once TryStringToNumber has failed.
+    static bool tryParseStyled(const std::string& s, System::Globalization::NumberStyles style,
+                               const IFormatProvider* provider, float& result) {
+        const std::string normalized = System::detail::NumberFormatText::NormalizeForParsing(s, style, provider);
+        std::string canonical;
+        if (System::detail::FloatNumberStylesParser::TryCanonicalize(normalized, style, canonical)) {
+            return tryParseCore(canonical, result);
+        }
+        std::string_view sv{normalized};
+        while (!sv.empty() && isAsciiWhitespace(sv.front())) sv.remove_prefix(1);
+        while (!sv.empty() && isAsciiWhitespace(sv.back())) sv.remove_suffix(1);
+        if (equalsIgnoreCaseAscii(sv, "NaN") || equalsIgnoreCaseAscii(sv, "+NaN") || equalsIgnoreCaseAscii(sv, "-NaN")) {
+            result = std::numeric_limits<float>::quiet_NaN();
+            return true;
+        }
+        if (equalsIgnoreCaseAscii(sv, "Infinity") || equalsIgnoreCaseAscii(sv, "+Infinity")) {
+            result = std::numeric_limits<float>::infinity();
+            return true;
+        }
+        if (equalsIgnoreCaseAscii(sv, "-Infinity")) {
+            result = -std::numeric_limits<float>::infinity();
+            return true;
+        }
+        result = 0.0f;
+        return false;
+    }
+
 public:
     // -------------------------------------------------------------------------
     // Parse / ToString
@@ -1003,18 +1049,44 @@ public:
     /**
      * @brief Converts the string representation of a number using a format provider.
      *
-     * C++ counterpart of .NET Single.Parse(string, IFormatProvider). The current floating-point
-     * parser implements the invariant numeric grammar; @p provider is accepted so callers can
-     * preserve an explicit InvariantCulture contract.
+     * C++ counterpart of .NET Single.Parse(string, IFormatProvider): the default style
+     * (`NumberStyles::Float | AllowThousands`) with the separators, signs and special symbols of
+     * the `NumberFormatInfo` that @p provider supplies (a `CultureInfo` supplies its own).
      *
      * @param s The string representation to parse.
-     * @param provider The format provider, or nullptr.
+     * @param provider The format provider, or nullptr for the invariant spelling.
      * @return The parsed single-precision value.
      * @throws System::FormatException if the string is not a valid floating-point literal.
      */
     [[nodiscard]] static float Parse(const std::string& s, const IFormatProvider* provider) {
-        (void)provider;
-        return Parse(s);
+        return Parse(s, defaultParseStyle(), provider);
+    }
+
+    /**
+     * @brief Converts the string representation of a number in a specified style and
+     *        culture-specific format.
+     *
+     * C++ counterpart of .NET Single.Parse(string, NumberStyles, IFormatProvider). The grammar
+     * is `System::detail::FloatNumberStylesParser`'s: `NumberStyles::Float` alone rejects a group
+     * separator, `Number` admits a trailing sign, `Currency` a currency symbol and parentheses.
+     * The NaN and infinity symbols are matched outside the grammar, on the trimmed text and
+     * case-insensitively, as .NET does.
+     *
+     * @param s The string representation to parse.
+     * @param style The permitted style elements.
+     * @param provider The format provider, or nullptr for the invariant spelling.
+     * @return The parsed single-precision value.
+     * @throws System::ArgumentException if @p style is undefined or names a hexadecimal or
+     *         binary specifier.
+     * @throws System::FormatException if the string is not a valid number under @p style.
+     */
+    [[nodiscard]] static float Parse(const std::string& s, System::Globalization::NumberStyles style,
+                                     const IFormatProvider* provider) {
+        System::detail::FloatNumberStylesParser::ValidateParseStyleFloatingPoint(style);
+        float result{};
+        if (!tryParseStyled(s, style, provider, result))
+            throw System::FormatException("Input string was not in a correct format.");
+        return result;
     }
 
     /**
@@ -1028,18 +1100,37 @@ public:
     /**
      * @brief Tries to convert a string using a format provider without throwing.
      *
-     * C++ counterpart of .NET Single.TryParse(string, IFormatProvider, out float). The current
-     * floating-point parser implements the invariant numeric grammar; @p provider is accepted so
-     * callers can preserve an explicit InvariantCulture contract.
+     * C++ counterpart of .NET Single.TryParse(string, IFormatProvider, out float): the default
+     * style with the spelling of the `NumberFormatInfo` that @p provider supplies.
      *
      * @param s The string representation to parse.
-     * @param provider The format provider, or nullptr.
+     * @param provider The format provider, or nullptr for the invariant spelling.
      * @param result Receives the parsed value on success or zero on failure.
      * @return true when parsing succeeds; otherwise false.
      */
-    static bool TryParse(const std::string& s, const IFormatProvider* provider, float& result) noexcept {
-        (void)provider;
-        return tryParseCore(s, result);
+    static bool TryParse(const std::string& s, const IFormatProvider* provider, float& result) {
+        return tryParseStyled(s, defaultParseStyle(), provider, result);
+    }
+
+    /**
+     * @brief Tries to convert a string in a specified style and culture-specific format without
+     *        throwing a FormatException.
+     *
+     * C++ counterpart of .NET Single.TryParse(string, NumberStyles, IFormatProvider, out float).
+     * As in .NET, an invalid @p style is an argument error and still throws.
+     *
+     * @param s The string representation to parse.
+     * @param style The permitted style elements.
+     * @param provider The format provider, or nullptr for the invariant spelling.
+     * @param result Receives the parsed value on success or zero on failure.
+     * @return true when parsing succeeds; otherwise false.
+     * @throws System::ArgumentException if @p style is undefined or names a hexadecimal or
+     *         binary specifier.
+     */
+    static bool TryParse(const std::string& s, System::Globalization::NumberStyles style,
+                         const IFormatProvider* provider, float& result) {
+        System::detail::FloatNumberStylesParser::ValidateParseStyleFloatingPoint(style);
+        return tryParseStyled(s, style, provider, result);
     }
 
     /**
@@ -1053,6 +1144,42 @@ public:
         auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
         if (ec == std::errc{}) return std::string(buf.data(), ptr);
         return std::to_string(value);
+    }
+
+    /**
+     * @brief Converts @p value to its string representation using culture-specific format
+     *        information.
+     *
+     * C++ counterpart of .NET Single.ToString(IFormatProvider): the shortest round-trippable
+     * text, spelled with the decimal separator, negative sign and special symbols of the
+     * `NumberFormatInfo` that @p provider supplies.
+     *
+     * @param value The value to format.
+     * @param provider The format provider, or nullptr for the invariant spelling.
+     * @return The formatted text.
+     */
+    [[nodiscard]] static std::string ToString(float value, const IFormatProvider* provider) {
+        return System::detail::NumberFormatText::LocalizeFormatted(ToString(value), provider);
+    }
+
+    /**
+     * @brief Converts @p value to a string using a format specifier and culture-specific format
+     *        information.
+     *
+     * C++ counterpart of .NET Single.ToString(string, IFormatProvider): `ToString(value, format)`
+     * with its separators, signs and special symbols respelled from the `NumberFormatInfo` that
+     * @p provider supplies. Every format specifier the two-argument overload accepts is accepted
+     * here.
+     *
+     * @param value The value to format.
+     * @param format The numeric format string.
+     * @param provider The format provider, or nullptr for the invariant spelling.
+     * @return The formatted text.
+     * @throws System::FormatException if @p format is not a valid specifier.
+     */
+    [[nodiscard]] static std::string ToString(float value, const std::string& format,
+                                              const IFormatProvider* provider) {
+        return System::detail::NumberFormatText::LocalizeFormatted(ToString(value, format), provider);
     }
 
     /** @brief Converts @p value to a string using a format specifier ("F2", "E3", "G", "R", "N2"). C++ counterpart of .NET Single.ToString(string). */

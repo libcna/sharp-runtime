@@ -3,10 +3,12 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <string>
+#include <typeinfo>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/IFormatProvider.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Globalization/DigitShapes.hpp"
 
@@ -18,9 +20,16 @@ namespace System::Globalization {
  * @brief Provides culture-specific information for formatting and parsing numeric values.
  *
  * C++ counterpart of .NET System.Globalization.NumberFormatInfo.
- * The default constructor initializes invariant (locale-independent) defaults.
- * Only the invariant format is meaningfully implemented; locale-specific formatting
- * is not supported.
+ * The default constructor initializes invariant (locale-independent) defaults. A `CultureInfo`
+ * fills in the separators its culture data table records (see
+ * `System/Globalization/detail/CultureData.hpp`); every field that table does not cover keeps
+ * the invariant value. The numeric `Parse`/`ToString` overloads that take an `IFormatProvider`
+ * resolve it through `GetInstance` and honour the separators, signs and special symbols of the
+ * instance they get (`System/detail/NumberFormatText.hpp`).
+ *
+ * This header is owned by `Core.Base`, next to `DateTimeFormatInfo`, so that the numeric
+ * primitives can name the type; it was moved out of the `Globalization` component for that
+ * reason and its include spelling is unchanged.
  */
 class NumberFormatInfo {
     bool isReadOnly_ = false;
@@ -180,12 +189,36 @@ public:
     /**
      * @brief Returns the NumberFormatInfo for the current thread's culture.
      *
-     * C++ counterpart of .NET NumberFormatInfo.CurrentInfo.
-     * Stub — returns the invariant info.
+     * C++ counterpart of .NET NumberFormatInfo.CurrentInfo. This header belongs to `Core.Base`,
+     * which cannot reach `CultureInfo` (a `Globalization` type), so the thread's culture is not
+     * consulted here and the invariant info is returned. A caller that has a culture passes it
+     * as the `IFormatProvider` of the numeric overloads, which is how the .NET call sites that
+     * matter (`Single.Parse(text, style, culture)`, `TypeConverter`s) reach it anyway.
      * @return A const reference to the invariant NumberFormatInfo.
      */
     [[nodiscard]] static const NumberFormatInfo& getCurrentInfoProperty() {
         return getInvariantInfoProperty();
+    }
+
+    /**
+     * @brief Gets the NumberFormatInfo associated with the specified provider.
+     *
+     * C++ counterpart of .NET NumberFormatInfo.GetInstance(IFormatProvider): asks
+     * @p provider for a `NumberFormatInfo` through `IFormatProvider::GetFormat` and falls back to
+     * `CurrentInfo` when the provider is null or does not supply one. A `CultureInfo` answers with
+     * its own `NumberFormat`.
+     *
+     * @param provider The provider to query, or nullptr.
+     * @return The provider's NumberFormatInfo, or the current (invariant) info.
+     */
+    [[nodiscard]] static const NumberFormatInfo& GetInstance(const System::IFormatProvider* provider) {
+        if (provider != nullptr) {
+            if (const auto* info = static_cast<const NumberFormatInfo*>(
+                    provider->GetFormat(typeid(NumberFormatInfo)))) {
+                return *info;
+            }
+        }
+        return getCurrentInfoProperty();
     }
 
     /**
@@ -216,114 +249,141 @@ public:
     // --- Number format ---
     /** @brief String that separates the integer from the fractional part. C++ counterpart of .NET NumberFormatInfo.NumberDecimalSeparator. @throws System::ArgumentException if @p value is empty. */
     [[nodiscard]] const std::string& getNumberDecimalSeparatorProperty() const { return numberDecimalSeparator_; }
+    /** @brief Sets the number decimal separator. @param value The non-empty separator. */
     void setNumberDecimalSeparatorProperty(const std::string& value) { VerifyWritable(); CheckNotEmpty(value); numberDecimalSeparator_ = value; }
 
     /** @brief String that separates groups of digits left of the decimal point. C++ counterpart of .NET NumberFormatInfo.NumberGroupSeparator. */
     [[nodiscard]] const std::string& getNumberGroupSeparatorProperty() const { return numberGroupSeparator_; }
+    /** @brief Sets the number group separator. @param value The separator. */
     void setNumberGroupSeparatorProperty(const std::string& value) { VerifyWritable(); numberGroupSeparator_ = value; }
 
     /** @brief Number of decimal digits in numeric values. C++ counterpart of .NET NumberFormatInfo.NumberDecimalDigits. @throws System::ArgumentOutOfRangeException if @p value is outside [0, 99]. */
     [[nodiscard]] intcs getNumberDecimalDigitsProperty() const { return numberDecimalDigits_; }
+    /** @brief Sets the number of decimal digits. @param value A value from 0 through 99. */
     void setNumberDecimalDigitsProperty(intcs value) { CheckRange(value, 0, 99); VerifyWritable(); numberDecimalDigits_ = value; }
 
     /** @brief Format pattern for negative numeric values. C++ counterpart of .NET NumberFormatInfo.NumberNegativePattern. @throws System::ArgumentOutOfRangeException if @p value is outside [0, 4]. */
     [[nodiscard]] intcs getNumberNegativePatternProperty() const { return numberNegativePattern_; }
+    /** @brief Sets the negative-number pattern. @param value A value from 0 through 4. */
     void setNumberNegativePatternProperty(intcs value) { CheckRange(value, 0, 4); VerifyWritable(); numberNegativePattern_ = value; }
 
     /** @brief Number of digits in each group left of the decimal point. C++ counterpart of .NET NumberFormatInfo.NumberGroupSizes. Returns a copy, matching .NET. @throws System::ArgumentException if any element is outside [1, 9] (the last element may also be 0). */
     [[nodiscard]] std::vector<intcs> getNumberGroupSizesProperty() const { return numberGroupSizes_; }
+    /** @brief Sets the numeric digit-group sizes. @param value The group sizes. */
     void setNumberGroupSizesProperty(const std::vector<intcs>& value) { VerifyWritable(); CheckGroupSize(value); numberGroupSizes_ = value; }
 
     // --- Currency format ---
     /** @brief String that separates the integer from the fractional part in currency values. C++ counterpart of .NET NumberFormatInfo.CurrencyDecimalSeparator. @throws System::ArgumentException if @p value is empty. */
     [[nodiscard]] const std::string& getCurrencyDecimalSeparatorProperty() const { return currencyDecimalSeparator_; }
+    /** @brief Sets the currency decimal separator. @param value The non-empty separator. */
     void setCurrencyDecimalSeparatorProperty(const std::string& value) { VerifyWritable(); CheckNotEmpty(value); currencyDecimalSeparator_ = value; }
 
     /** @brief String that separates groups of digits left of the decimal in currency values. C++ counterpart of .NET NumberFormatInfo.CurrencyGroupSeparator. */
     [[nodiscard]] const std::string& getCurrencyGroupSeparatorProperty() const { return currencyGroupSeparator_; }
+    /** @brief Sets the currency group separator. @param value The separator. */
     void setCurrencyGroupSeparatorProperty(const std::string& value) { VerifyWritable(); currencyGroupSeparator_ = value; }
 
     /** @brief String used as the currency symbol. C++ counterpart of .NET NumberFormatInfo.CurrencySymbol. */
     [[nodiscard]] const std::string& getCurrencySymbolProperty() const { return currencySymbol_; }
+    /** @brief Sets the currency symbol. @param value The symbol. */
     void setCurrencySymbolProperty(const std::string& value) { VerifyWritable(); currencySymbol_ = value; }
 
     /** @brief Number of decimal digits in currency values. C++ counterpart of .NET NumberFormatInfo.CurrencyDecimalDigits. @throws System::ArgumentOutOfRangeException if @p value is outside [0, 99]. */
     [[nodiscard]] intcs getCurrencyDecimalDigitsProperty() const { return currencyDecimalDigits_; }
+    /** @brief Sets the number of currency decimal digits. @param value A value from 0 through 99. */
     void setCurrencyDecimalDigitsProperty(intcs value) { CheckRange(value, 0, 99); VerifyWritable(); currencyDecimalDigits_ = value; }
 
     /** @brief Format pattern for negative currency values. C++ counterpart of .NET NumberFormatInfo.CurrencyNegativePattern. @throws System::ArgumentOutOfRangeException if @p value is outside [0, 16]. */
     [[nodiscard]] intcs getCurrencyNegativePatternProperty() const { return currencyNegativePattern_; }
+    /** @brief Sets the negative-currency pattern. @param value A value from 0 through 16. */
     void setCurrencyNegativePatternProperty(intcs value) { CheckRange(value, 0, 16); VerifyWritable(); currencyNegativePattern_ = value; }
 
     /** @brief Format pattern for positive currency values. C++ counterpart of .NET NumberFormatInfo.CurrencyPositivePattern. @throws System::ArgumentOutOfRangeException if @p value is outside [0, 3]. */
     [[nodiscard]] intcs getCurrencyPositivePatternProperty() const { return currencyPositivePattern_; }
+    /** @brief Sets the positive-currency pattern. @param value A value from 0 through 3. */
     void setCurrencyPositivePatternProperty(intcs value) { CheckRange(value, 0, 3); VerifyWritable(); currencyPositivePattern_ = value; }
 
     /** @brief Number of digits in each group left of the decimal in currency values. C++ counterpart of .NET NumberFormatInfo.CurrencyGroupSizes. Returns a copy, matching .NET. @throws System::ArgumentException if any element is outside [1, 9] (the last element may also be 0). */
     [[nodiscard]] std::vector<intcs> getCurrencyGroupSizesProperty() const { return currencyGroupSizes_; }
+    /** @brief Sets the currency digit-group sizes. @param value The group sizes. */
     void setCurrencyGroupSizesProperty(const std::vector<intcs>& value) { VerifyWritable(); CheckGroupSize(value); currencyGroupSizes_ = value; }
 
     // --- Sign and special symbols ---
     /** @brief String that denotes a negative number. C++ counterpart of .NET NumberFormatInfo.NegativeSign. */
     [[nodiscard]] const std::string& getNegativeSignProperty() const { return negativeSign_; }
+    /** @brief Sets the negative sign. @param value The sign text. */
     void setNegativeSignProperty(const std::string& value) { VerifyWritable(); negativeSign_ = value; }
 
     /** @brief String that denotes a positive number. C++ counterpart of .NET NumberFormatInfo.PositiveSign. */
     [[nodiscard]] const std::string& getPositiveSignProperty() const { return positiveSign_; }
+    /** @brief Sets the positive sign. @param value The sign text. */
     void setPositiveSignProperty(const std::string& value) { VerifyWritable(); positiveSign_ = value; }
 
     /** @brief String that represents the IEEE NaN value. C++ counterpart of .NET NumberFormatInfo.NaNSymbol. */
     [[nodiscard]] const std::string& getNaNSymbolProperty() const { return naNSymbol_; }
+    /** @brief Sets the NaN symbol. @param value The symbol text. */
     void setNaNSymbolProperty(const std::string& value) { VerifyWritable(); naNSymbol_ = value; }
 
     /** @brief String that represents positive infinity. C++ counterpart of .NET NumberFormatInfo.PositiveInfinitySymbol. */
     [[nodiscard]] const std::string& getPositiveInfinitySymbolProperty() const { return positiveInfinitySymbol_; }
+    /** @brief Sets the positive-infinity symbol. @param value The symbol text. */
     void setPositiveInfinitySymbolProperty(const std::string& value) { VerifyWritable(); positiveInfinitySymbol_ = value; }
 
     /** @brief String that represents negative infinity. C++ counterpart of .NET NumberFormatInfo.NegativeInfinitySymbol. */
     [[nodiscard]] const std::string& getNegativeInfinitySymbolProperty() const { return negativeInfinitySymbol_; }
+    /** @brief Sets the negative-infinity symbol. @param value The symbol text. */
     void setNegativeInfinitySymbolProperty(const std::string& value) { VerifyWritable(); negativeInfinitySymbol_ = value; }
 
     // --- Percent format ---
     /** @brief String to use as the percent symbol. C++ counterpart of .NET NumberFormatInfo.PercentSymbol. */
     [[nodiscard]] const std::string& getPercentSymbolProperty() const { return percentSymbol_; }
+    /** @brief Sets the percent symbol. @param value The symbol text. */
     void setPercentSymbolProperty(const std::string& value) { VerifyWritable(); percentSymbol_ = value; }
 
     /** @brief String to use as the per mille symbol (‰). C++ counterpart of .NET NumberFormatInfo.PerMilleSymbol. */
     [[nodiscard]] const std::string& getPerMilleSymbolProperty() const { return perMilleSymbol_; }
+    /** @brief Sets the per-mille symbol. @param value The symbol text. */
     void setPerMilleSymbolProperty(const std::string& value) { VerifyWritable(); perMilleSymbol_ = value; }
 
     /** @brief String that separates the integer from the fractional part in percent values. C++ counterpart of .NET NumberFormatInfo.PercentDecimalSeparator. @throws System::ArgumentException if @p value is empty. */
     [[nodiscard]] const std::string& getPercentDecimalSeparatorProperty() const { return percentDecimalSeparator_; }
+    /** @brief Sets the percent decimal separator. @param value The non-empty separator. */
     void setPercentDecimalSeparatorProperty(const std::string& value) { VerifyWritable(); CheckNotEmpty(value); percentDecimalSeparator_ = value; }
 
     /** @brief String that separates groups of digits left of the decimal in percent values. C++ counterpart of .NET NumberFormatInfo.PercentGroupSeparator. */
     [[nodiscard]] const std::string& getPercentGroupSeparatorProperty() const { return percentGroupSeparator_; }
+    /** @brief Sets the percent group separator. @param value The separator. */
     void setPercentGroupSeparatorProperty(const std::string& value) { VerifyWritable(); percentGroupSeparator_ = value; }
 
     /** @brief Number of decimal digits in percent values. C++ counterpart of .NET NumberFormatInfo.PercentDecimalDigits. @throws System::ArgumentOutOfRangeException if @p value is outside [0, 99]. */
     [[nodiscard]] intcs getPercentDecimalDigitsProperty() const { return percentDecimalDigits_; }
+    /** @brief Sets the number of percent decimal digits. @param value A value from 0 through 99. */
     void setPercentDecimalDigitsProperty(intcs value) { CheckRange(value, 0, 99); VerifyWritable(); percentDecimalDigits_ = value; }
 
     /** @brief Format pattern for negative percent values. C++ counterpart of .NET NumberFormatInfo.PercentNegativePattern. @throws System::ArgumentOutOfRangeException if @p value is outside [0, 11]. */
     [[nodiscard]] intcs getPercentNegativePatternProperty() const { return percentNegativePattern_; }
+    /** @brief Sets the negative-percent pattern. @param value A value from 0 through 11. */
     void setPercentNegativePatternProperty(intcs value) { CheckRange(value, 0, 11); VerifyWritable(); percentNegativePattern_ = value; }
 
     /** @brief Format pattern for positive percent values. C++ counterpart of .NET NumberFormatInfo.PercentPositivePattern. @throws System::ArgumentOutOfRangeException if @p value is outside [0, 3]. */
     [[nodiscard]] intcs getPercentPositivePatternProperty() const { return percentPositivePattern_; }
+    /** @brief Sets the positive-percent pattern. @param value A value from 0 through 3. */
     void setPercentPositivePatternProperty(intcs value) { CheckRange(value, 0, 3); VerifyWritable(); percentPositivePattern_ = value; }
 
     /** @brief Number of digits in each group left of the decimal in percent values. C++ counterpart of .NET NumberFormatInfo.PercentGroupSizes. Returns a copy, matching .NET. @throws System::ArgumentException if any element is outside [1, 9] (the last element may also be 0). */
     [[nodiscard]] std::vector<intcs> getPercentGroupSizesProperty() const { return percentGroupSizes_; }
+    /** @brief Sets the percent digit-group sizes. @param value The group sizes. */
     void setPercentGroupSizesProperty(const std::vector<intcs>& value) { VerifyWritable(); CheckGroupSize(value); percentGroupSizes_ = value; }
 
     // --- Digit substitution ---
     /** @brief Specifies how a GUI displays the shape of a digit. C++ counterpart of .NET NumberFormatInfo.DigitSubstitution. @throws System::ArgumentException if @p value is not a valid DigitShapes member. */
     [[nodiscard]] DigitShapes getDigitSubstitutionProperty() const { return digitSubstitution_; }
+    /** @brief Sets the digit-substitution mode. @param value The digit-shape policy. */
     void setDigitSubstitutionProperty(DigitShapes value) { VerifyWritable(); CheckDigitSubstitution(value); digitSubstitution_ = value; }
 
     /** @brief Native digits equivalent to Western digits 0-9. C++ counterpart of .NET NumberFormatInfo.NativeDigits. Returns a copy, matching .NET. @throws System::ArgumentException unless @p value has exactly 10 single-codepoint entries. */
     [[nodiscard]] std::vector<std::string> getNativeDigitsProperty() const { return nativeDigits_; }
+    /** @brief Sets the ten native digit strings. @param value Exactly ten single-codepoint strings. */
     void setNativeDigitsProperty(const std::vector<std::string>& value) { VerifyWritable(); CheckNativeDigits(value); nativeDigits_ = value; }
 
 private:

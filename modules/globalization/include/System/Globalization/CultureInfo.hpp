@@ -19,6 +19,8 @@
 #include "System/Globalization/CultureNotFoundException.hpp"
 #include "System/Globalization/DateTimeFormatInfo.hpp"
 #include "System/Globalization/NumberFormatInfo.hpp"
+#include "System/Globalization/TextInfo.hpp"
+#include "System/Globalization/detail/CultureData.hpp"
 
 namespace System::Globalization {
 
@@ -26,12 +28,14 @@ namespace System::Globalization {
  * @brief Provides information about a specific culture (locale).
  *
  * C++ counterpart of .NET System.Globalization.CultureInfo.
- * This port has no locale/ICU formatting database (unlike real .NET's CultureData), so named
- * cultures still use invariant number and date/time data. A small identity-metadata table covers
- * the culture names required by current consumers; for any other culture name, name-derived
- * properties (EnglishName, NativeName, DisplayName) fall back to the name itself, and
- * TwoLetterISOLanguageName is derived heuristically from the name's leading subtag --
- * documented on each property rather than silently claiming full parity.
+ * This port has no locale/ICU formatting database (unlike real .NET's CultureData). What it has
+ * is the small explicit table in `System/Globalization/detail/CultureData.hpp`: for the cultures
+ * listed there, `EnglishName`, `TextInfo::ListSeparator` and the decimal and group separators of
+ * `NumberFormat` carry that culture's CLDR values; every other field, and every unlisted culture
+ * name, keeps the invariant data. Date/time data is invariant for every culture. For an unlisted
+ * culture name, name-derived properties (EnglishName, NativeName, DisplayName) fall back to the
+ * name itself, and TwoLetterISOLanguageName is derived heuristically from the name's leading
+ * subtag -- documented on each property rather than silently claiming full parity.
  * **CurrentCulture and CurrentUICulture are per-thread since #2409**, with .NET's process-wide
  * `DefaultThreadCurrentCulture` fallback beneath them and the invariant culture last. They used
  * to be process-wide statics -- a set on one thread changed what every other thread read, and a
@@ -44,21 +48,34 @@ class CultureInfo : public System::IFormatProvider {
     bool isReadOnly_;
     NumberFormatInfo numberFormat_;
     DateTimeFormatInfo dateTimeFormat_;
+    TextInfo textInfo_;
 
-    /** @brief Returns known English identity metadata without claiming formatting data. */
+    /** @brief Returns known English identity metadata from the culture data table. */
     [[nodiscard]] static std::string_view LookupEnglishName(const std::string_view name) {
-        static constexpr std::array<std::pair<std::string_view, std::string_view>, 6> names{{
-            {"en-US", "English (United States)"},
-            {"en-GB", "English (United Kingdom)"},
-            {"da-DK", "Danish (Denmark)"},
-            {"fr-FR", "French (France)"},
-            {"ja-JP", "Japanese (Japan)"},
-            {"ko-KR", "Korean (Korea)"},
-        }};
-        for (const auto& [cultureName, englishName] : names) {
-            if (cultureName == name) return englishName;
+        const detail::CultureDataRecord* record = detail::FindCultureData(name);
+        return record != nullptr ? record->englishName : std::string_view{};
+    }
+
+    /**
+     * @brief Builds the NumberFormatInfo for @p name: the invariant defaults with the decimal
+     *        and group separators the culture data table records, applied to the number,
+     *        currency and percent families alike (CLDR uses one pair for all three in every
+     *        listed culture).
+     */
+    [[nodiscard]] static NumberFormatInfo MakeNumberFormat(const std::string_view name) {
+        NumberFormatInfo info = NumberFormatInfo::getInvariantInfoProperty().Clone();
+        const detail::CultureDataRecord* record = detail::FindCultureData(name);
+        if (record != nullptr && !record->name.empty()) {
+            const std::string decimalSeparator(record->numberDecimalSeparator);
+            const std::string groupSeparator(record->numberGroupSeparator);
+            info.setNumberDecimalSeparatorProperty(decimalSeparator);
+            info.setNumberGroupSeparatorProperty(groupSeparator);
+            info.setCurrencyDecimalSeparatorProperty(decimalSeparator);
+            info.setCurrencyGroupSeparatorProperty(groupSeparator);
+            info.setPercentDecimalSeparatorProperty(decimalSeparator);
+            info.setPercentGroupSeparatorProperty(groupSeparator);
         }
-        return {};
+        return info;
     }
 
     /**
@@ -134,10 +151,11 @@ class CultureInfo : public System::IFormatProvider {
 
     CultureInfo(const std::string& name, bool neutral, bool readOnly)
         : name_(name), isNeutral_(neutral), isReadOnly_(readOnly),
-          numberFormat_(readOnly ? NumberFormatInfo::ReadOnly(NumberFormatInfo::getInvariantInfoProperty())
-                                  : NumberFormatInfo::getInvariantInfoProperty().Clone()),
+          numberFormat_(readOnly ? NumberFormatInfo::ReadOnly(MakeNumberFormat(name))
+                                  : MakeNumberFormat(name)),
           dateTimeFormat_(readOnly ? DateTimeFormatInfo::ReadOnly(DateTimeFormatInfo::getInvariantInfoProperty())
-                                    : DateTimeFormatInfo::getInvariantInfoProperty().Clone()) {}
+                                    : DateTimeFormatInfo::getInvariantInfoProperty().Clone()),
+          textInfo_(readOnly ? TextInfo::ReadOnly(TextInfo(name)) : TextInfo(name)) {}
 
     /** @brief Throws InvalidOperationException if this instance is read-only. */
     void VerifyWritable() const {
@@ -340,6 +358,18 @@ public:
         VerifyWritable();
         dateTimeFormat_ = value;
     }
+
+    /**
+     * @brief Gets the TextInfo that defines the writing system associated with the culture.
+     *
+     * C++ counterpart of .NET CultureInfo.TextInfo. The instance is read-only exactly when this
+     * culture is. Its `ListSeparator` comes from the culture data table
+     * (`System/Globalization/detail/CultureData.hpp`): `","` for the invariant culture and
+     * `en-US`, `";"` for `cs-CZ`, `de-DE`, `fr-FR` and the other listed cultures whose decimal
+     * separator is a comma; the casing operations are invariant for every culture, as before.
+     * @return A const reference to this culture's TextInfo.
+     */
+    [[nodiscard]] const TextInfo& getTextInfoProperty() const { return textInfo_; }
 
     /**
      * @brief Determines whether this CultureInfo is equal to another.

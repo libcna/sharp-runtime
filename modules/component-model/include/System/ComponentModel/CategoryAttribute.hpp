@@ -425,45 +425,9 @@ namespace System::ComponentModel {
     inline const RefreshPropertiesAttribute RefreshPropertiesAttribute::Repaint{RefreshProperties::Repaint};
     inline const RefreshPropertiesAttribute RefreshPropertiesAttribute::Default{RefreshProperties::None};
 
-    /**
-     * @brief Specifies the type converter type associated with an object.
-     *
-     * This metadata attribute is useful independently of the TypeConverter
-     * runtime system.  The System::Type overload stores the RTTI full name;
-     * assembly-qualified names are unavailable by the project's permanent
-     * no-reflection deviation.
-     */
-    class TypeConverterAttribute final : public System::Attribute {
-        std::string typeName_;
-    public:
-        /** A shared attribute with no converter type name. */
-        static const TypeConverterAttribute Default;
-
-        /** Constructs the attribute with an empty type name. */
-        TypeConverterAttribute() = default;
-
-        /** @param typeName Fully qualified name of the converter type. */
-        explicit TypeConverterAttribute(std::string typeName) : typeName_(std::move(typeName)) {}
-
-        /** @param type Converter type represented by the project's RTTI Type wrapper. */
-        explicit TypeConverterAttribute(const System::Type& type)
-            : typeName_(type.getFullNameProperty()) {}
-
-        /** @return The fully qualified converter type name. */
-        [[nodiscard]] const std::string& getConverterTypeNameProperty() const noexcept { return typeName_; }
-
-        /** Compares attributes by converter type name. */
-        [[nodiscard]] bool Equals(const System::Attribute& other) const override {
-            const auto* attribute = dynamic_cast<const TypeConverterAttribute*>(&other);
-            return attribute != nullptr && attribute->typeName_ == typeName_;
-        }
-
-        /** Returns a hash code based on the converter type name. */
-        [[nodiscard]] int GetHashCode() const override {
-            return static_cast<int>(std::hash<std::string>{}(typeName_));
-        }
-    };
-    inline const TypeConverterAttribute TypeConverterAttribute::Default{};
+    // TypeConverterAttribute moved to its own header, System/ComponentModel/TypeConverterAttribute.hpp,
+    // when it gained the converter factory the TypeDescriptor registry resolves; it is still
+    // included below so this grouped header keeps offering it.
 
     /** Specifies the designer for a class. */
     class DesignerAttribute : public System::Attribute {
@@ -486,3 +450,5 @@ namespace System::ComponentModel {
     };
 
 } // namespace System::ComponentModel
+
+#include "System/ComponentModel/TypeConverterAttribute.hpp"

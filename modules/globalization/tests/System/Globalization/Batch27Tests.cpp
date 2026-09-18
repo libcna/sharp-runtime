@@ -359,6 +359,8 @@ TEST(CultureInfoBatch27Test, EnglishName_KnownConsumerCultures) {
         {"fr-FR", "French (France)"},
         {"ja-JP", "Japanese (Japan)"},
         {"ko-KR", "Korean (Korea)"},
+        {"de-DE", "German (Germany)"},
+        {"cs-CZ", "Czech (Czechia)"},
     };
     for (const auto& [name, englishName] : cases) {
         EXPECT_EQ(CultureInfo(name).getEnglishNameProperty(), englishName) << name;
@@ -366,8 +368,10 @@ TEST(CultureInfoBatch27Test, EnglishName_KnownConsumerCultures) {
 }
 
 TEST(CultureInfoBatch27Test, EnglishName_UnknownCulture_FallsBackToName) {
-    CultureInfo ci("de-DE");
-    EXPECT_EQ(ci.getEnglishNameProperty(), "de-DE");
+    // "de-DE" used to be the unlisted example; it gained a culture data row alongside the
+    // list-separator work, so a name the table genuinely does not carry is used instead.
+    CultureInfo ci("xx-YY");
+    EXPECT_EQ(ci.getEnglishNameProperty(), "xx-YY");
 }
 
 TEST(CultureInfoBatch27Test, NativeName_MatchesEnglishName) {
@@ -412,9 +416,14 @@ TEST(CultureInfoBatch27Test, ThreeLetterISOLanguageName_UnknownCulture_IsEmpty) 
 // NumberFormat / DateTimeFormat wiring
 // ---------------------------------------------------------------------------
 
-TEST(CultureInfoBatch27Test, NumberFormat_DefaultsToInvariantContent) {
+TEST(CultureInfoBatch27Test, NumberFormat_ComesFromTheCultureDataTable) {
+    // Until the culture data table existed this pinned that de-DE used the invariant
+    // separators; the table now carries CLDR's for the listed cultures, and an unlisted name
+    // is what still defaults to the invariant content.
     CultureInfo ci("de-DE");
-    EXPECT_EQ(ci.getNumberFormatProperty().getNumberDecimalSeparatorProperty(), ".");
+    EXPECT_EQ(ci.getNumberFormatProperty().getNumberDecimalSeparatorProperty(), ",");
+    CultureInfo unlisted("xx-YY");
+    EXPECT_EQ(unlisted.getNumberFormatProperty().getNumberDecimalSeparatorProperty(), ".");
 }
 
 TEST(CultureInfoBatch27Test, NumberFormat_Settable) {

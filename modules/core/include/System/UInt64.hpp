@@ -18,6 +18,7 @@
 #include "System/Globalization/NumberStyles.hpp"
 #include "System/OverflowException.hpp"
 #include "System/detail/IntegerNumberStylesParser.hpp"
+#include "System/detail/NumberFormatText.hpp"
 
 namespace System {
 
@@ -69,6 +70,7 @@ namespace System {
 
         /**
          * @brief Tries to convert a string to a UInt64 without throwing.
+         * @param s The text to parse.
          * @param result Receives the parsed value on success, or 0 on failure.
          * @return true if parsing succeeded; false otherwise.
          */
@@ -82,17 +84,19 @@ namespace System {
          * UInt64 equivalent.
          *
          * C++ counterpart of .NET UInt64.Parse(string, NumberStyles, IFormatProvider). @p
-         * provider is accepted for API-surface parity but ignored. Supports
+         * provider selects the NumberFormatInfo whose separators, signs and currency
+         * symbol are honoured; the text is respelled to the invariant grammar first
+         * (System/detail/NumberFormatText.hpp). Supports
          * NumberStyles.Integer, .Number, .Currency, and .HexNumber -- see
          * include/System/detail/IntegerNumberStylesParser.hpp for the exact supported grammar.
          * @throws System::FormatException if the string is not in a correct format for @p style.
          * @throws System::OverflowException if the value exceeds UInt64 range.
          */
-        static SharpRuntime::ulongcs Parse(const std::string& s, System::Globalization::NumberStyles style,
+        static SharpRuntime::ulongcs Parse(const std::string& input, System::Globalization::NumberStyles style,
                                             const IFormatProvider* provider) {
-            (void)provider;
+            const std::string s = System::detail::NumberFormatText::NormalizeForParsing(input, style, provider);
             SharpRuntime::ulongcs result;
-            if (!TryParse(s, style, provider, result)) {
+            if (!TryParse(input, style, provider, result)) {
                 using System::Globalization::NumberStyles;
                 if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
                     uint64_t bits; bool tooManyDigits = false;
@@ -122,9 +126,9 @@ namespace System {
          *
          * C++ counterpart of .NET UInt64.TryParse(string, NumberStyles, IFormatProvider, out ulong).
          */
-        static bool TryParse(const std::string& s, System::Globalization::NumberStyles style,
+        static bool TryParse(const std::string& input, System::Globalization::NumberStyles style,
                               const IFormatProvider* provider, SharpRuntime::ulongcs& result) {
-            (void)provider;
+            const std::string s = System::detail::NumberFormatText::NormalizeForParsing(input, style, provider);
             // #2269: .NET validates the style at every integer overload
             // (NumberFormatInfo.ValidateParseStyleInteger). An invalid style is an ARGUMENT error,
             // so this THROWS rather than returning false -- .NET's TryParse throws for it too.
@@ -154,6 +158,38 @@ namespace System {
 
         /** @brief Converts the value to its decimal string representation. */
         static std::string ToString(SharpRuntime::ulongcs value) { return std::to_string(value); }
+
+        /**
+         * @brief Converts @p value to its string representation using culture-specific format
+         *        information.
+         *
+         * C++ counterpart of .NET UInt64.ToString(IFormatProvider): the negative sign of the
+         * NumberFormatInfo that @p provider supplies is honoured (System/detail/NumberFormatText.hpp).
+         * @param value The value to format.
+         * @param provider The format provider, or nullptr for the invariant spelling.
+         * @return The formatted text.
+         */
+        static std::string ToString(SharpRuntime::ulongcs value, const IFormatProvider* provider) {
+            return System::detail::NumberFormatText::LocalizeFormatted(ToString(value), provider);
+        }
+
+        /**
+         * @brief Converts @p value to a string using a format specifier and culture-specific
+         *        format information.
+         *
+         * C++ counterpart of .NET UInt64.ToString(string, IFormatProvider): `ToString(value, format)`
+         * with its negative sign, group separator and decimal separator respelled from the
+         * NumberFormatInfo that @p provider supplies.
+         * @param value The value to format.
+         * @param format The numeric format string.
+         * @param provider The format provider, or nullptr for the invariant spelling.
+         * @return The formatted text.
+         * @throws System::FormatException if @p format is not a valid specifier.
+         */
+        static std::string ToString(SharpRuntime::ulongcs value, const std::string& format,
+                                    const IFormatProvider* provider) {
+            return System::detail::NumberFormatText::LocalizeFormatted(ToString(value, format), provider);
+        }
 
         /** @brief Converts value to a string using a format specifier ("X", "X16", "D", "D20", "G"). */
         static std::string ToString(SharpRuntime::ulongcs value, const std::string& format) {

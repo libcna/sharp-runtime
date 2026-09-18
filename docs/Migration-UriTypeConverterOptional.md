@@ -1,10 +1,16 @@
 <!-- SPDX-License-Identifier: MIT -->
 <!-- Copyright (c) Robert Vokac and contributors -->
 
-# Migration — `UriTypeConverter::ConvertFrom` returns `std::optional<Uri>` (ticket #1999)
+# Historical migration — optional-returning `UriTypeConverter` (ticket #1999)
 
-*2026-08-19.* `System::UriTypeConverter::ConvertFrom` returns `std::optional<Uri>` instead of
-`Uri`, so an **empty** input returns the empty state rather than throwing.
+> Superseded: `UriTypeConverter` now derives from `TypeConverter` and uses the
+> common `std::any` conversion API. See
+> [UriTypeConverter is a TypeConverter](Migration-UriTypeConverterIsATypeConverter.md).
+
+*2026-08-19.* This document recorded the intermediate change where
+`System::UriTypeConverter::ConvertFrom` returned `std::optional<Uri>` instead of
+`Uri`. That signature no longer exists. The same observable null behavior is now
+represented by an empty `std::any`, as it is throughout the TypeConverter API.
 
 **This is a public virtual signature change**, landed under **SA-10** with SA-2's five conditions
 discharged.
@@ -54,15 +60,24 @@ Two things have changed since:
 
 What a *future* override would lose is pinned as site 3 of the negative fixture.
 
-## 4. To migrate
+## 4. Historical migration
 
 ```cpp
-Uri uri = converter.ConvertFrom(text);              // was
-auto uri = converter.ConvertFrom(text);             // now
+Uri uri = converter.ConvertFrom(text);              // original
+auto uri = converter.ConvertFrom(text);             // intermediate API
 if (uri) { /* … uri->getHostProperty() … */ }
 ```
 
-An empty `text` no longer throws — it yields an empty optional.
+For the current API, pass a boxed string and cast a successful result:
+
+```cpp
+std::any converted = converter.ConvertFrom(std::any(text));
+if (converted.has_value()) {
+    const auto& uri = std::any_cast<const System::Uri&>(converted);
+}
+```
+
+An empty `text` yields an empty `std::any`.
 
 ## 5. One detail made explicit rather than changed
 
@@ -93,9 +108,9 @@ also shows the relative URI round-trips, which is why `ConvertTo` uses `Original
 M2 was invalid as first written — it left `text` unused and `-Werror=unused-parameter` rejected it
 — and was reformulated rather than counted.
 
-Negative consumer fixture: `test/consumer/uri_typeconverter_optional_negative.cpp`, three sites,
-all rejected. Fixture set grows to **44 fixtures / 226 sites**. Site 2 is the spelling most likely
-to survive a careless migration — calling straight through the result, which used to be a `Uri`.
+The consumer fixture at `test/consumer/uri_typeconverter_optional_negative.cpp`
+now verifies migration from this intermediate API to the common TypeConverter
+surface. Its filename is retained so external fixture inventories do not break.
 
 Site 3's diagnostic is **"invalid covariant return type"** rather than the "does not override" I
 predicted, and it is the more precise of the two: gcc reads the old signature as an *attempted

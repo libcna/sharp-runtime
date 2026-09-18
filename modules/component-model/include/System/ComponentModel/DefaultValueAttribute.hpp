@@ -8,7 +8,6 @@
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Attribute.hpp"
-#include "System/PlatformNotSupportedException.hpp"
 #include "System/Type.hpp"
 
 namespace System::ComponentModel {
@@ -94,16 +93,18 @@ namespace System::ComponentModel {
         explicit DefaultValueAttribute(std::any v) : value_(std::move(v)) {}
 
         /**
-         * Initializes an attribute from a type and invariant string.
+         * @brief Initializes a new instance, converting the specified value to the specified
+         *        type, and using an invariant culture as the translation context.
          *
-         * .NET delegates this conversion to TypeConverter. It is intentionally unavailable until
-         * the TypeConverter system is ported, so this overload throws rather than silently storing
-         * an incorrectly converted value.
+         * C++ counterpart of .NET DefaultValueAttribute(Type, string): the value is
+         * `TypeDescriptor::GetConverter(type)->ConvertFromInvariantString(value)`. As in .NET, a
+         * conversion that fails leaves the attribute holding an empty value rather than
+         * throwing (`DefaultValueAttribute.cs` swallows the exception), and a null string (an
+         * empty optional) stores an empty value without consulting the converter.
+         * @param type The type the value is converted to.
+         * @param value The invariant text of the value, or `std::nullopt` for .NET's `null`.
          */
-        [[noreturn]] DefaultValueAttribute(const System::Type&, std::optional<std::string>) {
-            throw System::PlatformNotSupportedException(
-                "DefaultValueAttribute type conversion requires System.ComponentModel.TypeConverter.");
-        }
+        DefaultValueAttribute(const System::Type& type, std::optional<std::string> value);
 
         /** @return The default value as a type-erased std::any. */
         [[nodiscard]] virtual const std::any& getValueProperty() const noexcept { return value_; }

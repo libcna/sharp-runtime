@@ -8,7 +8,7 @@ This file is generated from the CMake component registrations. Run
 `python3 scripts/generate_component_catalog.py` after changing module
 metadata, or use `--check` to verify that the committed catalogue is current.
 
-The graph contains **44 physical modules** and **105 direct production dependency edges**.
+The graph contains **44 physical modules** and **108 direct production dependency edges**.
 
 For each row, the component name and representative public header form a
 minimal consumer example using the template below:
@@ -37,7 +37,7 @@ for maintainers and are not part of the consumer include surface.
 | `Collections.Blocking` | `modules/collections-blocking` | interface | `Collections.Core`, `Core.Base`, `Threading` | — | — | — | `System/Collections/Concurrent/BlockingCollection.hpp` |
 | `Collections.Async` | `modules/collections-async` | interface | `Threading` | — | — | — | `System/Collections/Generic/IAsyncEnumerable.hpp` |
 | `Collections.ObjectModel` | `modules/collections-object-model` | interface | `Collections.Core`, `ComponentModel`, `Core.Base` | — | — | — | `System/Collections/ObjectModel/ObservableCollection.hpp` |
-| `ComponentModel` | `modules/component-model` | interface | `Core.Base` | — | — | — | `System/ComponentModel/AsyncCompletedEventArgs.hpp` |
+| `ComponentModel` | `modules/component-model` | static | `Collections.Core`, `Core.Base`, `Globalization`, `Uri` | — | — | — | `System/ComponentModel/AsyncCompletedEventArgs.hpp` |
 | `Diagnostics` | `modules/diagnostics` | static | `Core.Base` | — | — | — | `System/Diagnostics/CodeAnalysis/CodeAnalysisAttributes.hpp` |
 | `Globalization` | `modules/globalization` | static | `Core.Base` | — | — | — | `System/Globalization/Calendar.hpp` |
 | `Resources` | `modules/resources` | static | `Globalization` | `Core.Base` | — | — | `System/Resources/ResourceManager.hpp` |
