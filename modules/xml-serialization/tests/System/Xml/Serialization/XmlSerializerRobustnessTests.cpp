@@ -95,20 +95,18 @@ TEST(XmlSerializerRobustnessTests, BareAmpersandIsAcceptedAsLiteralText_KnownLen
 }
 
 /**
- * A well-formed document whose root is some *other* type loads as a default-valued instance
- * rather than throwing.
- *
- * That is .NET's behaviour for a member-name mismatch and it is the right one here: the
- * alternative is refusing a save whose format merely grew a field. It is asserted explicitly
- * because it is a decision, not an accident -- a caller that needs to reject a foreign document
- * checks the root name first, which is what `RootElementName()` is for.
+ * A foreign document root is not a missing member. .NET XmlSerializer rejects it with
+ * InvalidOperationException; silently returning a default Settings object would conceal a
+ * wrong or corrupt file while making the game look as if it loaded successfully.
  */
-TEST(XmlSerializerRobustnessTests, WrongRootElement_YieldsDefaultsNotAnException) {
+TEST(XmlSerializerRobustnessTests, WrongRootElement_ThrowsInvalidOperationException) {
     XmlSerializer<Container> serializer;
-    const Container value = serializer.Deserialize("<SomethingElse><Other>1</Other></SomethingElse>");
-
-    EXPECT_EQ(value.Title, "");
-    EXPECT_TRUE(value.Items.empty());
+    EXPECT_THROW((void)serializer.Deserialize("<SomethingElse><Other>1</Other></SomethingElse>"),
+                 System::InvalidOperationException);
+    System::Xml::XmlDocument document;
+    document.LoadXml("<SomethingElse><Other>1</Other></SomethingElse>");
+    EXPECT_THROW((void)serializer.DeserializeFrom(document.getDocumentElementProperty()),
+                 System::InvalidOperationException);
 }
 
 TEST(XmlSerializerRobustnessTests, WrongTypeInNumericField_Throws) {

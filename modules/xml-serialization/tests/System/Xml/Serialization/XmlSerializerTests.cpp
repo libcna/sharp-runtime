@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include "System/Xml/Serialization/XmlSerializer.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/IO/MemoryStream.hpp"
 
 using System::Xml::Serialization::XmlSerializationOptions;
@@ -51,6 +52,32 @@ TEST(XmlSerializerStreamTests, DeserializeReadsFromCurrentStreamPositionAndLeave
     EXPECT_EQ(value.ChapterName, "One");
     EXPECT_EQ(value.Description, "Ready");
     EXPECT_TRUE(stream.getCanReadProperty());
+}
+
+TEST(XmlSerializerStreamTests, SerializeWritesUtf8AtCurrentPositionAndLeavesStreamOpen) {
+    System::IO::MemoryStream stream;
+    const SharpRuntime::bytecs prefix[] = {'x', 'y'};
+    stream.Write(prefix, 0, 2);
+
+    XmlSerializer<SaveGameDescriptionData>{}.Serialize(
+        stream, SaveGameDescriptionData{"slot1", "One", "Ready"});
+
+    EXPECT_TRUE(stream.getCanReadProperty());
+    EXPECT_EQ(stream.getPositionProperty(), stream.getLengthProperty());
+    const auto bytes = stream.ToArray();
+    const std::string wire(bytes.begin(), bytes.end());
+    EXPECT_EQ(wire.substr(0, 2), "xy");
+    EXPECT_NE(wire.find("<?xml version=\"1.0\" encoding=\"utf-8\"?>", 2),
+              std::string::npos);
+    EXPECT_EQ(XmlSerializer<SaveGameDescriptionData>{}.Deserialize(wire.substr(2)).FileName,
+              "slot1");
+}
+
+TEST(XmlSerializerStreamTests, SerializeRejectsReadOnlyStream) {
+    const SharpRuntime::bytecs data[] = {'x'};
+    System::IO::MemoryStream stream(data, 1, false);
+    EXPECT_THROW(XmlSerializer<SaveGameDescriptionData>{}.Serialize(
+                     stream, SaveGameDescriptionData{}), System::ArgumentException);
 }
 
 // --- ShipGame's Entity/EntityList: ShipGame/ShipGame/EntityList.cs ----------------------------
@@ -94,6 +121,25 @@ struct EntityListData {
 
     SHARP_XML_SERIALIZABLE(EntityListData, "EntityList", SHARP_XML_M(EntityListData, entities))
 };
+
+struct DefaultArrayData {
+    std::vector<std::int32_t> Values{10, 20};
+    SHARP_XML_SERIALIZABLE(DefaultArrayData, "DefaultArray",
+                            SHARP_XML_M(DefaultArrayData, Values))
+};
+
+TEST(XmlSerializerTests, PresentArrayReplacesConstructorDefaultsAndMissingArrayRetainsThem) {
+    XmlSerializer<DefaultArrayData> serializer;
+    const auto present = serializer.Deserialize(
+        "<DefaultArray><Values><int>7</int></Values></DefaultArray>");
+    EXPECT_EQ(present.Values, (std::vector<std::int32_t>{7}));
+
+    const auto empty = serializer.Deserialize("<DefaultArray><Values/></DefaultArray>");
+    EXPECT_TRUE(empty.Values.empty());
+
+    const auto missing = serializer.Deserialize("<DefaultArray/>");
+    EXPECT_EQ(missing.Values, (std::vector<std::int32_t>{10, 20}));
+}
 
 // --- A minimal item type for the root-level List<T> call sites --------------------------------
 

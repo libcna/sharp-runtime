@@ -3,6 +3,18 @@
 
 # NEXT.md
 
+> **2026-09-19 — SAMPLE-014 consumer repair on `next`.** Spacewar now uses the shared
+> `XmlSerializer<Settings>` directly for its original `File.Create`/`File.OpenRead` stream
+> routes. The serializer's stream write overload keeps the caller's stream open, a present
+> collection replaces initialized defaults, and a foreign document root raises
+> `InvalidOperationException`. The exact original `settings.xml` load/save/reload gate passes;
+> `SharpRuntimeTests_Xml_Serialization` passes **58/58** and the full repository build passes
+> at `--parallel 2`. The full component gate was also attempted with the live SOAP endpoint:
+> five unrelated existing `SharpRuntimeTests_Xml_Linq` namespace tests fail only on the
+> self-closing-element whitespace expectation (`<e/>` versus `<e />`); no XML LINQ source was
+> changed in this task. The older `xml`-branch handoff below is historical, not the current
+> next action for SAMPLE-014.
+
 > **BRANCH `xml` — `SAMPLES-DEC-008` ENGINE COMPLETE, 2026-08-31.** `modules/xml-serialization`
 > implements `System.Xml.Serialization` for the closed set of types the three blocked
 > `cna-samples` ports reach. Suite **17,934 / 39 executables, 0 failed** after merging `next` at `1f5bbbc2` (+46 from this
@@ -14,9 +26,9 @@
 > planted and removed; one of them exposed a fixture test that could not fail (it parsed zero
 > entities, wrote zero, read zero, and compared equal), now fixed with exact per-file counts.
 >
-> **Next step is in `cna-samples`, not here:** register each game's types against the engine,
-> remove the hand-written XML workarounds, and re-qualify `SAMPLE-014`, `SAMPLE-066` and
-> `SAMPLE-070`. Scope, evidence and the three recorded deviations:
+> **Historical next step (SAMPLE-014 completed 2026-09-19):** register each game's types against
+> the engine, remove handwritten XML workarounds, and re-qualify the remaining consumers.
+> Scope, evidence and the recorded deviations:
 > `docs/XmlSerializationScope.md`.
 
 > **#2419 CLOSED — CLANG GATE GREEN, 2026-08-22.** An independent Clang 17 build found four

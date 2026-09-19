@@ -10,6 +10,8 @@
 
 #include "System/Collections/Generic/List.hpp"
 #include "System/IO/StreamReader.hpp"
+#include "System/IO/StreamWriter.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Xml/Serialization/detail/XmlLeafConvert.hpp"
 #include "System/Xml/Serialization/detail/XmlMember.hpp"
 #include "System/Xml/XmlDocument.hpp"
@@ -80,8 +82,27 @@ namespace System::Xml::Serialization {
             return Render(doc, options);
         }
 
+        /**
+         * @brief Serializes a value at the current position of a writable stream.
+         *
+         * The stream stays open and the XML declaration names UTF-8, as with the .NET
+         * Stream overload. The caller owns the stream and its final close.
+         *
+         * @param stream Destination stream.
+         * @param value Value to serialize.
+         * @throws System::ArgumentException if the stream is not writable.
+         */
+        void Serialize(System::IO::Stream& stream, const T& value) const {
+            XmlSerializationOptions options;
+            options.WriteEncodingAttribute = true;
+            System::IO::StreamWriter writer(&stream, true);
+            writer.Write(Serialize(value, options));
+            writer.Flush();
+        }
+
         /** @brief Parses @p xml produced by (or wire-compatible with) `Serialize`, back into a
-         * @p T. @throws System::Xml::XmlException on malformed XML. */
+         * @p T. @throws System::Xml::XmlException on malformed XML.
+         * @throws System::InvalidOperationException when the document root names another type. */
         [[nodiscard]] T Deserialize(const std::string& xml) const {
             System::Xml::XmlDocument doc;
             doc.LoadXml(xml);
@@ -89,6 +110,7 @@ namespace System::Xml::Serialization {
             if (root == nullptr) {
                 throw System::Xml::XmlException("XmlSerializer::Deserialize: no root element.");
             }
+            ValidateRoot(root);
 
             T result{};
             if constexpr (detail::IsXmlListV<T>) {
@@ -109,6 +131,7 @@ namespace System::Xml::Serialization {
          * @return Deserialized value.
          * @throws System::ArgumentException if the stream is not readable.
          * @throws System::Xml::XmlException if the XML is malformed.
+         * @throws System::InvalidOperationException if the document root names another type.
          */
         [[nodiscard]] T Deserialize(System::IO::Stream& stream) const {
             System::IO::StreamReader reader(&stream, true);
@@ -155,11 +178,13 @@ namespace System::Xml::Serialization {
          * @brief Reads @p value out of an element the caller located in its own document -- the
          * read counterpart of `SerializeInto`, and what `Deserialize(xmlReader)` amounts to once
          * the enclosing document has been parsed.
+         * @throws System::InvalidOperationException if the element names another root type.
          */
         [[nodiscard]] T DeserializeFrom(System::Xml::XmlElement* element) const {
             if (element == nullptr) {
                 throw System::Xml::XmlException("XmlSerializer::DeserializeFrom: null element.");
             }
+            ValidateRoot(element);
             T result{};
             if constexpr (detail::IsXmlListV<T>) {
                 ReadList(element, result);
@@ -185,6 +210,14 @@ namespace System::Xml::Serialization {
         }
 
     private:
+        static void ValidateRoot(const System::Xml::XmlElement* root) {
+            if (root->getNameProperty() != RootElementName()) {
+                throw System::InvalidOperationException(
+                    "XmlSerializer: <" + root->getNameProperty() + "> was not expected; "
+                    "expected <" + RootElementName() + ">.");
+            }
+        }
+
         // --- document assembly ---------------------------------------------------------------
 
         static void BuildDocument(System::Xml::XmlDocument& doc, const T& value) {
@@ -371,6 +404,7 @@ namespace System::Xml::Serialization {
                 out = std::make_shared<Pointee>();
                 ReadInto(element, *out);
             } else if constexpr (detail::IsXmlListV<Value>) {
+                out = Value{};
                 ReadList(element, out);
             } else if constexpr (detail::XmlComposite<Value>) {
                 ReadMembers(element, out);

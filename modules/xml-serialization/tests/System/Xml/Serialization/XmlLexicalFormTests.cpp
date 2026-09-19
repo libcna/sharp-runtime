@@ -42,11 +42,11 @@ struct NumberHolder {
 
 }  // namespace
 
-// The exact ShipLights ambient block from Spacewar's settings.xml, leading dots and all.
+// The numeric text from Spacewar's ShipLights ambient block, under this test type's root.
 TEST(XmlLexicalFormTests, FloatWithoutLeadingZero_ParsesAsSpacewarsSettingsWritesIt) {
     XmlSerializer<Vector4Like> serializer;
     const Vector4Like ambient = serializer.Deserialize(
-        "<Ambient><X>.4</X><Y>.4</Y><Z>.4</Z><W>1</W></Ambient>");
+        "<Vector4><X>.4</X><Y>.4</Y><Z>.4</Z><W>1</W></Vector4>");
 
     EXPECT_FLOAT_EQ(ambient.X, 0.4f);
     EXPECT_FLOAT_EQ(ambient.Y, 0.4f);
@@ -55,7 +55,7 @@ TEST(XmlLexicalFormTests, FloatWithoutLeadingZero_ParsesAsSpacewarsSettingsWrite
 
     // And the values from the second ShipLighting entry, which mixes forms.
     const Vector4Like colour = serializer.Deserialize(
-        "<Ambient><X>.639</X><Y>.808</Y><Z>.937</Z><W>1</W></Ambient>");
+        "<Vector4><X>.639</X><Y>.808</Y><Z>.937</Z><W>1</W></Vector4>");
     EXPECT_FLOAT_EQ(colour.X, 0.639f);
     EXPECT_FLOAT_EQ(colour.Z, 0.937f);
 }

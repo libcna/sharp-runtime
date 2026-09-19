@@ -54,6 +54,9 @@ inside a local class, so a type declared inside a function body will not compile
 | Markup escaping (`&`, `<`, `>`, quotes) and non-ASCII text | a quest named `Smith & Son` must not corrupt a save |
 | **Nested serialization into a caller's document** (`SerializeInto`/`DeserializeFrom`/`RootElementName`) | **16 of the 20** `Session.cs` call sites serialize into an already-open `XmlWriter` |
 | Deserialization from a readable `Stream` at its current position without taking ownership | NetRumble's `ParticleEffect.Load(ContentManager, String)` opens each particle XML with `File.OpenRead` and passes the stream to `XmlSerializer.Deserialize` |
+| Serialization into a writable `Stream` at its current position without taking ownership | Spacewar's `Settings.Save` calls `XmlSerializer.Serialize(stream, this)`; the stream overload writes a UTF-8 declaration and leaves closing to the caller |
+| Present array replaces constructor defaults; absent array retains them | Spacewar initializes `Ships`, `Weapons` and `ShipLights` before loading XML; .NET replaces a present array rather than appending to its old contents |
+| Foreign document root is rejected | Spacewar's settings loader must not silently accept another document as default settings; .NET raises `InvalidOperationException` for an unexpected root |
 
 ## The dominant call-site shape: nesting, not standalone documents
 
@@ -177,8 +180,8 @@ capability already existed, tested and audited, in `modules/xml`.
 A save file is read back after an arbitrary interval, possibly truncated by a crash mid-write,
 possibly hand-edited, possibly from a different build of the game.
 `XmlSerializerRobustnessTests.cpp` covers that: malformed and truncated documents throw
-`XmlException`; a foreign root element yields defaults rather than an error (a caller that must
-reject one checks `RootElementName()` first); non-numeric text in a numeric field throws rather
+`XmlException`; a foreign root element raises `InvalidOperationException`, as verified against
+the real .NET serializer; non-numeric text in a numeric field throws rather
 than reading as zero, because zero is a legitimate value and guessing would hide corruption; an
 unrecognised sibling inside a collection is skipped, so a version that added an element does not
 make the list unreadable; 5,000-element collections and one-megabyte strings round-trip.
