@@ -318,7 +318,22 @@ Known permanent deviations (not bugs, not TODO):
   and reentrancy-safe snapshot invocation — both genuinely support multicast where a ported type
   needs it. `Delegate::DynamicInvoke` always throws `NotImplementedException` (no late-bound
   `object[]` invocation equivalent in C++) in all three tiers.
-- **Serialization** (`[Serializable]`, `SerializationInfo`) — ignored; not needed for game code.
+- **Serialization** — no serializer. There is no `BinaryFormatter`, no surrogate selector, no
+  type resolution by name, no stream format and no object-graph walk; `[Serializable]` is
+  ignored, and nothing in this runtime writes a serialized stream anywhere. What *does* exist,
+  since 2026-09-20, is the value store the obsolete-but-documented
+  `(SerializationInfo, StreamingContext)` constructor / `GetObjectData` pair needs:
+  `System::Runtime::Serialization::SerializationInfo` is a real name-to-value bag with .NET's
+  own rules (add a name once, read it as the type it was stored as, `SerializationException`
+  otherwise), `StreamingContext` carries `StreamingContextStates` and a context object, and
+  `SerializationException` exists. That lets a ported type write its own fields out by name
+  and reconstruct itself from them, in process -- which is what CNA's
+  `ContentLoadException`, `NetworkSessionJoinException` and
+  `StorageDeviceNotConnectedException` need for their documented XNA 4.0 signatures. It is not
+  a step towards a serializer, and `System::Exception` deliberately still has no
+  serialization constructor or virtual `GetObjectData`: those live in CoreLib alongside
+  `SerializationInfo` in .NET, and here they are in different modules, so a deriving type
+  writes and restores its own base state instead.
 - **P/Invoke / interop** — out of scope.
 - **The unit of every public index, length and count is a UTF-8 storage byte**, where .NET's is a
   UTF-16 code unit — decided by ticket **#2015** (SR-AUD-290, SR-AUD-296) on 2026-08-17 and
