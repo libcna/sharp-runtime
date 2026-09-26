@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <algorithm>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -25,8 +26,57 @@ namespace System::IO {
      * GetFileSystemInfos, the Root property, and searchPattern/SearchOption-based overloads of
      * GetFiles/GetDirectories. GetFileNames() is a port-added convenience method with no real
      * .NET equivalent (real .NET's GetFiles() already returns FileInfo[], not paths).
+     * Existing directories named with different ASCII casing are resolved only after an exact
+     * lookup fails. This preserves Windows XNA source paths on case-sensitive hosts; ambiguous
+     * folded names retain the ordinary not-found behavior. Directory's static APIs remain
+     * host-filesystem-sensitive.
      */
     class DirectoryInfo : public FileSystemInfo {
+        [[nodiscard]] static std::u8string foldAsciiCase(const std::filesystem::path& path) {
+            std::u8string value = path.u8string();
+            std::transform(value.begin(), value.end(), value.begin(), [](char8_t ch) {
+                return ch >= u8'A' && ch <= u8'Z' ? static_cast<char8_t>(ch - u8'A' + u8'a') : ch;
+            });
+            return value;
+        }
+
+        // Windows XNA sources can name a directory with different ASCII casing from its
+        // on-disk spelling. Try the exact path first; only a failed lookup walks parents.
+        // Multiple case-folded matches are ambiguous and retain the ordinary not-found result.
+        [[nodiscard]] static std::filesystem::path resolveExistingPath(
+            const std::filesystem::path& requested) {
+            namespace fs = std::filesystem;
+            std::error_code error;
+            if (fs::exists(requested, error) && !error) return requested;
+
+            fs::path resolved = requested.root_path();
+            for (const fs::path& component : requested.relative_path()) {
+                const fs::path exact = resolved / component;
+                error.clear();
+                if (fs::exists(exact, error) && !error) {
+                    resolved = exact;
+                    continue;
+                }
+
+                error.clear();
+                fs::directory_iterator entry(resolved, error);
+                if (error) return requested;
+                fs::path match;
+                const std::u8string wanted = foldAsciiCase(component);
+                for (; entry != fs::directory_iterator{}; entry.increment(error)) {
+                    if (error) return requested;
+                    if (foldAsciiCase(entry->path().filename()) == wanted) {
+                        if (!match.empty()) return requested;
+                        match = entry->path().filename();
+                    }
+                }
+                if (error) return requested;
+                if (match.empty()) return requested;
+                resolved /= match;
+            }
+            return resolved;
+        }
+
         [[noreturn]] static void throwEnumerationError(const std::filesystem::path& path,
                                                        const std::error_code& error) {
             if (error == std::errc::permission_denied) {
@@ -46,6 +96,14 @@ namespace System::IO {
         void forEachEntry(Visitor&& visitor) const {
             std::error_code error;
             std::filesystem::directory_iterator iterator(fullPath_, error);
+            if (error == std::errc::no_such_file_or_directory ||
+                error == std::errc::not_a_directory) {
+                const auto resolved = resolveExistingPath(fullPath_);
+                if (resolved != fullPath_) {
+                    error.clear();
+                    iterator = std::filesystem::directory_iterator(resolved, error);
+                }
+            }
             if (error) throwEnumerationError(fullPath_, error);
 
             const std::filesystem::directory_iterator end;
@@ -81,7 +139,11 @@ namespace System::IO {
         [[nodiscard]] bool getExistsProperty() const override {
             std::error_code ec;
             bool isDir = std::filesystem::is_directory(fullPath_, ec);
-            return !ec && isDir;
+            if (!ec && isDir) return true;
+            const auto resolved = resolveExistingPath(fullPath_);
+            if (resolved == fullPath_) return false;
+            ec.clear();
+            return std::filesystem::is_directory(resolved, ec) && !ec;
         }
 
         /** Returns the parent directory. */
@@ -91,6 +153,9 @@ namespace System::IO {
 
         /** Creates the directory and all intermediate directories. */
         void Create() {
+            std::error_code existsError;
+            if (std::filesystem::is_directory(resolveExistingPath(fullPath_), existsError) &&
+                !existsError) return;
             std::error_code ec;
             std::filesystem::create_directories(fullPath_, ec);
             if (ec) throw IOException("Failed to create directory: " + ec.message());
@@ -104,8 +169,9 @@ namespace System::IO {
             if (!getExistsProperty())
                 throw DirectoryNotFoundException("Could not find a part of the path '" + fullPath_.string() + "'.");
             std::error_code ec;
-            if (recursive) std::filesystem::remove_all(fullPath_, ec);
-            else           std::filesystem::remove(fullPath_, ec);
+            const auto resolved = resolveExistingPath(fullPath_);
+            if (recursive) std::filesystem::remove_all(resolved, ec);
+            else           std::filesystem::remove(resolved, ec);
             if (ec) throw IOException("Failed to delete directory: " + ec.message());
         }
 
@@ -123,6 +189,7 @@ namespace System::IO {
             if (!getExistsProperty())
                 throw DirectoryNotFoundException("Could not find a part of the path '" + fullPath_.string() + "'.");
             std::error_code ec;
+            const auto resolved = resolveExistingPath(fullPath_);
             const auto destinationPath = std::filesystem::absolute(destDirName, ec);
             if (ec)
                 throw IOException("Failed to resolve destination directory '" + destDirName +
@@ -138,7 +205,7 @@ namespace System::IO {
             }
             if (destinationExists)
                 throw IOException("Cannot create '" + destDirName + "' because a file or directory with the same name already exists.");
-            std::filesystem::rename(fullPath_, destinationPath, ec);
+            std::filesystem::rename(resolved, destinationPath, ec);
             if (ec) throw IOException("Failed to move directory: " + ec.message());
             fullPath_ = destinationPath;
             originalPath_ = destDirName;
@@ -170,7 +237,17 @@ namespace System::IO {
          */
         [[nodiscard]] std::vector<FileInfo> GetFiles(const std::string& searchPattern) const {
             std::vector<FileInfo> result;
-            for (const std::string& path : Directory::GetFiles(fullPath_.string(), searchPattern)) {
+            // The exact-path fast path lives in Directory::GetFiles. Resolve casing only after
+            // that lookup reports a missing directory.
+            std::vector<std::string> paths;
+            try {
+                paths = Directory::GetFiles(fullPath_.string(), searchPattern);
+            } catch (const DirectoryNotFoundException&) {
+                const auto resolved = resolveExistingPath(fullPath_);
+                if (resolved == fullPath_) throw;
+                paths = Directory::GetFiles(resolved.string(), searchPattern);
+            }
+            for (const std::string& path : paths) {
                 result.emplace_back(path);
             }
             return result;

@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <ctime>
+#include <iterator>
 #include <limits>
 #include <mutex>
 #include <string>
@@ -774,6 +775,51 @@ TEST(DirectoryInfoTests, GetFiles_SearchPattern_ReturnsMatchingFileInfoObjects) 
     EXPECT_TRUE(files[0].getNameProperty() == "SECOND.XNB" ||
                 files[1].getNameProperty() == "SECOND.XNB");
     Directory::Delete(dir, true);
+}
+
+TEST(DirectoryInfoTests, ExistingDirectoryResolvesAsciiCaseOnlyWhenNeeded) {
+    const std::string root = tf("di_case_lookup");
+    const std::string actual = root + "/Content/Audio/wav";
+    const std::string requested = root + "/content/audio/WAV";
+    Directory::CreateDirectory(actual);
+    File::WriteAllText(actual + "/laser.xnb", "sound");
+
+    DirectoryInfo info(requested);
+    EXPECT_TRUE(info.getExistsProperty());
+    EXPECT_EQ(info.ToString(), requested);
+    ASSERT_EQ(info.GetFiles().size(), 1u);
+    const auto files = info.GetFiles("*.XNB");
+    ASSERT_EQ(files.size(), 1u);
+    EXPECT_EQ(files[0].getNameProperty(), "laser.xnb");
+
+    info.Create();
+    EXPECT_EQ(std::distance(std::filesystem::directory_iterator(root + "/Content"),
+                            std::filesystem::directory_iterator{}), 1);
+    info.MoveTo(root + "/moved");
+    EXPECT_TRUE(info.getExistsProperty());
+    EXPECT_FALSE(Directory::Exists(actual));
+    info.Delete(true);
+    EXPECT_FALSE(info.getExistsProperty());
+
+    Directory::Delete(root, true);
+}
+
+TEST(DirectoryInfoTests, AmbiguousCaseFoldDoesNotChooseArbitraryDirectory) {
+    const std::string root = tf("di_ambiguous_case");
+    Directory::CreateDirectory(root + "/Audio");
+    Directory::CreateDirectory(root + "/audio");
+    if (std::filesystem::equivalent(root + "/Audio", root + "/audio")) {
+        Directory::Delete(root, true);
+        return;
+    }
+
+    const DirectoryInfo exact(root + "/Audio");
+    EXPECT_TRUE(exact.getExistsProperty());
+    const DirectoryInfo ambiguous(root + "/aUdIo");
+    EXPECT_FALSE(ambiguous.getExistsProperty());
+    EXPECT_THROW((void)ambiguous.GetFiles(), System::IO::DirectoryNotFoundException);
+    EXPECT_THROW((void)ambiguous.GetFiles("*.xnb"), System::IO::DirectoryNotFoundException);
+    Directory::Delete(root, true);
 }
 
 // ===========================================================================
