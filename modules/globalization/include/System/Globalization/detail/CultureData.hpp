@@ -46,10 +46,11 @@ inline constexpr CultureDataRecord kInvariantCultureData{
     "", "Invariant Language (Invariant Country)", ",", ".", ","};
 
 /** @brief The cultures this runtime carries data for. Keep sorted by name. */
-inline constexpr std::array<CultureDataRecord, 22> kCultureData{{
+inline constexpr std::array<CultureDataRecord, 23> kCultureData{{
     {"cs-CZ", "Czech (Czechia)",                  ";", ",", "\xc2\xa0"},     // U+00A0
     {"da-DK", "Danish (Denmark)",                 ";", ",", "."},
     {"de-DE", "German (Germany)",                 ";", ",", "."},
+    {"en-AU", "English (Australia)",               ",", ".", ","},
     {"en-GB", "English (United Kingdom)",         ",", ".", ","},
     {"en-US", "English (United States)",          ",", ".", ","},
     {"es-ES", "Spanish (Spain)",                  ";", ",", "."},

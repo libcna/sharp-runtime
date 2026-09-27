@@ -168,6 +168,12 @@ TEST(CultureDataTest, GetFormatStillAnswersWithTheCultureOwnNumberFormat) {
     EXPECT_EQ(&NumberFormatInfo::GetInstance(nullptr), &NumberFormatInfo::getInvariantInfoProperty());
 }
 
+TEST(CultureDataTest, EnAuEnglishNameMatchesTheXnaReference) {
+    const CultureInfo australian("en-AU");
+    EXPECT_EQ(australian.getEnglishNameProperty(), "English (Australia)");
+    EXPECT_EQ(australian.getTwoLetterISOLanguageNameProperty(), "en");
+}
+
 TEST(CultureDataTest, EnglishNamesForTheNewRows) {
     EXPECT_EQ(CultureInfo("cs-CZ").getEnglishNameProperty(), "Czech (Czechia)");
     EXPECT_EQ(CultureInfo("de-DE").getEnglishNameProperty(), "German (Germany)");
