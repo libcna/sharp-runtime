@@ -308,9 +308,9 @@ TEST(ListIndexerVersionDivergence, TheIndexerNoLongerHandsOutAPlainMutableRefere
     static_assert(std::is_same_v<decltype(std::declval<const List<int>&>()[0]), const int&>,
                   "ticket #1791: the const indexer is unchanged");
 
-    // The proxy is two pointers and never outlives its full-expression.
-    static_assert(sizeof(System::Collections::detail::ElementReference<int>) == 2 * sizeof(void*),
-                  "ticket #1791: the proxy is a slot pointer plus a counter pointer");
+    // The optional pre-write guard adds one pointer; the proxy still owns nothing.
+    static_assert(sizeof(System::Collections::detail::ElementReference<int>) == 3 * sizeof(void*),
+                  "GS-007b: slot, counter and optional pre-write guard pointers");
 
     // A retained plain T& into the storage is no longer obtainable here -- that
     // is what removes the four reproduced use-after-free shapes of #1790 §5.3

@@ -527,10 +527,10 @@ TEST(ListIndexerVersioning, WritingToACopyLeavesTheOriginalEnumerable) {
 // The proxy's own C++ behaviour.
 // ===========================================================================
 
-TEST(ListIndexerProxyLanguage, TheProxyIsTwoPointersAndOwnsNothing) {
-    static_assert(sizeof(ElementReference<int>) == 2 * sizeof(void*));
+TEST(ListIndexerProxyLanguage, TheProxyIsThreePointersAndOwnsNothing) {
+    static_assert(sizeof(ElementReference<int>) == 3 * sizeof(void*));
     static_assert(alignof(ElementReference<int>) == alignof(void*));
-    static_assert(sizeof(ElementReference<std::string>) == 2 * sizeof(void*));
+    static_assert(sizeof(ElementReference<std::string>) == 3 * sizeof(void*));
     static_assert(std::is_nothrow_copy_constructible_v<ElementReference<int>>);
     static_assert(std::is_trivially_destructible_v<ElementReference<int>>);
     SUCCEED();
