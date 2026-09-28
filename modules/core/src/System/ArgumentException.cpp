@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/ArgumentException.hpp"
 #include "System/detail/Utf8Text.hpp"
+#include "System/detail/FrameworkCompatibility.hpp"
 #include <algorithm>
 #include <cctype>
 
@@ -10,6 +11,8 @@ namespace System {
 
     static std::string appendParamName(const std::string& msg, const std::string& paramName) {
         if (paramName.empty()) return msg;
+        if (System::detail::UseNetFrameworkArgumentExceptionMessages())
+            return msg + "\nParameter name: " + paramName;
         return msg + " (Parameter '" + paramName + "')";
     }
 

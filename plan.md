@@ -1,5 +1,28 @@
 # Sharp Runtime plan
 
+## SAMPLE-104 — entry enumeration and Framework diagnostics — 2026-09-28
+
+Bounded maintenance on the owner's **feature/gamer-services-collections** branch; preserve it.
+Dictionary now enumerates live .NET entry slots, reuses freed slots LIFO, preserves order across
+rehash and retains the public MapType/iterator constructor spellings and fail-fast policy.
+Normal updates remain average O(1); raw mutable ToMap interop reconciles unknown history in map
+order. SA-3 LP64 layout pin: Dictionary 64→176 bytes/align8, iterator 24→24/align8. All consumers
+must rebuild; see `docs/Migration-DictionaryEntryEnumeration.md`.
+
+Substring validation/parameter/overflow diagnostics are corrected. The off-by-default AppContext
+switch `SharpRuntime.UseNetFrameworkArgumentExceptionMessages` provides Framework 4 spelling;
+modern standalone defaults remain. CNA selects the profile at its general XNA host boundary.
+Eleven collection and five exception regressions are added. Standalone builds use existing build/
+and shared ccache, two jobs; the unchanged original YachtServer supplies the genuine live SOAP
+fixture, without disabled or skipped tests. Full component gate: **18,120 run/18,120 passed across 41 executables**, zero failed/skipped.
+The module-boundary validator has the same two inherited visibility findings on HEAD and working
+source, zero new ones; this separate check is not green. An overlapping relink returned ETXTBSY
+in test discovery; the final closure build is serialized. Detailed receipts are in SAMPLE-104.
+
+Sample browser/account/SystemLink transport remains owner-deferred, with remote preserved.
+Public signatures and MapType/iterator spellings remain; no sample-specific sorting/message
+rewrite, branch switch or push was requested.
+
 *Last verified cross-compiler gate: 2026-08-22 — branch **`next`**. GCC gate **17,840 across 38 executables: 17,840
 passed, 0 failed, 0 skipped — GREEN**, recounted from the per-executable logs with every executable
 run separately and continuing past failures, with zero build warnings at `--parallel 2`. The fresh

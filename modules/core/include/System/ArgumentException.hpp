@@ -11,6 +11,9 @@ namespace System {
      * @brief The exception that is thrown when one of the arguments provided to a method is not valid.
      *
      * C++ counterpart of .NET System.ArgumentException.
+     * The default diagnostic suffix is modern .NET. AppContext switch
+     * SharpRuntime.UseNetFrameworkArgumentExceptionMessages opts into .NET Framework's
+     * separate Parameter name line; validation, ParamName and HResult are unchanged.
      */
     class ArgumentException : public SystemException {
         std::string paramName_;

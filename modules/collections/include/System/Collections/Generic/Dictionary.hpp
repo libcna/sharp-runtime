@@ -3,6 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cmath>
+#include <optional>
+#include <iterator>
+#include <type_traits>
 #include <unordered_map>
 #include <stdexcept>
 #include <string>
@@ -24,7 +27,11 @@ using SharpRuntime::intcs;
  *
  * C++ counterpart of .NET System.Collections.Generic.Dictionary<TKey,TValue>.
  * Backed by std::unordered_map keyed under @c EqualityComparer<TKey>.Default; provides O(1)
- * average-case lookup, insertion, and removal.
+ * average-case lookup, insertion, and removal. Enumeration follows .NET's live entry slots:
+ * append new entries, reuse removed slots in LIFO order, and preserve slots across rehashing.
+ * This is an implementation behavior, not a promise of sorted or insertion-only ordering.
+ * Raw modifications through mutable ToMap() have no recoverable insertion history; unknown
+ * entries are reconciled in raw map order. Regular Dictionary APIs never require that scan.
  *
  * @par Default key equality and hashing (ticket #1919)
  * The backing map is parameterised on @ref MapType's hasher and key-equality predicate,
@@ -53,23 +60,12 @@ using SharpRuntime::intcs;
  *
  * @note begin()/end() return a version-checked iterator that throws
  * System::InvalidOperationException("Collection was modified; enumeration operation may not "
- * "execute.") if the dictionary is structurally modified while iteration is in progress,
- * matching .NET's Dictionary<TKey,TValue> enumerator fail-fast contract in spirit. The
- * version-bump rule matches real .NET's actual _version semantics (verified against
- * Dictionary.cs) for Add() and the indexer setter: both bump on inserting a NEW key, but
- * overwriting an EXISTING key's value does NOT (not a structural change). TWO deliberate
- * deviations from .NET's exact _version rules, both for C++ memory safety rather than pure
- * .NET parity: (1) Remove() DOES bump version_ here, unlike real .NET's Dictionary.Remove
- * (which doesn't, since its array-backed entries use a free-list so index-based enumeration is
- * unaffected by a removal) -- this port's iterator wraps a real std::unordered_map iterator,
- * and erasing the element the iterator currently points at invalidates that specific iterator
- * even though other iterators remain valid (confirmed via an ASan use-after-free repro before
- * this fix); not bumping would silently let an in-progress enumeration crash instead of
- * throwing cleanly. (2) Clear() also bumps version_ here, unlike real .NET's Dictionary.Clear()
- * (which also skips the bump), because std::unordered_map::clear() invalidates every iterator
- * into the map, unlike .NET's array-based entries which are simply zeroed in place. Both
- * deviations trade being slightly stricter than real .NET (an extra InvalidOperationException
- * real .NET wouldn't throw in these two specific scenarios) for guaranteed memory safety.
+ * "execute.") after structural mutation. Existing mutation-version behavior is retained:
+ * inserting a new key, successful removal, Clear, EnsureCapacity and TrimExcess invalidate
+ * enumeration; overwriting an existing value does not. In particular, Remove/Clear remain
+ * stricter than modern .NET's free-slot enumeration. Iterators now carry an entry index and
+ * retrieve a live map node only after checking the version, including operator->().
+ * This change restores entry ordering without changing the existing invalidation contract.
  *
  * @tparam TKey   The type of the keys.
  * @tparam TValue The type of the values.
@@ -94,37 +90,121 @@ public:
 
 private:
     MapType map_;
-    System::Collections::detail::MutationCounter version_;
+    mutable System::Collections::detail::MutationCounter version_;
+    // .NET enumerates its entry array, not hash buckets. Removed slots are reused LIFO.
+    mutable std::vector<std::optional<TKey>> entryKeys_;
+    mutable std::unordered_map<TKey, std::size_t,
+        System::detail::DefaultKeyHash<TKey>, System::detail::DefaultKeyEqual<TKey>> entryPositions_;
+    mutable std::vector<std::size_t> freeEntries_;
+    mutable bool externalMapExposed_ = false;
 
-    /**
-     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
-     * production) letting a regression position the mutation counter near a boundary.
-     */
     friend struct SharpRuntime::Testing::CollectionVersionAccess<Dictionary<TKey, TValue>>;
+
+    void TrackInsertion(const TKey& key) const {
+        const bool append = freeEntries_.empty();
+        const std::size_t index = append ? entryKeys_.size() : freeEntries_.back();
+        entryPositions_.emplace(key, index);
+        try {
+            if (append) entryKeys_.emplace_back(key);
+            else entryKeys_[index].emplace(key);
+        } catch (...) {
+            entryPositions_.erase(key);
+            throw;
+        }
+        if (!append) freeEntries_.pop_back();
+    }
+
+    void TrackRemoval(const TKey& key) const {
+        auto position = entryPositions_.find(key);
+        if (position == entryPositions_.end()) return;
+        const std::size_t index = position->second;
+        freeEntries_.push_back(index);
+        entryKeys_[index].reset();
+        entryPositions_.erase(position);
+    }
+
+    // Raw STL edits have no insertion history. Preserve known slots, remove erased keys,
+    // and attach unknown raw-map entries in that map's order. Normal .NET APIs never scan.
+    void SynchronizeExternalMap() const {
+        if (!externalMapExposed_) return;
+        bool changed = false;
+        for (std::size_t i = 0; i < entryKeys_.size(); ++i) {
+            if (entryKeys_[i] && map_.find(*entryKeys_[i]) == map_.end()) {
+                TrackRemoval(*entryKeys_[i]);
+                changed = true;
+            }
+        }
+        for (const auto& entry : map_) {
+            if (entryPositions_.find(entry.first) == entryPositions_.end()) {
+                TrackInsertion(entry.first);
+                changed = true;
+            }
+        }
+        if (changed) ++version_;
+    }
+
+    bool Insert(const TKey& key, const TValue& value) {
+        SynchronizeExternalMap();
+        if (map_.find(key) != map_.end()) return false;
+        const auto [it, inserted] = map_.emplace(key, value);
+        if (!inserted) return false;
+        try { TrackInsertion(it->first); }
+        catch (...) { map_.erase(it); throw; }
+        ++version_;
+        return true;
+    }
 
     template<typename InnerIt>
     class VersionCheckedIterator {
         const Dictionary* owner_;
         System::Collections::detail::MutationVersion version_;
-        InnerIt it_;
+        std::size_t index_;
+
+        void CheckVersion() const {
+            owner_->SynchronizeExternalMap();
+            if (version_ != owner_->version_)
+                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+        }
+        void SkipRemoved() {
+            while (index_ < owner_->entryKeys_.size() && !owner_->entryKeys_[index_]) ++index_;
+        }
     public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = typename MapType::value_type;
+        using difference_type = std::ptrdiff_t;
+        using reference = typename std::iterator_traits<InnerIt>::reference;
+        using pointer = typename std::iterator_traits<InnerIt>::pointer;
+
+        VersionCheckedIterator(const Dictionary* owner, std::size_t index)
+            : owner_(owner), version_(owner->version_), index_(index) { SkipRemoved(); }
+        // Retain the original constructor spelling for STL interoperability consumers.
         VersionCheckedIterator(const Dictionary* owner, InnerIt it)
-            : owner_(owner), version_(owner->version_), it_(it) {}
+            : owner_(owner), version_(owner->version_), index_(0) {
+            owner_->SynchronizeExternalMap();
+            version_ = owner_->version_;
+            index_ = it == owner_->map_.end() ? owner_->entryKeys_.size()
+                     : owner_->entryPositions_.at(it->first);
+        }
 
         VersionCheckedIterator& operator++() {
-            if (version_ != owner_->version_)
-                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
-            ++it_;
+            CheckVersion();
+            ++index_;
+            SkipRemoved();
             return *this;
         }
-        decltype(auto) operator*() const {
-            if (version_ != owner_->version_)
-                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
-            return *it_;
+        reference operator*() const {
+            CheckVersion();
+            const auto it = owner_->map_.find(*owner_->entryKeys_[index_]);
+            if constexpr (std::is_same_v<InnerIt, typename MapType::const_iterator>)
+                return *it;
+            else
+                return const_cast<value_type&>(*it);
         }
-        auto operator->() const { return it_.operator->(); }
-        bool operator!=(const VersionCheckedIterator& other) const { return it_ != other.it_; }
-        bool operator==(const VersionCheckedIterator& other) const { return it_ == other.it_; }
+        pointer operator->() const { return std::addressof(operator*()); }
+        bool operator!=(const VersionCheckedIterator& other) const { return !(*this == other); }
+        bool operator==(const VersionCheckedIterator& other) const {
+            return owner_ == other.owner_ && index_ == other.index_;
+        }
     };
 
 public:
@@ -153,10 +233,8 @@ public:
      * @throws System::ArgumentException if a key with the same value already exists.
      */
     void Add(const TKey& key, const TValue& value) {
-        if (map_.count(key))
+        if (!Insert(key, value))
             throw System::ArgumentException("An item with the same key has already been added.");
-        map_[key] = value;
-        ++version_;
     }
 
     /**
@@ -164,37 +242,37 @@ public:
      *
      * C++ counterpart of .NET Dictionary<TKey,TValue>.Remove(TKey).
      *
-     * @note DEVIATION from real .NET: Dictionary.cs's Remove does NOT bump `_version` (its
-     * array-backed entries use a free-list, so index-based enumeration is unaffected by a
-     * removal). This port's version-checked iterator wraps a real std::unordered_map iterator,
-     * where erasing the element the iterator is CURRENTLY positioned on invalidates that
-     * specific iterator (confirmed via an ASan use-after-free repro) even though other
-     * iterators remain valid per the standard -- not bumping version_ here would silently let
-     * an in-progress enumeration crash instead of throwing cleanly. Bumping unconditionally on
-     * a successful removal trades exact `_version` parity for guaranteed memory safety.
+     * @note A successful removal retains this port's existing version bump and fail-fast
+     * contract. Modern .NET allows more removal-during-enumeration cases; restoring entry
+     * slot order does not change that separate compatibility decision.
      * @param key The key of the element to remove.
      * @return true if the element was found and removed; otherwise false.
      */
     bool Remove(const TKey& key) {
-        bool removed = map_.erase(key) > 0;
-        if (removed) ++version_;
-        return removed;
+        SynchronizeExternalMap();
+        auto it = map_.find(key);
+        if (it == map_.end()) return false;
+        TrackRemoval(it->first);
+        map_.erase(it);
+        ++version_;
+        return true;
     }
 
     /**
      * @brief Removes the element with the specified key and copies its value to the output parameter.
      *
      * C++ counterpart of .NET Dictionary<TKey,TValue>.Remove(TKey, out TValue). See the other
-     * Remove(TKey) overload's doc-comment for why this port bumps version_ on removal, unlike
-     * real .NET's Dictionary.Remove.
+     * Remove(TKey) overload's doc-comment for the retained fail-fast removal contract.
      * @param key   The key of the element to remove.
      * @param value Receives the removed value if found.
      * @return true if the element was found and removed; otherwise false.
      */
     bool Remove(const TKey& key, TValue& value) {
+        SynchronizeExternalMap();
         auto it = map_.find(key);
         if (it == map_.end()) return false;
         value = std::move(it->second);
+        TrackRemoval(it->first);
         map_.erase(it);
         ++version_;
         return true;
@@ -249,10 +327,7 @@ public:
      * @return true if the pair was added; false if the key already existed.
      */
     bool TryAdd(const TKey& key, const TValue& value) {
-        if (map_.count(key)) return false;
-        map_[key] = value;
-        ++version_;
-        return true;
+        return Insert(key, value);
     }
 
     /**
@@ -273,7 +348,13 @@ public:
      *
      * C++ counterpart of .NET Dictionary<TKey,TValue>.Clear().
      */
-    void Clear() { map_.clear(); ++version_; }
+    void Clear() {
+        map_.clear();
+        entryKeys_.clear();
+        entryPositions_.clear();
+        freeEntries_.clear();
+        ++version_;
+    }
 
     /**
      * @brief Gets a vector containing the keys of the dictionary.
@@ -283,7 +364,7 @@ public:
     [[nodiscard]] std::vector<TKey> getKeysProperty() const {
         std::vector<TKey> keys;
         keys.reserve(map_.size());
-        for (const auto& kv : map_) keys.push_back(kv.first);
+        for (const auto& kv : *this) keys.push_back(kv.first);
         return keys;
     }
 
@@ -295,7 +376,7 @@ public:
     [[nodiscard]] std::vector<TValue> getValuesProperty() const {
         std::vector<TValue> vals;
         vals.reserve(map_.size());
-        for (const auto& kv : map_) vals.push_back(kv.second);
+        for (const auto& kv : *this) vals.push_back(kv.second);
         return vals;
     }
 
@@ -325,8 +406,22 @@ public:
      * C++ counterpart of .NET Dictionary<TKey,TValue>.TrimExcess().
      */
     void TrimExcess() {
+        SynchronizeExternalMap();
+        // Build the compacted metadata first. A throwing key copy/allocation must not
+        // leave existing live entries unenumerable.
+        decltype(entryKeys_) keys;
+        decltype(entryPositions_) positions;
+        keys.reserve(map_.size());
+        positions.reserve(map_.size());
+        for (const auto& entry : *this) {
+            positions.emplace(entry.first, keys.size());
+            keys.emplace_back(entry.first);
+        }
         map_.rehash(static_cast<std::size_t>(
             std::ceil(static_cast<double>(map_.size()) / map_.max_load_factor())));
+        entryKeys_.swap(keys);
+        entryPositions_.swap(positions);
+        freeEntries_.clear();
         ++version_;
     }
 
@@ -364,9 +459,10 @@ public:
          * _version++).
          */
         ValueProxy& operator=(const TValue& value) {
-            bool isNewKey = owner_->map_.find(key_) == owner_->map_.end();
-            owner_->map_[key_] = value;
-            if (isNewKey) ++owner_->version_;
+            owner_->SynchronizeExternalMap();
+            auto it = owner_->map_.find(key_);
+            if (it != owner_->map_.end()) it->second = value;
+            else owner_->Insert(key_, value);
             return *this;
         }
     };
@@ -405,13 +501,13 @@ public:
      * Throws System::InvalidOperationException from operator++/operator* if the dictionary is
      * structurally modified during iteration -- see the class doc-comment for the exact rules.
      */
-    iterator begin()        { return iterator(this, map_.begin()); }
+    iterator begin()        { SynchronizeExternalMap(); return iterator(this, std::size_t{0}); }
     /** @brief Returns a version-checked iterator past the last element (for range-based for). */
-    iterator end()          { return iterator(this, map_.end()); }
+    iterator end()          { SynchronizeExternalMap(); return iterator(this, entryKeys_.size()); }
     /** @brief Returns a const version-checked iterator to the first element (for range-based for). */
-    [[nodiscard]] const_iterator begin() const { return const_iterator(this, map_.cbegin()); }
+    [[nodiscard]] const_iterator begin() const { SynchronizeExternalMap(); return const_iterator(this, std::size_t{0}); }
     /** @brief Returns a const version-checked iterator past the last element (for range-based for). */
-    [[nodiscard]] const_iterator end()   const { return const_iterator(this, map_.cend()); }
+    [[nodiscard]] const_iterator end()   const { SynchronizeExternalMap(); return const_iterator(this, entryKeys_.size()); }
 
     /**
      * @brief Returns a const reference to the underlying map.
@@ -428,7 +524,7 @@ public:
      * Provides direct STL interoperability when needed. See the const overload for the
      * floating/direct-nullable-floating key consequence.
      */
-    MapType& ToMap() { return map_; }
+    MapType& ToMap() { externalMapExposed_ = true; return map_; }
 };
 
 } // namespace System::Collections::Generic
