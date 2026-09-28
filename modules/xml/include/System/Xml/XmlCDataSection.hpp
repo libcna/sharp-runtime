@@ -11,7 +11,7 @@ namespace System::Xml {
     /** @brief Represents a CDATA section (`<![CDATA[...]]>`). C++ counterpart of .NET System.Xml.XmlCDataSection. */
     class XmlCDataSection : public XmlText {
     public:
-        XmlCDataSection(tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
+        XmlCDataSection(SharpRuntime::Vendor::tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
             : XmlText(native, ownerDocument) {}
 
         [[nodiscard]] XmlNodeType getNodeTypeProperty() const override { return XmlNodeType::CDATA; }

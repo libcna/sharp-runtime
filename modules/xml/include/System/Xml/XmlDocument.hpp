@@ -31,12 +31,13 @@ namespace System::Xml {
     /**
      * @brief Represents an XML document; the root of the classic XmlDocument DOM API.
      *
-     * C++ counterpart of .NET System.Xml.XmlDocument. Owns a tinyxml2::XMLDocument and caches
-     * one wrapper object per native tinyxml2 node so navigation (ParentNode, FirstChild, etc.)
-     * returns stable identities. Non-copyable/non-movable: it holds an internal self-pointer
-     * (XmlNode::native_ points at its own tinyxml2::XMLDocument member) so its address must be
-     * stable — construct it with `new`/on the stack and pass by pointer/reference, matching
-     * other non-movable stream-like types in this runtime (e.g. FileStream).
+     * C++ counterpart of .NET System.Xml.XmlDocument. Owns a
+     * SharpRuntime::Vendor::tinyxml2::XMLDocument and caches one wrapper object per native
+     * tinyxml2 node so navigation (ParentNode, FirstChild, etc.) returns stable identities.
+     * Non-copyable/non-movable: it holds an internal self-pointer (XmlNode::native_ points at its
+     * own XMLDocument member) so its address must be stable — construct it with `new`/on the
+     * stack and pass by pointer/reference, matching other non-movable stream-like types in this
+     * runtime (e.g. FileStream).
      *
      * @note NodeInserting/NodeInserted/NodeRemoving/NodeRemoved/NodeChanging/NodeChanged are
      * settable std::function fields that are dispatched by every tree mutation whose affected
@@ -54,10 +55,10 @@ namespace System::Xml {
      * safely is tracked separately; the silence is deliberate and is pinned by a test.
      */
     class XmlDocument : public XmlNode {
-        tinyxml2::XMLDocument doc_;
+        SharpRuntime::Vendor::tinyxml2::XMLDocument doc_;
         std::shared_ptr<XmlNameTable> nameTable_;
         std::unique_ptr<XmlImplementation> implementation_;
-        std::unordered_map<tinyxml2::XMLNode*, std::unique_ptr<XmlNode>> nodeCache_;
+        std::unordered_map<SharpRuntime::Vendor::tinyxml2::XMLNode*, std::unique_ptr<XmlNode>> nodeCache_;
         // Owns nodes created by factory methods with no native tinyxml2 backing to key nodeCache_
         // by (XmlAttribute, XmlEntityReference -- see those Create* methods' own comments): tracked
         // here until either the document is destroyed, or ReleaseUnattachedNode() transfers
@@ -67,11 +68,11 @@ namespace System::Xml {
         // if it was never attached to anything.
         std::vector<std::unique_ptr<XmlNode>> unattachedNodes_;
         bool preserveWhitespace_ = false;
-        // Scratch parent used to "detach" a node without destroying it (tinyxml2::Unlink is
+        // Scratch parent used to "detach" a node without destroying it (tinyxml2's XMLNode::Unlink is
         // private; InsertEndChild's documented move-if-already-parented semantics let us
         // achieve the same effect: moving a node here removes it from its real parent while
         // keeping it alive and reusable, matching .NET's RemoveChild contract).
-        tinyxml2::XMLElement* detachedHolder_ = nullptr;
+        SharpRuntime::Vendor::tinyxml2::XMLElement* detachedHolder_ = nullptr;
 
         XmlDocument(const XmlDocument&) = delete;
         XmlDocument& operator=(const XmlDocument&) = delete;
@@ -87,7 +88,7 @@ namespace System::Xml {
         [[nodiscard]] XmlDocument* GetDocument() const override { return const_cast<XmlDocument*>(this); }
 
         /** @brief Wraps a native tinyxml2 node in the appropriate XmlNode subclass, caching by identity. @return nullptr if @p native is nullptr. */
-        XmlNode* WrapNode(tinyxml2::XMLNode* native);
+        XmlNode* WrapNode(SharpRuntime::Vendor::tinyxml2::XMLNode* native);
 
         /**
          * @brief Internal: transfers ownership of a node this document is holding in
@@ -97,13 +98,13 @@ namespace System::Xml {
          */
         void ReleaseUnattachedNode(XmlNode* node);
         /** @return The underlying tinyxml2 document, for interop with code that needs direct tinyxml2 access. */
-        [[nodiscard]] tinyxml2::XMLDocument& getNativeDocument() { return doc_; }
+        [[nodiscard]] SharpRuntime::Vendor::tinyxml2::XMLDocument& getNativeDocument() { return doc_; }
         /** @brief Internal: purges cached wrappers for @p native and its descendants (call before a tinyxml2 delete). */
-        void PurgeCache(tinyxml2::XMLNode* native);
+        void PurgeCache(SharpRuntime::Vendor::tinyxml2::XMLNode* native);
         /** @brief Internal: detaches @p native from its current parent, keeping it alive/reusable. */
-        void DetachNode(tinyxml2::XMLNode* native);
+        void DetachNode(SharpRuntime::Vendor::tinyxml2::XMLNode* native);
         /** @return true if @p native is (or is parented directly under) this document's internal detached-node holder. */
-        [[nodiscard]] bool IsDetached(const tinyxml2::XMLNode* native) const;
+        [[nodiscard]] bool IsDetached(const SharpRuntime::Vendor::tinyxml2::XMLNode* native) const;
 
         [[nodiscard]] XmlNodeType getNodeTypeProperty() const override { return XmlNodeType::Document; }
         [[nodiscard]] std::string getNameProperty() const override { return "#document"; }

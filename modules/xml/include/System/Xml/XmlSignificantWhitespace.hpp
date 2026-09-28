@@ -13,7 +13,7 @@ namespace System::Xml {
      */
     class XmlSignificantWhitespace : public XmlCharacterData {
     public:
-        XmlSignificantWhitespace(tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
+        XmlSignificantWhitespace(SharpRuntime::Vendor::tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
             : XmlCharacterData(native, ownerDocument) {}
 
         [[nodiscard]] XmlNodeType getNodeTypeProperty() const override { return XmlNodeType::SignificantWhitespace; }

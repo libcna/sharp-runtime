@@ -18,7 +18,7 @@ namespace System::Xml {
      */
     class XmlDocumentFragment : public XmlNode {
     public:
-        XmlDocumentFragment(tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
+        XmlDocumentFragment(SharpRuntime::Vendor::tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
             : XmlNode(native, ownerDocument) {}
 
         [[nodiscard]] XmlNodeType getNodeTypeProperty() const override { return XmlNodeType::DocumentFragment; }

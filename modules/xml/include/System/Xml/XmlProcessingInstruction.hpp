@@ -17,7 +17,7 @@ namespace System::Xml {
      */
     class XmlProcessingInstruction : public XmlLinkedNode {
     public:
-        XmlProcessingInstruction(tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
+        XmlProcessingInstruction(SharpRuntime::Vendor::tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
             : XmlLinkedNode(native, ownerDocument) {}
 
         [[nodiscard]] XmlNodeType getNodeTypeProperty() const override { return XmlNodeType::ProcessingInstruction; }

@@ -25,6 +25,10 @@
 #include <cctype>
 #include <stack>
 
+// The vendored tinyxml2 lives in SharpRuntime::Vendor::tinyxml2 so that it cannot collide with a
+// consumer's own tinyxml2 (docs/VendoredTinyXml2.md); this file only ever means that copy.
+namespace tinyxml2 = ::SharpRuntime::Vendor::tinyxml2;
+
 namespace System::Xml {
 
 // ---------------------------------------------------------------------------

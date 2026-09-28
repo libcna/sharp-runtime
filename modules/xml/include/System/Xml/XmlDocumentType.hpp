@@ -22,7 +22,7 @@ namespace System::Xml {
         std::string systemId_;
 
     public:
-        XmlDocumentType(tinyxml2::XMLNode* native, XmlDocument* ownerDocument,
+        XmlDocumentType(SharpRuntime::Vendor::tinyxml2::XMLNode* native, XmlDocument* ownerDocument,
                         std::string name, std::string publicId, std::string systemId)
             : XmlLinkedNode(native, ownerDocument),
               name_(std::move(name)), publicId_(std::move(publicId)), systemId_(std::move(systemId)) {}

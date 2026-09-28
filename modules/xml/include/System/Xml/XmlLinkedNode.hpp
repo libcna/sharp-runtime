@@ -19,7 +19,7 @@ namespace System::Xml {
     class XmlLinkedNode : public XmlNode {
     protected:
         XmlLinkedNode() = default;
-        XmlLinkedNode(tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
+        XmlLinkedNode(SharpRuntime::Vendor::tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
             : XmlNode(native, ownerDocument) {}
     };
 

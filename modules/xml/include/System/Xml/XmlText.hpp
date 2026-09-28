@@ -10,7 +10,7 @@ namespace System::Xml {
     /** @brief Represents the text content of an element or attribute. C++ counterpart of .NET System.Xml.XmlText. */
     class XmlText : public XmlCharacterData {
     public:
-        XmlText(tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
+        XmlText(SharpRuntime::Vendor::tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
             : XmlCharacterData(native, ownerDocument) {}
 
         [[nodiscard]] XmlNodeType getNodeTypeProperty() const override { return XmlNodeType::Text; }

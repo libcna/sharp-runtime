@@ -11,7 +11,7 @@ namespace System::Xml {
     /** @brief Represents an XML comment (`<!-- text -->`). C++ counterpart of .NET System.Xml.XmlComment. */
     class XmlComment : public XmlCharacterData {
     public:
-        XmlComment(tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
+        XmlComment(SharpRuntime::Vendor::tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
             : XmlCharacterData(native, ownerDocument) {}
 
         [[nodiscard]] XmlNodeType getNodeTypeProperty() const override { return XmlNodeType::Comment; }

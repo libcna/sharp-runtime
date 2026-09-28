@@ -21,8 +21,23 @@ must not be misrepresented as being the original software.
 distribution.
 */
 
-#ifndef TINYXML2_INCLUDED
-#define TINYXML2_INCLUDED
+/*
+    Local modification for sharp-runtime (not part of upstream tinyxml2):
+    everything this header would otherwise put at global scope is moved out
+    of the way, so that a program can link sharp-runtime together with its
+    own, possibly different, tinyxml2 without the two copies sharing symbols.
+      - namespace tinyxml2        -> namespace SharpRuntime::Vendor::tinyxml2
+      - include guard             -> SHARP_RUNTIME_VENDOR_TINYXML2_INCLUDED
+      - TIXML2_*_VERSION and TINYXML2_MAX_ELEMENT_DEPTH constants moved into
+        that namespace
+      - TINYXML2_*_VERSION macros -> SHARP_RUNTIME_TINYXML2_*_VERSION
+    Two copies of tinyxml2 in one link that both used ::tinyxml2 made the
+    linker bind one copy's code to the other's class layout, with no
+    diagnostic -- see sharp-runtime's docs/VendoredTinyXml2.md.
+*/
+
+#ifndef SHARP_RUNTIME_VENDOR_TINYXML2_INCLUDED
+#define SHARP_RUNTIME_VENDOR_TINYXML2_INCLUDED
 
 #if defined(ANDROID_NDK)
 #   include <ctype.h>
@@ -93,13 +108,15 @@ distribution.
 /* Versioning, past 1.0.14:
 	http://semver.org/
 */
+#define SHARP_RUNTIME_TINYXML2_MAJOR_VERSION 11
+#define SHARP_RUNTIME_TINYXML2_MINOR_VERSION 0
+#define SHARP_RUNTIME_TINYXML2_PATCH_VERSION 0
+
+namespace SharpRuntime { namespace Vendor { namespace tinyxml2
+{
 TINYXML2_CONSTANT int TIXML2_MAJOR_VERSION = 11;
 TINYXML2_CONSTANT int TIXML2_MINOR_VERSION = 0;
 TINYXML2_CONSTANT int TIXML2_PATCH_VERSION = 0;
-
-#define TINYXML2_MAJOR_VERSION 11
-#define TINYXML2_MINOR_VERSION 0
-#define TINYXML2_PATCH_VERSION 0
 
 // A fixed element depth limit is problematic. There needs to be a
 // limit to avoid a stack overflow. However, that limit varies per
@@ -108,8 +125,6 @@ TINYXML2_CONSTANT int TIXML2_PATCH_VERSION = 0;
 // so there needs to be a limit in place.
 TINYXML2_CONSTANT int TINYXML2_MAX_ELEMENT_DEPTH = 500;
 
-namespace tinyxml2
-{
 class XMLDocument;
 class XMLElement;
 class XMLAttribute;
@@ -2375,10 +2390,10 @@ private:
 };
 
 
-} // namespace tinyxml2
+} } } // namespace SharpRuntime::Vendor::tinyxml2
 
 #if defined(_MSC_VER)
 #   pragma warning(pop)
 #endif
 
-#endif // TINYXML2_INCLUDED
+#endif // SHARP_RUNTIME_VENDOR_TINYXML2_INCLUDED

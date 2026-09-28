@@ -15,7 +15,7 @@ namespace System::Xml {
      */
     class XmlCharacterData : public XmlLinkedNode {
     protected:
-        XmlCharacterData(tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
+        XmlCharacterData(SharpRuntime::Vendor::tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
             : XmlLinkedNode(native, ownerDocument) {}
 
     public:

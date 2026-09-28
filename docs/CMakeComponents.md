@@ -163,7 +163,9 @@ External libraries are configured only by their owning component:
 - `IO.Compression` finds ZLIB privately.
 - `IO.Compression.Zip` builds vendored miniz privately.
 - `Xml` builds vendored tinyxml2 and exposes it publicly because
-  `XmlDocument.hpp` exposes tinyxml2 types.
+  `XmlDocument.hpp` exposes tinyxml2 types. The copy lives in namespace
+  `SharpRuntime::Vendor::tinyxml2` and publishes no include directory of its own,
+  so it coexists with a consumer's own tinyxml2 (`docs/VendoredTinyXml2.md`).
 - `Net` links `ws2_32` privately on Windows.
 - `Security.Cryptography.Random` links `bcrypt` privately on Windows.
 - `Storage` privately links an existing SDL3 target on Android.

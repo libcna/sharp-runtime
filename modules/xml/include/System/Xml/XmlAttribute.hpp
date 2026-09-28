@@ -5,7 +5,7 @@
 
 #include "System/Xml/XmlNode.hpp"
 
-namespace tinyxml2 { class XMLElement; }
+namespace SharpRuntime::Vendor::tinyxml2 { class XMLElement; }
 
 namespace System::Xml {
 
@@ -13,17 +13,17 @@ namespace System::Xml {
      * @brief Represents an XML attribute.
      *
      * C++ counterpart of .NET System.Xml.XmlAttribute. tinyxml2 ties attributes directly to
-     * their owning XMLElement (there is no API to create a detached tinyxml2::XMLAttribute), so
-     * this wrapper stores name/value locally and, once attached to an element (via
-     * XmlElement::SetAttributeNode), reads/writes through the owning tinyxml2::XMLElement
-     * instead — matching .NET's observable behavior (value changes are visible through the
-     * element) without needing to track individual tinyxml2::XMLAttribute pointers, which
-     * tinyxml2 may reallocate internally.
+     * their owning XMLElement (there is no API to create a detached
+     * SharpRuntime::Vendor::tinyxml2::XMLAttribute), so this wrapper stores name/value locally
+     * and, once attached to an element (via XmlElement::SetAttributeNode), reads/writes through
+     * the owning SharpRuntime::Vendor::tinyxml2::XMLElement instead — matching .NET's
+     * observable behavior (value changes are visible through the element) without needing to
+     * track individual XMLAttribute pointers, which tinyxml2 may reallocate internally.
      */
     class XmlAttribute : public XmlNode {
         std::string name_;
         std::string localValue_;
-        tinyxml2::XMLElement* ownerElementNative_ = nullptr;
+        SharpRuntime::Vendor::tinyxml2::XMLElement* ownerElementNative_ = nullptr;
         XmlElement* ownerElementWrapper_ = nullptr;
 
     public:
@@ -57,9 +57,9 @@ namespace System::Xml {
         [[nodiscard]] bool getSpecifiedProperty() const { return true; }
 
         /** @brief Internal: attaches a previously-unattached attribute to @p element, pushing its local value onto it for the first time. Used by XmlElement::SetAttributeNode. */
-        void AttachTo(XmlElement* elementWrapper, tinyxml2::XMLElement* elementNative);
+        void AttachTo(XmlElement* elementWrapper, SharpRuntime::Vendor::tinyxml2::XMLElement* elementNative);
         /** @brief Internal: binds this wrapper to an attribute that already exists live on @p element, WITHOUT touching its current value. Used by XmlElement to wrap already-set attributes. */
-        void BindExisting(XmlElement* elementWrapper, tinyxml2::XMLElement* elementNative);
+        void BindExisting(XmlElement* elementWrapper, SharpRuntime::Vendor::tinyxml2::XMLElement* elementNative);
         /** @brief Internal: detaches this wrapper (keeps the last known value locally). Used by XmlElement. */
         void Detach();
         /** @return true if this attribute is currently attached to an element. */

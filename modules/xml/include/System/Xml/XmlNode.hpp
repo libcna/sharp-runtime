@@ -11,7 +11,7 @@
 #include "System/Xml/XmlNodeList.hpp"
 #include "System/Xml/XmlNodeType.hpp"
 
-namespace tinyxml2 { class XMLNode; }
+namespace SharpRuntime::Vendor::tinyxml2 { class XMLNode; }
 
 namespace System::Xml {
 
@@ -24,9 +24,9 @@ namespace System::Xml {
      * @brief Represents a single node in an XML document; the abstract base of the classic
      * XmlDocument DOM API.
      *
-     * C++ counterpart of .NET System.Xml.XmlNode. Backed by a tinyxml2::XMLNode* owned by the
-     * tinyxml2::XMLDocument inside this node's XmlDocument; node identity is stable because
-     * XmlDocument caches one wrapper per native pointer (repeated navigation calls, e.g.
+     * C++ counterpart of .NET System.Xml.XmlNode. Backed by a
+     * SharpRuntime::Vendor::tinyxml2::XMLNode* owned by the XMLDocument inside this node's
+     * XmlDocument; node identity is stable because XmlDocument caches one wrapper per native pointer (repeated navigation calls, e.g.
      * ParentNode() twice, return the same XmlNode*).
      *
      * @note Simplifications (practical-subset scope, documented rather than silent):
@@ -38,12 +38,12 @@ namespace System::Xml {
      */
     class XmlNode : public XPath::IXPathNavigable {
     protected:
-        tinyxml2::XMLNode* native_ = nullptr;
+        SharpRuntime::Vendor::tinyxml2::XMLNode* native_ = nullptr;
         XmlDocument* ownerDocument_ = nullptr;
         mutable std::unique_ptr<XmlNodeList> childNodesSnapshot_;
 
         XmlNode() = default;
-        XmlNode(tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
+        XmlNode(SharpRuntime::Vendor::tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
             : native_(native), ownerDocument_(ownerDocument) {}
 
         /**
@@ -73,7 +73,7 @@ namespace System::Xml {
         virtual ~XmlNode();
 
         /** @return The underlying tinyxml2 node; for interop with code that needs direct tinyxml2 access. */
-        [[nodiscard]] tinyxml2::XMLNode* getNativeNode() const { return native_; }
+        [[nodiscard]] SharpRuntime::Vendor::tinyxml2::XMLNode* getNativeNode() const { return native_; }
 
         /** @return The type of this node. */
         [[nodiscard]] virtual XmlNodeType getNodeTypeProperty() const = 0;

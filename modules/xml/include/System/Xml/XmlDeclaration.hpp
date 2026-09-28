@@ -16,7 +16,7 @@ namespace System::Xml {
      */
     class XmlDeclaration : public XmlLinkedNode {
     public:
-        XmlDeclaration(tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
+        XmlDeclaration(SharpRuntime::Vendor::tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
             : XmlLinkedNode(native, ownerDocument) {}
 
         [[nodiscard]] XmlNodeType getNodeTypeProperty() const override { return XmlNodeType::XmlDeclaration; }

@@ -41,6 +41,10 @@
 #include "System/Xml/XmlReader.hpp"
 #include "System/Xml/XmlWriter.hpp"
 
+// The vendored tinyxml2 lives in SharpRuntime::Vendor::tinyxml2 so that it cannot collide with a
+// consumer's own tinyxml2 (docs/VendoredTinyXml2.md); this file only ever means that copy.
+namespace tinyxml2 = ::SharpRuntime::Vendor::tinyxml2;
+
 using System::TimeSpan;
 using System::Xml::XmlConvert;
 using System::Xml::XmlDocument;

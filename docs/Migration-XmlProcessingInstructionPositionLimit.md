@@ -61,8 +61,9 @@ one node type and therefore one rule.
 
 Two routes exist and both are refused:
 
-1. **Patch `vendor/tinyxml2` to add a PI node type.** `vendor/` is third-party source, kept
-   unmodified from upstream, and CLAUDE.md forbids editing it.
+1. **Patch `vendor/tinyxml2` to add a PI node type.** `vendor/` is third-party source, and
+   CLAUDE.md forbids changing its behaviour; tinyxml2's only local change is a rename of its
+   namespace (`docs/VendoredTinyXml2.md`), never its parsing.
 2. **Pre-rewrite non-leading `<?...?>` before handing text to the substrate and map it back.**
    This forks the substrate's parsing semantics for every document that passes through
    `LoadXml`, to serve one node kind. Measured as mutation M3 (§5), a naive version of exactly

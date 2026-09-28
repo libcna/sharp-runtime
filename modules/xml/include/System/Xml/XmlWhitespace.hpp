@@ -10,7 +10,7 @@ namespace System::Xml {
     /** @brief Represents whitespace between markup. C++ counterpart of .NET System.Xml.XmlWhitespace. */
     class XmlWhitespace : public XmlCharacterData {
     public:
-        XmlWhitespace(tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
+        XmlWhitespace(SharpRuntime::Vendor::tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
             : XmlCharacterData(native, ownerDocument) {}
 
         [[nodiscard]] XmlNodeType getNodeTypeProperty() const override { return XmlNodeType::Whitespace; }

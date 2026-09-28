@@ -9,7 +9,7 @@
 #include "System/Xml/XmlAttributeCollection.hpp"
 #include "System/Xml/XmlLinkedNode.hpp"
 
-namespace tinyxml2 { class XMLElement; }
+namespace SharpRuntime::Vendor::tinyxml2 { class XMLElement; }
 
 namespace System::Xml {
 
@@ -27,11 +27,11 @@ namespace System::Xml {
         mutable std::unique_ptr<XmlAttributeCollection> attrsSnapshot_;
         mutable std::unique_ptr<XmlNodeList> elementsByTagNameSnapshot_;
 
-        tinyxml2::XMLElement* nativeElement() const;
+        SharpRuntime::Vendor::tinyxml2::XMLElement* nativeElement() const;
         XmlAttribute* GetOrCreateAttrWrapper(const std::string& name);
 
     public:
-        XmlElement(tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
+        XmlElement(SharpRuntime::Vendor::tinyxml2::XMLNode* native, XmlDocument* ownerDocument)
             : XmlLinkedNode(native, ownerDocument) {}
 
         [[nodiscard]] XmlNodeType getNodeTypeProperty() const override { return XmlNodeType::Element; }
