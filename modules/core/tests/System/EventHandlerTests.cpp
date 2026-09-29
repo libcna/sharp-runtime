@@ -363,3 +363,42 @@ TEST(EventHandlerContractTests, Decl2324_TheCancellableArgsTypesReachNoHandlerAl
                   "#2324");
     SUCCEED() << "see the comment block above for the nine-alias measurement";
 }
+
+TEST(EventHandlerTests, CopiesAreIndependentUnlessShared) {
+    EventHandler<EventArgs> original;
+    int calls = 0;
+    original += [&calls](System::Object*, const EventArgs&) { ++calls; };
+    auto copy = original;
+    copy += [&calls](System::Object*, const EventArgs&) { calls += 10; };
+    original.Raise(nullptr, EventArgs::Empty);
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(copy.Size(), 2u);
+    EXPECT_FALSE(copy.IsShared());
+}
+
+TEST(EventHandlerTests, SharedCopiesSeeOneSubscriberList) {
+    EventHandler<EventArgs> original;
+    original.Share();
+    int a = 0, b = 0;
+    auto copy = original;
+    EventHandler<EventArgs> assigned;
+    assigned = copy;
+    EXPECT_TRUE(copy.IsShared() && assigned.IsShared());
+    const auto token = copy.Add([&a](System::Object*, const EventArgs&) { ++a; });
+    assigned += [&b](System::Object*, const EventArgs&) { ++b; };
+    EXPECT_EQ(original.Size(), 2u);
+    // Raising through any copy runs each subscriber once, like one C# object's event.
+    original.Raise(nullptr, EventArgs::Empty);
+    EXPECT_EQ(a, 1);
+    EXPECT_EQ(b, 1);
+    // Unsubscribing through another copy removes it for all.
+    assigned.Remove(token);
+    copy.Raise(nullptr, EventArgs::Empty);
+    EXPECT_EQ(a, 1);
+    EXPECT_EQ(b, 2);
+    // A moved-from event is empty and usable.
+    auto moved = std::move(original);
+    EXPECT_TRUE(original.Empty());
+    moved.Raise(nullptr, EventArgs::Empty);
+    EXPECT_EQ(b, 3);
+}

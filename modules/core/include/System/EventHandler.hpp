@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <memory>
 #include <vector>
 #include <utility>
 #include <cstddef>
@@ -99,9 +100,33 @@ namespace System
         using ReplayHook = std::function<void(const HandlerType&)>;
 
     private:
-        std::vector<std::pair<Token, HandlerType>> handlers_;
-        Token nextToken_ = 0;
-        ReplayHook replayHook_;
+        struct State
+        {
+            std::vector<std::pair<Token, HandlerType>> handlers;
+            Token nextToken = 0;
+            ReplayHook replayHook;
+            bool shared = false;
+        };
+        // Allocated on first use, so an event nobody subscribes to costs one null pointer.
+        std::shared_ptr<State> state_;
+
+        State& state()
+        {
+            if (!state_)
+            {
+                state_ = std::make_shared<State>();
+            }
+            return *state_;
+        }
+
+        static std::shared_ptr<State> copyOf(const std::shared_ptr<State>& other)
+        {
+            if (!other)
+            {
+                return nullptr;
+            }
+            return other->shared ? other : std::make_shared<State>(*other);
+        }
 
     public:
         /**
@@ -110,9 +135,73 @@ namespace System
         EventHandler() = default;
 
         /**
+         * @brief Copies the subscribers: an independent copy, or the same subscriber list when
+         * the source was shared (see Share()).
+         *
+         * @param other Source.
+         */
+        EventHandler(const EventHandler& other) : state_(copyOf(other.state_)) {}
+
+        /**
+         * @brief Moves the subscribers; the source is left empty.
+         *
+         * @param other Source.
+         */
+        EventHandler(EventHandler&& other) noexcept = default;
+
+        /**
+         * @brief Replaces the subscribers with a copy of another's (shared if it is shared).
+         *
+         * @param other Source.
+         * @return Reference to this instance.
+         */
+        EventHandler& operator=(const EventHandler& other)
+        {
+            if (this != &other)
+            {
+                state_ = copyOf(other.state_);
+            }
+            return *this;
+        }
+
+        /**
+         * @brief Replaces the subscribers with another's; the source is left empty.
+         *
+         * @param other Source.
+         * @return Reference to this instance.
+         */
+        EventHandler& operator=(EventHandler&& other) noexcept = default;
+
+        /**
          * @brief Destroys the event handler collection.
          */
         ~EventHandler() = default;
+
+        /**
+         * @brief Makes every copy taken from now on share this event's subscriber list.
+         *
+         * Not a .NET concept: it models C# reference semantics for an event of a class that
+         * this port represents as a C++ value. In C# every variable holding the object sees
+         * one event, so subscribing or unsubscribing through any of them affects all, and
+         * raising it runs each handler once. A value-mapped owner that hands out copies of one
+         * logical object calls this on its event before copying (XNA's
+         * AvatarDescription.Changed on the per-player cached description is the use that
+         * needed it). Without a call, copies are independent, as before.
+         */
+        void Share()
+        {
+            state().shared = true;
+        }
+
+        /**
+         * @brief Whether copies of this event share its subscriber list (see Share()).
+         *
+         * @return true once Share() was called on this or the event it was copied from.
+         */
+        [[nodiscard]] bool IsShared() const
+        {
+            return state_ && state_->shared;
+        }
 
         /**
          * @brief Adds a new subscribed handler.
@@ -150,14 +239,14 @@ namespace System
          * (e.g. `NetworkSession`): it sets the hook once (typically in its own constructor) to a
          * closure that inspects its own current state and calls the passed-in handler directly
          * for each already-pending item. The hook is called with the raw HandlerType, not through
-         * Raise()/Invoke(), so it does not touch nextToken_/handlers_ and cannot itself be
+         * Raise()/Invoke(), so it does not touch the token counter or handler list and cannot itself be
          * observed as a second "real" subscriber.
          *
          * @param hook The replay hook, or an empty std::function to clear it.
          */
         void SetReplayHook(ReplayHook hook)
         {
-            replayHook_ = std::move(hook);
+            state().replayHook = std::move(hook);
         }
 
         /**
@@ -189,16 +278,19 @@ namespace System
          */
         Token Add(HandlerType handler)
         {
-            const Token token = nextToken_++;
+            auto& current = state();
+            const Token token = current.nextToken++;
             if (!handler)
             {
                 return token;
             }
-            if (replayHook_)
+            if (current.replayHook)
             {
-                replayHook_(handler);
+                // Held by value: the hook may add further handlers while it runs.
+                const auto hook = current.replayHook;
+                hook(handler);
             }
-            handlers_.emplace_back(token, std::move(handler));
+            state().handlers.emplace_back(token, std::move(handler));
             return token;
         }
 
@@ -211,12 +303,17 @@ namespace System
          */
         void Remove(Token token)
         {
-            handlers_.erase(
-                std::remove_if(handlers_.begin(), handlers_.end(),
+            if (!state_)
+            {
+                return;
+            }
+            auto& handlers = state_->handlers;
+            handlers.erase(
+                std::remove_if(handlers.begin(), handlers.end(),
                     [token](const std::pair<Token, HandlerType>& entry) {
                         return entry.first == token;
                     }),
-                handlers_.end()
+                handlers.end()
             );
         }
 
@@ -225,7 +322,10 @@ namespace System
          */
         void Clear()
         {
-            handlers_.clear();
+            if (state_)
+            {
+                state_->handlers.clear();
+            }
         }
 
         /**
@@ -235,7 +335,7 @@ namespace System
          */
         [[nodiscard]] bool Empty() const
         {
-            return handlers_.empty();
+            return !state_ || state_->handlers.empty();
         }
 
         /**
@@ -245,7 +345,7 @@ namespace System
          */
         [[nodiscard]] std::size_t Size() const
         {
-            return handlers_.size();
+            return state_ ? state_->handlers.size() : 0;
         }
 
         /**
@@ -266,7 +366,11 @@ namespace System
          */
         void Raise(Object* sender, const TEventArgs& e)
         {
-            auto snapshot = handlers_;
+            if (!state_)
+            {
+                return;
+            }
+            auto snapshot = state_->handlers;
             for (auto& entry : snapshot)
             {
                 // The truthiness test mirrors C#'s `SomethingHappened?.Invoke(...)` and is
