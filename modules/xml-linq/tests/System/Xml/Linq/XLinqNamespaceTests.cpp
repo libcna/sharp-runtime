@@ -364,13 +364,15 @@ TEST(XLinqNamespaceTests, RoundTrip_ThroughSaveToFile) {
 TEST(XLinqNamespaceTests, BothSerializationDoorsProduceTheSameQualifiedNames) {
     auto root = std::make_shared<XElement>(XNamespace::Get("urn:audit") + "root");
     root->Add(std::make_shared<XAttribute>(XNamespace::Get("urn:audit") + "attribute", "value"));
-    EXPECT_EQ(throughWriter(*root), compact(*root));
+    // Writer empty tags retain their documented separating space; compare qualified data.
+    EXPECT_EQ(throughWriter(*root), "<p1:root xmlns:p1=\"urn:audit\" p1:attribute=\"value\" />");
+    EXPECT_EQ(compact(*root), "<p1:root xmlns:p1=\"urn:audit\" p1:attribute=\"value\"/>");
 }
 
 TEST(XLinqNamespaceTests, TheWriterDoorAlsoPreservesADeclarationAsADeclaration) {
     auto e = std::make_shared<XElement>(XName("e"));
     e->Add(std::make_shared<XAttribute>(XNamespace::Xmlns + "p", "urn:x"));
-    EXPECT_EQ(throughWriter(*e), "<e xmlns:p=\"urn:x\"/>");
+    EXPECT_EQ(throughWriter(*e), "<e xmlns:p=\"urn:x\" />");
 }
 
 // --- Namespace-aware query ----------------------------------------------------------------------
@@ -459,19 +461,19 @@ TEST(XLinqNamespaceTests, AttributeToString_XmlPrefixIsUsedWithoutADeclaration) 
 TEST(XLinqNamespaceTests, StreamingElement_NamespacedNameCarriesAPrefixAndItsDeclaration) {
     XStreamingElement se(XNamespace::Get("urn:s") + "root");
     se.Add(std::make_shared<XAttribute>(XNamespace::Get("urn:s") + "a", "1"));
-    EXPECT_EQ(se.ToString(), "<p1:root xmlns:p1=\"urn:s\" p1:a=\"1\"/>");
+    EXPECT_EQ(se.ToString(), "<p1:root xmlns:p1=\"urn:s\" p1:a=\"1\" />");
 }
 
 TEST(XLinqNamespaceTests, StreamingElement_ADeclarationInItsContentIsUsedRatherThanRegenerated) {
     XStreamingElement se(XNamespace::Get("urn:s") + "root");
     se.Add(std::make_shared<XAttribute>(XNamespace::Xmlns + "s", "urn:s"));
-    EXPECT_EQ(se.ToString(), "<s:root xmlns:s=\"urn:s\"/>");
+    EXPECT_EQ(se.ToString(), "<s:root xmlns:s=\"urn:s\" />");
 }
 
 TEST(XLinqNamespaceTests, StreamingElement_UnqualifiedIsUnchanged) {
     XStreamingElement se(XName("root"));
     se.Add(std::make_shared<XAttribute>(XName("id"), "1"));
-    EXPECT_EQ(se.ToString(), "<root id=\"1\"/>");
+    EXPECT_EQ(se.ToString(), "<root id=\"1\" />");
 }
 
 // --- Namespace-declaration validation, reached for the first time by parsed input -----------------

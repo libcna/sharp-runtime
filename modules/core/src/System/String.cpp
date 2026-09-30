@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/String.hpp"
+#include "System/detail/FrameworkCompatibility.hpp"
 #include "System/TimeSpan.hpp"
 #include "System/detail/CompositeFormat.hpp"
 #include "System/detail/FloatTextFormat.hpp"
@@ -480,17 +481,35 @@ namespace System
 
     std::string String::Substring(const std::string& value, SharpRuntime::intcs startIndex)
     {
-        if (startIndex < 0 || static_cast<size_t>(startIndex) > value.size())
-            throw System::ArgumentOutOfRangeException("startIndex", "String::Substring: startIndex must be within the bounds of the string.");
-        return value.substr(static_cast<size_t>(startIndex));
+        if (startIndex < 0) {
+            if (System::detail::UseNetFrameworkArgumentExceptionMessages())
+                throw System::ArgumentOutOfRangeException("startIndex", "StartIndex cannot be less than zero.");
+            System::ArgumentOutOfRangeException::ThrowIfNegative(startIndex, "startIndex");
+        }
+        if (static_cast<std::size_t>(startIndex) > value.size())
+            throw System::ArgumentOutOfRangeException("startIndex", "startIndex cannot be larger than length of string.");
+        return value.substr(static_cast<std::size_t>(startIndex));
     }
 
     std::string String::Substring(const std::string& value, SharpRuntime::intcs startIndex, SharpRuntime::intcs length)
     {
-        if (startIndex < 0 || length < 0 ||
-            static_cast<size_t>(startIndex) + static_cast<size_t>(length) > value.size())
-            throw System::ArgumentOutOfRangeException("startIndex", "String::Substring: startIndex and length must refer to a location within the string.");
-        return value.substr(static_cast<size_t>(startIndex), static_cast<size_t>(length));
+        // Validation precedence is observable when more than one argument is invalid.
+        // Subtract after validating startIndex: do not overflow a signed startIndex + length.
+        if (startIndex < 0) {
+            if (System::detail::UseNetFrameworkArgumentExceptionMessages())
+                throw System::ArgumentOutOfRangeException("startIndex", "StartIndex cannot be less than zero.");
+            System::ArgumentOutOfRangeException::ThrowIfNegative(startIndex, "startIndex");
+        }
+        if (static_cast<std::size_t>(startIndex) > value.size())
+            throw System::ArgumentOutOfRangeException("startIndex", "startIndex cannot be larger than length of string.");
+        if (length < 0) {
+            if (System::detail::UseNetFrameworkArgumentExceptionMessages())
+                throw System::ArgumentOutOfRangeException("length", "Length cannot be less than zero.");
+            System::ArgumentOutOfRangeException::ThrowIfNegative(length, "length");
+        }
+        if (static_cast<std::size_t>(length) > value.size() - static_cast<std::size_t>(startIndex))
+            throw System::ArgumentOutOfRangeException("length", "Index and length must refer to a location within the string.");
+        return value.substr(static_cast<std::size_t>(startIndex), static_cast<std::size_t>(length));
     }
 
     std::string String::Trim(const std::string& value)

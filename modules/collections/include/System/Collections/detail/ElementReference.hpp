@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <functional>
 #include <type_traits>
 #include <utility>
 
@@ -63,6 +64,12 @@ namespace System::Collections::detail
     {
         T* slot_;
         MutationCounter* version_;
+        const std::function<void()>* beforeWrite_ = nullptr;
+
+        void validateWrite() const
+        {
+            if (beforeWrite_ && *beforeWrite_) (*beforeWrite_)();
+        }
 
         /**
          * Advances the owning collection's counter exactly once when the enclosing scope
@@ -84,6 +91,7 @@ namespace System::Collections::detail
         template <typename TApply>
         ElementReference& tracked(TApply&& apply)
         {
+            validateWrite();
             const Advance advance{version_};
             apply(*slot_);
             return *this;
@@ -104,6 +112,21 @@ namespace System::Collections::detail
          */
         constexpr ElementReference(T* slot, MutationCounter* version) noexcept
             : slot_(slot), version_(version) {}
+
+        /**
+         * @brief Binds a tracked slot with an optional owner-supplied pre-write check.
+         *
+         * Reads do not invoke the check. A throwing check prevents both assignment and
+         * counter advancement. The owner keeps the function alive for the proxy's lifetime;
+         * this proxy neither copies the function nor allocates storage for it.
+         *
+         * @param slot Bounds-checked element storage.
+         * @param version Owner's mutation counter.
+         * @param beforeWrite Optional function invoked before every write.
+         */
+        constexpr ElementReference(T* slot, MutationCounter* version,
+                                   const std::function<void()>* beforeWrite) noexcept
+            : slot_(slot), version_(version), beforeWrite_(beforeWrite) {}
 
         /** @brief Copies the alias, like copying a pointer; mutates nothing. */
         constexpr ElementReference(const ElementReference&) noexcept = default;
@@ -234,6 +257,7 @@ namespace System::Collections::detail
          */
         T operator++(int)
         {
+            validateWrite();
             T previous = *slot_;
             const Advance advance{version_};
             ++*slot_;
@@ -246,6 +270,7 @@ namespace System::Collections::detail
          */
         T operator--(int)
         {
+            validateWrite();
             T previous = *slot_;
             const Advance advance{version_};
             --*slot_;
