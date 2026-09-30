@@ -212,12 +212,19 @@ if(SHARP_RUNTIME_BUILD_BENCHMARKS)
             bench/StringBenchmark.cpp
     )
 
+    add_executable(SharpRuntimeCollectionsBench
+            bench/CollectionsBenchmark.cpp
+    )
+
     target_link_libraries(SharpRuntimeBench PRIVATE SharpRuntime::All)
+    target_link_libraries(SharpRuntimeCollectionsBench PRIVATE SharpRuntime::Collections.Core)
 
     if(NOT MSVC)
         target_compile_options(SharpRuntimeBench PRIVATE -Wall -Wextra -Werror -O2)
+        target_compile_options(SharpRuntimeCollectionsBench PRIVATE -Wall -Wextra -Werror -O2)
     else()
         target_compile_options(SharpRuntimeBench PRIVATE /O2)
+        target_compile_options(SharpRuntimeCollectionsBench PRIVATE /O2)
     endif()
 endif()
 

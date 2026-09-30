@@ -3,6 +3,11 @@
 
 # NEXT.md
 
+> **2026-09-30 — current entry point:** See
+> [the human development handoff](docs/HumanDevelopmentHandoff-2026-09-30.md)
+> for the dated current state, ticket database, audit scope, and human-owned
+> C++ workflow. The following entries are historical implementation records.
+
 > **2026-09-19 — SAMPLE-014 consumer repair on `next`.** Spacewar now uses the shared
 > `XmlSerializer<Settings>` directly for its original `File.Create`/`File.OpenRead` stream
 > routes. The serializer's stream write overload keeps the caller's stream open, a present

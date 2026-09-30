@@ -249,15 +249,15 @@ TEST(TimerExceptionBoundaryPinTests, Fix2155_ElapsedReportsTheRaisingTimerAsItsS
     EXPECT_EQ(seen, static_cast<System::Object*>(&timer));
 }
 
-TEST(TimerExceptionBoundaryPinTests, Fix2155_TheLayoutCostIsExactlyOneVptr) {
-    // The price the approval paid for, pinned so it cannot grow unnoticed: sizeof 104 -> 112 and a
-    // new vtable. Measured in build-probe before and after.
-    //
-    // Asserted as a RELATIONSHIP as well as a literal, so a platform with a different pointer width
-    // keeps the pin meaningful and a SECOND base (or a stored member) still breaks it.
-    static_assert(sizeof(Timer) == 112, "#2155: 104 + one vptr");
-    static_assert(sizeof(Timer) == 104 + sizeof(void*), "#2155: the growth is exactly one vptr");
+TEST(TimerExceptionBoundaryPinTests, Fix2155_AndGspJ1_LayoutIsPinned) {
+    // #2155 added the Object base and one vptr: Timer was 104 -> 112 bytes with the then-current
+    // 64-byte EventHandler. GSP-J1 shrank EventHandler to 16 bytes, making Timer 112 -> 64.
+    // The 48-byte remainder still includes the Object base and all Timer-owned state.
+#if defined(__linux__) && defined(__x86_64__)
+    static_assert(sizeof(Timer) == 48 + sizeof(System::EventHandler<ElapsedEventArgs>));
+    static_assert(sizeof(Timer) == 64, "GSP-J1: Timer shrank with its public Elapsed member");
     static_assert(alignof(Timer) == 8);
+#endif
 
     // The vptr is the FIRST subobject: an Object* obtained from a Timer* points at the same
     // address. Pinned because it is the half sizeof cannot express.

@@ -7,7 +7,7 @@ Sharp Runtime exposes independently selectable CMake targets. Applications
 request only their direct components; Sharp Runtime resolves and enables the
 transitive dependency closure.
 
-The registered graph currently contains 41 physical modules and 91 direct
+The registered graph currently contains 44 physical modules and 109 direct
 production dependency edges. The boundary validator reports no cycles,
 duplicate include paths, orphan files, undeclared edges, stale edges, or
 visibility mismatches. The dependency allow-list is empty.
@@ -45,10 +45,10 @@ The application does not list transitive dependencies. For a standalone
 configuration, pass a semicolon-separated list:
 
 ```bash
-cmake -S . -B build-components \
+cmake -S . -B build-modular \
   -DSHARP_RUNTIME_BUILD_TESTS=OFF \
   '-DSHARP_RUNTIME_COMPONENTS=IO;IO.Hashing'
-cmake --build build-components --parallel 3
+cmake --build build-modular --parallel 2
 ```
 
 An unset or empty list selects `All` in a standalone repository build.
@@ -106,11 +106,11 @@ Tests no longer force `All`. A selective configuration builds the requested
 component's tests plus explicitly declared test-only production dependencies:
 
 ```bash
-cmake -S . -B build-json-tests \
+cmake -S . -B build-modular \
   -DSHARP_RUNTIME_COMPONENTS=Text.Json \
   -DSHARP_RUNTIME_BUILD_TESTS=ON
-cmake --build build-json-tests --target SharpRuntimeTests --parallel 3
-scripts/run_component_tests.sh build-json-tests
+cmake --build build-modular --target SharpRuntimeTests --parallel 2
+scripts/run_component_tests.sh build-modular
 ```
 
 That command runs only `SharpRuntimeTests_Text_Json`. It does not build tests
@@ -122,7 +122,7 @@ For the repository-wide suite:
 cmake -S . -B build \
   -DSHARP_RUNTIME_COMPONENTS=All \
   -DSHARP_RUNTIME_BUILD_TESTS=ON
-cmake --build build --target SharpRuntimeTests --parallel 3
+cmake --build build --target SharpRuntimeTests --parallel 2
 scripts/run_component_tests.sh build
 ```
 
@@ -131,8 +131,10 @@ are named `SharpRuntimeTests_<Component>`; genuinely cross-module scenarios
 are in `SharpRuntimeIntegrationTests`. CTest also discovers every individual
 GoogleTest case.
 
-The verified 2026-07-25 `All` baseline contains 12,681 tests across 36
-component executables and one integration executable.
+The 2026-09-30 `All` run passed 18,123 tests across 41 executables with zero
+failures or skips using the original Yacht SOAP fixture. For the full dated
+verification status, see the
+[human development handoff](HumanDevelopmentHandoff-2026-09-30.md).
 
 ## Boundary validation and CI
 
@@ -142,13 +144,18 @@ Run the full native gate with:
 scripts/local_ci_check.sh build
 ```
 
+For a zero-skip run, provide `SHARP_RUNTIME_SOAP_ENDPOINT` for the two live
+`ServiceModel` tests. With the original Yacht fixture available, the helper
+documented in the root `README.md` starts it on a private port and runs this
+whole gate via `--local-ci`.
+
 Run the selective consumer matrix with:
 
 ```bash
 scripts/check_selective_components.sh
 ```
 
-`.github/workflows/components.yml` runs the ten selective configurations and
+`.github/workflows/components.yml` runs the eleven selective configurations and
 the full compatibility build on Ubuntu for pushes and pull requests. It does
 not currently provide Windows, macOS, or Emscripten coverage.
 
@@ -173,7 +180,7 @@ External libraries are configured only by their owning component:
 A `Text.Json`-only build configures none of `Threading`, `TimeZone`, ZLIB,
 miniz, tinyxml2, SDL, socket, or platform-crypto targets. The negative
 consumer fixtures also cover private/sibling header leakage: `Text.Json` must not expose
-`Collections.Core` or `Collections.ObjectModel`, and `Xml.Linq` must not
+`Collections.Blocking` or `Collections.ObjectModel`, and `Xml.Linq` must not
 expose Xml's private `Diagnostics` dependency.
 
 ## Intentional ownership exceptions

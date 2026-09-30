@@ -8,7 +8,7 @@ This file is generated from the CMake component registrations. Run
 `python3 scripts/generate_component_catalog.py` after changing module
 metadata, or use `--check` to verify that the committed catalogue is current.
 
-The graph contains **44 physical modules** and **108 direct production dependency edges**.
+The graph contains **44 physical modules** and **109 direct production dependency edges**.
 
 For each row, the component name and representative public header form a
 minimal consumer example using the template below:
@@ -70,8 +70,8 @@ for maintainers and are not part of the consumer include surface.
 | `Security.Cryptography.Random` | `modules/security-cryptography-random` | static | `Core.Base` | — | — | `bcrypt` on Windows (private) | `System/Security/Cryptography/RNGCryptoServiceProvider.hpp` |
 | `Xml` | `modules/xml` | static | `Core.Base`, `Uri` | `Diagnostics`, `TimeZone` | `TimeZone`, `Xml.Linq` | vendored tinyxml2 (public) | `System/Xml/ConformanceLevel.hpp` |
 | `Xml.Linq` | `modules/xml-linq` | static | `Core.Base`, `Xml` | — | — | — | `System/Xml/Linq/Extensions.hpp` |
-| `Xml.Serialization` | `modules/xml-serialization` | interface | `Collections.Core`, `IO`, `Xml` | — | — | — | `System/Xml/Serialization/IXmlSerializable.hpp` |
-| `ServiceModel` | `modules/service-model` | static | `Core.Base`, `Net.Http`, `Uri`, `Xml` | — | `Net.Sockets` | — | `System/ServiceModel/BasicHttpBinding.hpp` |
+| `Xml.Serialization` | `modules/xml-serialization` | interface | `Collections.Core`, `Core.Base`, `IO`, `Xml` | — | — | — | `System/Xml/Serialization/IXmlSerializable.hpp` |
+| `ServiceModel` | `modules/service-model` | static | `Core.Base`, `Uri`, `Xml` | `Net.Http` | `Net.Http`, `Net.Sockets` | — | `System/ServiceModel/BasicHttpBinding.hpp` |
 
 ## Compatibility components
 

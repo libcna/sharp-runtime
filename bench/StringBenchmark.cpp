@@ -9,10 +9,11 @@
 // SHARP_RUNTIME_BUILD_BENCHMARKS CMake option). Run manually (use a Release config -- this
 // project's default CMake build applies no optimization flags to the SHARP_RUNTIME library
 // itself, only to this benchmark's own translation unit, so an unoptimized library build makes
-// cross-run/cross-change comparisons meaningless):
-//   cmake -S . -B build-bench -DSHARP_RUNTIME_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_TYPE=Release
-//   cmake --build build-bench --target SharpRuntimeBench --parallel 3
-//   ./build-bench/SharpRuntimeBench
+// cross-run/cross-change comparisons meaningless). Use the repository's shared build-probe/
+// directory for the isolated Release measurement and at most two build jobs:
+//   cmake -S . -B build-probe -DSHARP_RUNTIME_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_TYPE=Release
+//   cmake --build build-probe --target SharpRuntimeBench --parallel 2
+//   ./build-probe/SharpRuntimeBench
 #include <chrono>
 #include <cstdio>
 #include <string>

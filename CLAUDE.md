@@ -6,21 +6,27 @@
 
 ---
 
+## Human ownership of future C++ development
+
+The maintainer intends to write, review, and commit future C++ implementation changes personally.
+AI is a consultant for code reading, design alternatives, .NET reference checks, test ideas,
+profiling interpretation, and review. It must not author implementation patches or silently
+change tickets in routine future work. A direct, task-specific instruction from the maintainer
+may authorize an exception, as it does for the isolated 2026-09-30 handoff branch.
+See `docs/HumanDevelopmentHandoff-2026-09-30.md` for the takeover workflow.
+
 ## Non-negotiable rules
 
 1. **Zero errors, zero warnings** before any commit. `cmake --build build --parallel 2` must be clean.
 2. **No test-count regression.** `scripts/run_component_tests.sh build` must show no failures or
-   skips. The current verified baseline is **17,840 tests across 38 executables with THE GATE
-   GREEN** — 17,840 run, 17,840 passed, 0 failed, 0 skipped, measured on 2026-08-22 by post-#1941
-   consumer-audit ticket #2418 after a cache-disabled full repository build at two jobs and the
-   complete local CI gate.
-   It is +59 on #2417's 17,781 final-audit closure: Core.Base +22, Globalization +1, IO +5,
-   Net +6, Net.Http.Headers +2, TimeZone +18, and Xml +5; all other executables are unchanged.
-   Graph 41 / 96, test-only seams 5 / 22, negative fixtures 55 / 284. The Doxygen 1.9.8
-   no-regression baseline is 2,675 and is enforced both locally and in
-   CI. Ticket #2419 additionally makes the complete production graph a permanent Clang gate:
-   Clang 19.1.7 builds all 219 first-party translation units with `-Werror`, 0 warnings and
-   0 errors, from both `local_ci_check.sh` and the GitHub full job.
+   skips. The latest verified test count is **18,123 tests across 41 executables** — 18,123
+   passed, 0 failed, 0 skipped on 2026-09-30 in the isolated handoff worktree. The two live
+   ServiceModel tests require `SHARP_RUNTIME_SOAP_ENDPOINT`; the complete run used the unchanged
+   original Yacht service through `scripts/run_component_tests_with_soap_fixture.py` on a private
+   loopback port. Graph 44 / 109; test-only seams 5 / 22; negative fixtures 55 / 284.
+   Clang 19.1.7 built all 230 first-party production translation units with `-Werror`, zero
+   warnings and errors. Doxygen 1.9.8 emitted 2,674 warnings under the unchanged no-regression
+   ceiling of 2,675. The earlier 17,840 / 38 result belongs to 2026-08-22.
    Historical test-count ledger: see `docs/TestCountLedger.md` (moved out of always-loaded scope 2026-08-28; it was 88.6% of this file's bytes).
 3. **Push only to `feature/work`.** Never push to `develop` or `master`, and never create tags, without explicit per-action user approval.
 4. **SPDX header on every project source/header** — `// SPDX-License-Identifier: MIT` + copyright + .NET attribution. Vendored sources retain their upstream headers; Markdown uses an HTML SPDX comment where one is present.

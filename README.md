@@ -5,13 +5,14 @@ Sharp Runtime is a C++23 implementation of a practical subset of the .NET
 ports, especially CNA, without attempting to implement a CLR, JIT, garbage
 collector, or the complete .NET platform.
 
-The repository currently builds as 41 independently selectable CMake
-components. The verified Linux baseline on **2026-08-22** is a warning-free full build with
-**17,840 tests across 38 test executables — 17,840 passed, 0 failed, 0 skipped**. The component
-graph has 96 direct production edges; all ten selective-component configurations, every module
-boundary, generated catalogue, audit/plan cross-reference and the bounded Doxygen gate are checked
-locally. The paragraph below is the historical chain up to 2026-07-29 and is retained rather than
-rewritten; every later reading is recorded batch by batch in `NEXT.md`.
+The repository currently builds as **44 independently selectable CMake components** with
+**109 direct production edges**. The full component test run on the 2026-09-30
+handoff branch passed **18,123/18,123 tests across 41 executables**, with zero
+failures or skips, using the original Yacht SOAP fixture for two live tests. The
+historical 2026-08-22 baseline was 17,840 tests across 38 executables. See
+`docs/HumanDevelopmentHandoff-2026-09-30.md` for the
+dated audit, ticket database, and current issue inventory. `NEXT.md` retains the
+historical implementation ledger.
 
 The verified Linux baseline on 2026-07-29 was a warning-free build
 with **14,070 passing tests across 37 test executables**. (This figure had been
@@ -85,10 +86,10 @@ actual binaries are component-scoped, for example:
 For a library-only build:
 
 ```bash
-cmake -S . -B build-no-tests \
+cmake -S . -B build-modular \
   -DSHARP_RUNTIME_COMPONENTS=All \
   -DSHARP_RUNTIME_BUILD_TESTS=OFF
-cmake --build build-no-tests --parallel 2
+cmake --build build-modular --parallel 2
 ```
 
 The complete local validation gate performs boundary checks, a warning-free
@@ -99,7 +100,18 @@ scripts/local_ci_check.sh build
 ```
 
 Some HTTP, socket, and ping tests require the environment to permit local
-network operations.
+network operations. Two `ServiceModel` tests also require a running original
+Yacht SOAP service. Without `SHARP_RUNTIME_SOAP_ENDPOINT` they report skips,
+which do not satisfy the repository's zero-skip gate. If the original fixture
+is available, run the complete local gate with a private, disposable server:
+
+```bash
+python3 scripts/run_component_tests_with_soap_fixture.py \
+  /path/to/original/Yacht/xna4-build/bin build --local-ci
+```
+
+The helper uses the unchanged original service and removes its copy after the
+gate. Its path is an external test prerequisite, not part of this repository.
 
 ## Selecting CMake components
 
@@ -156,11 +168,11 @@ A selective test configuration builds only the requested component's tests,
 plus explicitly declared test-only dependencies:
 
 ```bash
-cmake -S . -B build-json-tests \
+cmake -S . -B build-modular \
   -DSHARP_RUNTIME_COMPONENTS=Text.Json \
   -DSHARP_RUNTIME_BUILD_TESTS=ON
-cmake --build build-json-tests --target SharpRuntimeTests --parallel 2
-scripts/run_component_tests.sh build-json-tests
+cmake --build build-modular --target SharpRuntimeTests --parallel 2
+scripts/run_component_tests.sh build-modular
 ```
 
 ## Repository layout
@@ -188,9 +200,9 @@ The component graph is enforced rather than documented only:
 - `test/validate_module_boundaries_test.py` exercises negative validator
   fixtures.
 - `scripts/generate_component_catalog.py --check` rejects catalogue drift.
-- `scripts/check_selective_components.sh` defines ten isolated positive
+- `scripts/check_selective_components.sh` defines eleven isolated positive
   consumers and negative leakage fixtures.
-- `scripts/check_clang_production_build.sh` builds all 219 first-party
+- `scripts/check_clang_production_build.sh` builds all 230 first-party
   production translation units with Clang, tests disabled, and verifies from
   the compile database that every one still carries `-Werror`.
 - `scripts/check_negative_consumer_fixtures.py` compiles every negative consumer
@@ -206,11 +218,15 @@ The component graph is enforced rather than documented only:
   compatibility build on Ubuntu for pushes and pull requests. The full job
   includes both the GCC build/test gate and the Clang production warning gate.
 
-At the current baseline the graph has **41 physical modules and 96 direct
-production dependency edges**, with no allow-listed exception. The boundary
-validator, the complete ten-job selective matrix, and the full build/test gate
-pass. The Text.Json negative assertion confirms that the target does not
-configure `Threading` or `TimeZone`.
+The GitHub full job currently has no original Yacht SOAP fixture, so its two
+live `ServiceModel` tests skip and the zero-skip gate fails. This existing CI
+gap is tracked as ticket #2421; the private-fixture helper above verifies the
+whole local gate without filtering the tests.
+
+The graph has **44 physical modules and 109 direct production dependency
+edges**, with no allow-listed exception. The boundary validator and local/CI
+matrix parity pass on the handoff branch. The Text.Json negative assertion
+confirms that the target does not configure `Threading` or `TimeZone`.
 
 ## Platform status
 
@@ -220,8 +236,8 @@ Clang; other platform evidence is narrower:
 
 | Platform/toolchain | Verified scope |
 |---|---|
-| Linux/GCC | Current warning-free full component build and all 17,840 tests, with no failures or skips. |
-| Linux/Clang | Clang 19.1.7 builds all 219 first-party production translation units with `-Wall -Wextra -Werror`, 0 warnings and 0 errors. Tests remain covered by the Linux/GCC row. The production-only gate runs locally and in GitHub CI. |
+| Linux/GCC | Clean two-job full build; 18,123/18,123 tests across 41 executables on 2026-09-30 with the original Yacht SOAP fixture, 0 failures/skips. The complete local gate passed; ticket #2421 tracks provisioning that fixture in GitHub CI. |
+| Linux/Clang | Clang 19.1.7 built all 230 first-party production translation units with `-Wall -Wextra -Werror`, 0 warnings and 0 errors on the handoff branch. Tests remain covered by the Linux/GCC row. The production-only gate runs locally and in GitHub CI. |
 | Windows/MinGW | MinGW-w64 GCC 14-win32/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. GoogleTest was not cross-built and repository CI remains Ubuntu-only. |
 | Emscripten | Emscripten 5.0.7/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. Tests were not cross-built or run, and some runtime APIs deliberately throw `PlatformNotSupportedException`. |
 | macOS/Apple Clang | Real downstream Xcode 15.4 builds drove portability fixes on 2026-07-20; this repository has no macOS job or recorded full standalone test baseline. |
@@ -232,15 +248,15 @@ The i686 boundary has a dedicated regression target that configures and builds
 the complete supported surface without requiring Wine:
 
 ```bash
-cmake -S . -B cmake-build-mingw-i686 -G Ninja \
+cmake -S . -B build-probe -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/mingw-w64-i686.cmake \
   -DSHARP_RUNTIME_BUILD_TESTS=OFF \
   -DSHARP_RUNTIME_BUILD_I686_REGRESSION=ON \
   -DZLIB_INCLUDE_DIR=/path/to/i686/include \
   -DZLIB_LIBRARY=/path/to/i686/lib/libz.a \
   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-cmake --build cmake-build-mingw-i686 \
-  --target SharpRuntimeI686CompileBoundary --parallel 4
+cmake --build build-probe \
+  --target SharpRuntimeI686CompileBoundary --parallel 2
 ```
 
 Compile portability and runtime feature availability are separate. Unsupported
@@ -1266,13 +1282,16 @@ Versioned planning is split by purpose:
 
 - [plan.md](plan.md) records the current roadmap and completed architecture
   milestones.
-- [NEXT.md](NEXT.md) is the concise cold-start handoff: verified baseline,
-  recent changes, known gaps, and the next bounded tasks.
+- `docs/HumanDevelopmentHandoff-2026-09-30.md` is the dated handoff and issue
+  inventory for the human-led transition.
+- [NEXT.md](NEXT.md) is the historical implementation ledger; its first dated
+  entry may be useful, but older entries do not describe the current HEAD.
 - [CLAUDE.md](CLAUDE.md) defines contributor invariants and the porting
   checklist.
 - [prompt.md](prompt.md) defines the local SQLite workflow.
 
-Maintainers also use a local, git-ignored `plan.sqlite3` database:
+Maintainers also use the tracked `plan.sqlite3` planning database. Its name is
+in `.gitignore`, but it remains tracked because Git already indexed it:
 
 - `task` classifies .NET types as `ported`, `ignore`/legacy `ignored`, or
   `tobedecided`.
@@ -1292,8 +1311,9 @@ sqlite3 plan.sqlite3 \
   "SELECT ticket_no, priority, title FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"
 ```
 
-The database is not part of a fresh clone; these commands are for maintainers
-who have the local planning database.
+The database is part of a fresh clone. Its latest ticket update before this
+handoff was 2026-08-22, so a zero-`todo` query does not prove that newer code
+has no work left.
 
 ## API documentation
 

@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <type_traits>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 #include "System/EventHandler.hpp"
@@ -374,6 +375,17 @@ TEST(EventHandlerTests, CopiesAreIndependentUnlessShared) {
     EXPECT_EQ(calls, 1);
     EXPECT_EQ(copy.Size(), 2u);
     EXPECT_FALSE(copy.IsShared());
+}
+
+TEST(EventHandlerTests, GspJ1_SharedStatePointerLayoutIsPinned) {
+    // GSP-J1 moved the per-event vector, token and replay hook behind one shared state pointer.
+    // On the verified LP64/libstdc++ baseline the public type shrank from 64 to 16 bytes.
+    // This is a consumer-rebuild boundary, including every owner that stores the event by value.
+    static_assert(sizeof(EventHandler<EventArgs>) == sizeof(std::shared_ptr<void>));
+#if defined(__linux__) && defined(__x86_64__)
+    static_assert(sizeof(EventHandler<EventArgs>) == 16);
+    static_assert(alignof(EventHandler<EventArgs>) == 8);
+#endif
 }
 
 TEST(EventHandlerTests, SharedCopiesSeeOneSubscriberList) {

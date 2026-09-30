@@ -1,5 +1,21 @@
 # Sharp Runtime plan
 
+## 2026-09-30 — human development handoff
+
+The active handoff and current issue inventory are in
+`docs/HumanDevelopmentHandoff-2026-09-30.md` on branch
+`codex/human-handoff-20260930`. The entries below are dated historical records;
+their statements about the current branch, dependency graph, ticket status,
+and verified gate must be read with their recorded date. `plan.sqlite3` now
+contains ticket #2420 for the post-August audit delta, #2421 for the missing
+GitHub SOAP fixture, and refreshed notes for #1773 and #2381. A fresh 2026-09-30
+test run passed **18,123 / 18,123 across
+41 executables**, with zero failures/skips using the original Yacht SOAP fixture;
+Clang production and the Doxygen no-regression gate also passed. The complete
+local gate and downstream rebuild are recorded in the handoff report. Future
+C++ implementation is human-owned; AI acts as a
+consultant unless the maintainer explicitly assigns a coding task.
+
 ## SAMPLE-104 — entry enumeration and Framework diagnostics — 2026-09-28
 
 Bounded maintenance on the owner's **feature/gamer-services-collections** branch; preserve it.
