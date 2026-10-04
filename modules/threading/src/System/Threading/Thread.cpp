@@ -13,6 +13,8 @@
 
 namespace System::Threading {
 
+    thread_local std::shared_ptr<Thread::RunState> Thread::currentThreadState_;
+
     intcs Thread::GetCurrentProcessorId() {
 #if defined(_WIN32)
         return static_cast<intcs>(GetCurrentProcessorNumber());

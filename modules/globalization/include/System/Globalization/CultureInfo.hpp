@@ -675,11 +675,7 @@ private:
 // Absent by default: a thread that has chosen nothing falls through to the process-wide default
 // and then to the invariant culture, which is .NET's chain
 // (`s_currentThreadCulture ?? s_DefaultThreadCurrentCulture ?? s_userDefaultCulture`).
-inline thread_local std::optional<CultureInfo> CultureInfo::currentCulture_{};
-inline thread_local std::optional<CultureInfo> CultureInfo::currentUICulture_{};
 inline CultureInfo::SharedCultureSlot CultureInfo::defaultThreadCurrentCulture_{};
 inline CultureInfo::SharedCultureSlot CultureInfo::defaultThreadCurrentUICulture_{};
-inline thread_local std::shared_ptr<const CultureInfo> CultureInfo::currentCultureHold_{};
-inline thread_local std::shared_ptr<const CultureInfo> CultureInfo::currentUICultureHold_{};
 
 } // namespace System::Globalization

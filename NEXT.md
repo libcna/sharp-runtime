@@ -3,6 +3,17 @@
 
 # NEXT.md
 
+> **2026-10-05 — MSR-030 Windows consumer qualification.** The CNA sample campaign's full
+> MinGW-w64 consumer build exposed four target-platform defects: Windows `SOCKET` values were
+> narrowed to signed `int` in `ServiceHost`, its listener started before `WSAStartup`, Socket's
+> async teardown used POSIX `SHUT_RDWR`, and MinGW emitted duplicate TLS initializers for the
+> non-trivial inline thread-local state in `Thread` and `CultureInfo`. The socket handles now keep
+> pointer width, Winsock initializes once, shutdown selects the platform constant, and non-trivial
+> TLS storage has one out-of-line definition. The seven-renderer CNA/cna-samples Windows cross-build
+> links the complete corpus. The warning-free two-job build and unchanged original Yacht SOAP
+> fixture pass **18,123/18,123 tests across 41 executables**, with zero failures/skips. This is
+> cross-build evidence, not native Windows runtime qualification.
+>
 > **2026-09-30 — current entry point:** See
 > [the human development handoff](docs/HumanDevelopmentHandoff-2026-09-30.md)
 > for the dated current state, ticket database, audit scope, and human-owned

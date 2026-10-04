@@ -65,7 +65,7 @@ namespace System::Threading {
         // thread receives a distinct ID from the same counter as wrapped threads (#1958).
         // Holding the shared_ptr here (rather than a raw Thread*) means CurrentThreadProxy never
         // dereferences the (possibly already-destroyed) Thread object itself.
-        inline static thread_local std::shared_ptr<RunState> currentThreadState_;
+        static thread_local std::shared_ptr<RunState> currentThreadState_;
 
         // #1958 / SR-AUD-193. A thread NOT started through this class used to report managed id
         // 1 -- the main thread's -- so every external thread collided with it and with each

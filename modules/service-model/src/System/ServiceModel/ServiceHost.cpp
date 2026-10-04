@@ -14,6 +14,7 @@
 #    include <winsock2.h>
 #    include <ws2tcpip.h>
 using socket_t = SOCKET;
+constexpr socket_t kInvalidSocket = INVALID_SOCKET;
 #    define SM_CLOSE_SOCKET closesocket
 #else
 #    include <arpa/inet.h>
@@ -21,6 +22,7 @@ using socket_t = SOCKET;
 #    include <sys/socket.h>
 #    include <unistd.h>
 using socket_t = int;
+constexpr socket_t kInvalidSocket = -1;
 #    define SM_CLOSE_SOCKET ::close
 #endif
 
@@ -31,6 +33,26 @@ using socket_t = int;
 namespace System::ServiceModel {
 
 namespace {
+
+bool IsInvalidSocket(socket_t socket)
+{
+    return socket == kInvalidSocket;
+}
+
+void InitializeSockets()
+{
+#if defined(_WIN32)
+    static std::once_flag initialized;
+    static int result = 0;
+    std::call_once(initialized, [] {
+        WSADATA data{};
+        result = ::WSAStartup(MAKEWORD(2, 2), &data);
+    });
+    if (result != 0) {
+        throw CommunicationException("ServiceHost: could not initialize Windows sockets.");
+    }
+#endif
+}
 
 std::string LocalName(const std::string& name)
 {
@@ -185,8 +207,9 @@ void ServiceHost::Open()
         }
     }
 
+    InitializeSockets();
     const socket_t listener = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (listener < 0) {
+    if (IsInvalidSocket(listener)) {
         throw CommunicationException("ServiceHost: could not create a listening socket.");
     }
 
@@ -205,16 +228,17 @@ void ServiceHost::Open()
         throw CommunicationException("ServiceHost: could not listen on " + uri + ".");
     }
 
-    listenSocket_ = static_cast<int>(listener);
+    listenSocket_ = static_cast<std::uintptr_t>(listener);
     open_ = true;
-    listener_ = std::thread([this] { Listen(); });
+    listener_ = std::thread([this, listenerSocket = *listenSocket_] { Listen(listenerSocket); });
 }
 
-void ServiceHost::Listen()
+void ServiceHost::Listen(std::uintptr_t listenerSocket)
 {
+    const socket_t listener = static_cast<socket_t>(listenerSocket);
     while (open_) {
-        const socket_t connection = ::accept(static_cast<socket_t>(listenSocket_), nullptr, nullptr);
-        if (connection < 0) {
+        const socket_t connection = ::accept(listener, nullptr, nullptr);
+        if (IsInvalidSocket(connection)) {
             if (!open_) {
                 break;
             }
@@ -331,19 +355,20 @@ void ServiceHost::Close()
 
     open_ = false;
 
-    if (listenSocket_ >= 0) {
+    if (listenSocket_.has_value()) {
+        const socket_t listener = static_cast<socket_t>(*listenSocket_);
 #if defined(_WIN32)
-        ::shutdown(static_cast<socket_t>(listenSocket_), SD_BOTH);
+        ::shutdown(listener, SD_BOTH);
 #else
-        ::shutdown(static_cast<socket_t>(listenSocket_), SHUT_RDWR);
+        ::shutdown(listener, SHUT_RDWR);
 #endif
-        SM_CLOSE_SOCKET(static_cast<socket_t>(listenSocket_));
-        listenSocket_ = -1;
+        SM_CLOSE_SOCKET(listener);
     }
 
     if (listener_.joinable()) {
         listener_.join();
     }
+    listenSocket_.reset();
 }
 
 } // namespace System::ServiceModel

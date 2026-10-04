@@ -4,6 +4,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -100,7 +101,7 @@ namespace System::ServiceModel {
         [[nodiscard]] const EndpointAddress& getBaseAddressProperty() const { return baseAddress_; }
 
     private:
-        void Listen();
+        void Listen(std::uintptr_t listenerSocket);
         [[nodiscard]] std::string HandleRequest(const std::string& requestLine,
                                                 const std::string& soapAction,
                                                 const std::string& body);
@@ -115,7 +116,7 @@ namespace System::ServiceModel {
 
         std::atomic<bool> open_{false};
         std::thread listener_;
-        int listenSocket_ = -1;
+        std::optional<std::uintptr_t> listenSocket_;
         std::mutex mutex_;
     };
 

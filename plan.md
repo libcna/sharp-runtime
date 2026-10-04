@@ -1,5 +1,21 @@
 # Sharp Runtime plan
 
+## 2026-10-05 — MSR-030 Windows consumer qualification
+
+The authorized CNA multi-renderer sample campaign cross-linked the complete Windows sample corpus
+against sharp-runtime and exposed platform defects that ordinary single-translation-unit builds had
+not reached. `ServiceHost` now preserves the unsigned pointer-sized Winsock `SOCKET`, initializes
+Winsock once, and passes the listener value into its worker without narrowing. Socket async teardown
+uses `SD_BOTH` on Windows. `Thread` and `CultureInfo` retain their per-thread semantics while moving
+non-trivial TLS definitions out of public headers, avoiding MinGW's duplicate TLS initializer
+symbols in multi-TU applications.
+
+The existing `build/` tree was reused. The full warning-free build ran at the repository's stricter
+two-job ceiling. The complete component gate used the unchanged Yacht SOAP fixture on a private
+loopback port and passed **18,123/18,123 tests across 41 executables**, zero failures and zero skips.
+The Windows seven-renderer CNA/cna-samples cross-build links completely; native Windows execution is
+still a separate qualification phase.
+
 ## 2026-09-30 — human development handoff
 
 The active handoff and current issue inventory are in

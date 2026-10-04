@@ -144,6 +144,7 @@ namespace {
      * The flag is added to **sends only**. A receive cannot raise SIGPIPE, and adding a flag a
      * platform does not define would not compile.
      */
+#if !defined(_WIN32)
     int nativeSendFlags(SocketFlags flags) {
 #if defined(MSG_NOSIGNAL)
         return nativeSocketFlags(flags) | MSG_NOSIGNAL;
@@ -153,6 +154,7 @@ namespace {
         return nativeSocketFlags(flags);
 #endif
     }
+#endif
 
     // Builds a native sockaddr for `ep` into `storage`, returning the address length.
     // Supports IPEndPoint (v4/v6) and UnixDomainSocketEndPoint.
@@ -335,7 +337,13 @@ void Socket::waitForAsyncOperations(bool discardDescriptor) noexcept {
     // be discarded. shutdown() is irreversible: using it to drain the source side of a move would
     // transfer a disabled socket. Source moves therefore stop AcceptAsync through its bounded
     // poll loop but let the other operations complete naturally (#2417).
-    if (needsShutdown && fd_ >= 0) ::shutdown(static_cast<int>(fd_), SHUT_RDWR);
+    if (needsShutdown && fd_ >= 0) {
+#if defined(_WIN32)
+        ::shutdown(toSk(fd_), SD_BOTH);
+#else
+        ::shutdown(static_cast<int>(fd_), SHUT_RDWR);
+#endif
+    }
 #endif
     std::unique_lock<std::mutex> lock(asyncOps_->mutex);
     asyncOps_->idle.wait(lock, [this] { return asyncOps_->inFlight == 0; });
