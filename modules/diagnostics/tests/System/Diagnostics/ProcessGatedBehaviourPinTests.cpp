@@ -37,11 +37,16 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <sys/proc.h>
+#include <sys/sysctl.h>
+#endif
 
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -66,7 +71,24 @@ ProcessStartInfo shellStartInfo(const std::string& script, bool redirectOut = fa
 // Reads /proc/<pid>/stat's state field WITHOUT reaping the process -- waitpid() would reap it
 // and destroy the very state these pins measure. The comm field can contain spaces and
 // parentheses, so the state is taken from just after the LAST ')'.
+//
+// Darwin has no procfs. sysctl(KERN_PROC_PID) is what ps(1) reads there and, unlike libproc's
+// proc_pidinfo, it still answers for a zombie; its p_stat is mapped to the same letters.
 char processState(pid_t pid) {
+#if defined(__APPLE__)
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, static_cast<int>(pid)};
+    struct kinfo_proc info {};
+    std::size_t length = sizeof(info);
+    if (::sysctl(mib, 4, &info, &length, nullptr, 0) != 0 || length == 0) return '\0';
+    switch (info.kp_proc.p_stat) {
+    case SIDL: return 'I';
+    case SRUN: return 'R';
+    case SSLEEP: return 'S';
+    case SSTOP: return 'T';
+    case SZOMB: return 'Z';
+    default: return '?';
+    }
+#else
     const std::string path = "/proc/" + std::to_string(static_cast<long>(pid)) + "/stat";
     std::FILE* file = std::fopen(path.c_str(), "re");
     if (file == nullptr) return '\0';
@@ -78,6 +100,16 @@ char processState(pid_t pid) {
     const std::size_t close = contents.rfind(')');
     if (close == std::string::npos || close + 2 >= contents.size()) return '\0';
     return contents[close + 2];
+#endif
+}
+
+// Runs the rest of a shell command line in a NEW SESSION, outside the launching shell's process
+// group, so only a parent-pid walk can reach it. util-linux's setsid(1) does not exist on macOS;
+// perl's POSIX::setsid makes the same system call and ships with every macOS.
+std::string newSession() {
+    if (std::filesystem::exists("/usr/bin/setsid") || std::filesystem::exists("/bin/setsid"))
+        return "setsid";
+    return "/usr/bin/perl -MPOSIX -e 'POSIX::setsid() or die; exec @ARGV or die'";
 }
 
 bool waitForProcessState(pid_t pid, char expected, std::chrono::milliseconds limit) {
@@ -294,7 +326,7 @@ TEST(ProcessGatedBehaviourPinTests, Fix2031_ASetsidDescendantIsKilledWithTheTree
     // already-exited child, and spawns a grandchild in a NEW SESSION that writes the witness one
     // second later.
     const std::string script =
-        "setsid /bin/sh -c 'sleep 1; printf alive > " + witness + "' >/dev/null 2>&1; "
+        newSession() + " /bin/sh -c 'sleep 1; printf alive > " + witness + "' >/dev/null 2>&1; "
         "exec sleep 5";
 
     Process process = Process::Start(shellStartInfo(script));
@@ -322,7 +354,7 @@ TEST(ProcessGatedBehaviourPinTests, Fix2031_TheWalkIsTransitiveNotOneLevel) {
     // shell -> setsid shell -> shell -> the writer. The witness is written by a
     // great-grandchild, which only a transitive walk reaches.
     const std::string script =
-        "setsid /bin/sh -c '/bin/sh -c \"sleep 1; printf alive > " + witness + "\" & sleep 5' "
+        newSession() + " /bin/sh -c '/bin/sh -c \"sleep 1; printf alive > " + witness + "\" & sleep 5' "
         ">/dev/null 2>&1; exec sleep 5";
 
     Process process = Process::Start(shellStartInfo(script));
@@ -343,7 +375,7 @@ TEST(ProcessGatedBehaviourPinTests, Fix2031_KillFalseStillLeavesTheDescendantAlo
     const std::string witness = makeUniqueWitnessPath();
     ASSERT_FALSE(witness.empty());
     const std::string script =
-        "setsid /bin/sh -c 'sleep 1; printf alive > " + witness + "' >/dev/null 2>&1; "
+        newSession() + " /bin/sh -c 'sleep 1; printf alive > " + witness + "' >/dev/null 2>&1; "
         "exec sleep 5";
 
     Process process = Process::Start(shellStartInfo(script));

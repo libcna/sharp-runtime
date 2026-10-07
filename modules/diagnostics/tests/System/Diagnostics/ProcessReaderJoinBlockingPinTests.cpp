@@ -35,6 +35,7 @@
 
 #include <gtest/gtest.h>
 
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -63,14 +64,16 @@ constexpr int kKeepAliveSeconds = 3;
 // cannot fail the test, and well above the milliseconds a non-blocking implementation would take.
 constexpr long kBlockedFloorMs = 1500;
 
-// /bin/sh is dash in this container, which FORKS rather than exec's for `sleep N`. That is the
-// point: the direct child is a shell whose own child inherits the redirected stdout and outlives
-// it, so the pipe stays open after the direct child is gone. (The other Process suites use
-// `exec sleep N` precisely to AVOID this shape; here it is the subject.)
+// The direct child is a shell whose own child inherits the redirected stdout and outlives it, so
+// the pipe stays open after the direct child is gone. (The other Process suites use `exec sleep N`
+// precisely to AVOID this shape; here it is the subject.) The trailing `; true` is what makes the
+// shell FORK for `sleep`: dash forks for a lone `sleep N`, but bash -- /bin/sh on macOS -- execs
+// the last command of `-c`, which would leave no grandchild at all.
 ProcessStartInfo grandchildHoldsThePipe() {
     ProcessStartInfo startInfo("/bin/sh");
     startInfo.getArgumentListProperty().push_back("-c");
-    startInfo.getArgumentListProperty().push_back("sleep " + std::to_string(kKeepAliveSeconds));
+    startInfo.getArgumentListProperty().push_back("sleep " + std::to_string(kKeepAliveSeconds) +
+                                                  "; true");
     startInfo.setRedirectStandardOutputProperty(true);
     return startInfo;
 }

@@ -26,6 +26,7 @@
 #include <unistd.h>
 
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 
 #include "System/ArgumentException.hpp"
@@ -36,6 +37,17 @@ using System::Diagnostics::Process;
 using System::Diagnostics::ProcessStartInfo;
 
 namespace {
+
+// coreutils' true/false live in /bin on Linux but only in /usr/bin on macOS.
+std::string coreutilsTool(const char* name) {
+    const std::string inBin = std::string("/bin/") + name;
+    return std::filesystem::exists(inBin) ? inBin : std::string("/usr/bin/") + name;
+}
+
+// getcwd() reports the physical directory, and on macOS /tmp is a symlink to /private/tmp
+// (.NET reports /private/tmp there too).
+std::string physicalTmp() { return std::filesystem::canonical("/tmp").string(); }
+
 
 constexpr const char* InheritedKey = "SHARP_RUNTIME_FORK_SAFETY_INHERITED_2026";
 constexpr const char* OverriddenKey = "SHARP_RUNTIME_FORK_SAFETY_OVERRIDDEN_2026";
@@ -168,11 +180,11 @@ TEST(ProcessForkSafetyTests, ManyEnvironmentVariablesAreAllDelivered) {
 }
 
 TEST(ProcessForkSafetyTests, InvalidVariableNamesAreStillRejectedBeforeForking) {
-    ProcessStartInfo startInfo("/bin/true");
+    ProcessStartInfo startInfo(coreutilsTool("true"));
     startInfo.getEnvironmentVariablesProperty()["INVALID=NAME"] = "value";
     EXPECT_THROW(Process::Start(startInfo), System::ArgumentException);
 
-    ProcessStartInfo emptyName("/bin/true");
+    ProcessStartInfo emptyName(coreutilsTool("true"));
     emptyName.getEnvironmentVariablesProperty()[""] = "value";
     EXPECT_THROW(Process::Start(emptyName), System::ArgumentException);
 }
@@ -188,7 +200,7 @@ TEST(ProcessForkSafetyTests, ExecFailureIsStillReportedSynchronously) {
 }
 
 TEST(ProcessForkSafetyTests, WorkingDirectoryFailureIsStillReportedSynchronously) {
-    ProcessStartInfo startInfo("/bin/true");
+    ProcessStartInfo startInfo(coreutilsTool("true"));
     startInfo.setWorkingDirectoryProperty("/definitely-missing-sharp-runtime-dir-2026");
     startInfo.getEnvironmentVariablesProperty()["SHARP_RUNTIME_FORK_SAFETY_X"] = "1";
     EXPECT_THROW(Process::Start(startInfo), System::InvalidOperationException);
@@ -202,7 +214,7 @@ TEST(ProcessForkSafetyTests, WorkingDirectoryIsStillHonouredAlongsideAnOverride)
     startInfo.setWorkingDirectoryProperty("/tmp");
     startInfo.getEnvironmentVariablesProperty()[OverriddenKey] = "ok";
 
-    EXPECT_EQ(captureShellOutput(startInfo), "/tmp:ok");
+    EXPECT_EQ(captureShellOutput(startInfo), physicalTmp() + ":ok");
 }
 
 TEST(ProcessForkSafetyTests, ZZZ_NoZombieChildrenRemain) {

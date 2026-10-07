@@ -26,6 +26,8 @@
 #  include <dirent.h>
 #  if defined(__APPLE__)
 #    include <crt_externs.h>
+#    include <sys/sysctl.h>
+#    include <vector>
 #  endif
 #  define SHARP_RUNTIME_PROCESS_POSIX 1
 #endif
@@ -510,9 +512,10 @@ bool Process::Start() {
 namespace {
 
     /**
-     * @brief The immediate children of @p pid, read from `/proc/<n>/stat`'s fourth field.
+     * @brief The immediate children of @p pid, read from `/proc/<n>/stat`'s fourth field (on
+     *        Darwin, from the sysctl process table's e_ppid).
      *
-     * Ticket #2031. Linux-specific by construction: `/proc` is where the parent link lives, and
+     * Ticket #2031. Platform-specific by construction: `/proc` is where the parent link lives, and
      * .NET's own `GetChildProcesses` is equally platform-bound (it goes through
      * `Process.GetProcesses()`, whose Unix implementation reads `/proc`).
      *
@@ -522,6 +525,32 @@ namespace {
      */
     std::vector<pid_t> ChildrenOf(pid_t pid) {
         std::vector<pid_t> children;
+#if defined(__APPLE__)
+        // Darwin has no procfs, so the walk below found no children at all there and
+        // Kill(entireProcessTree: true) killed only the root. sysctl(KERN_PROC_ALL) is the
+        // process table ps(1) reads; e_ppid is the same parent link /proc's fourth field carries.
+        // The table can grow between sizing and reading, so the buffer is sized with slack and
+        // the read retried on ENOMEM.
+        int mib[3] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL};
+        for (int attempt = 0; attempt < 4; ++attempt) {
+            std::size_t length = 0;
+            if (::sysctl(mib, 3, nullptr, &length, nullptr, 0) != 0) return children;
+            length += length / 4 + sizeof(struct kinfo_proc) * 16;
+            std::vector<struct kinfo_proc> table(length / sizeof(struct kinfo_proc));
+            length = table.size() * sizeof(struct kinfo_proc);
+            if (::sysctl(mib, 3, table.data(), &length, nullptr, 0) != 0) {
+                if (errno == ENOMEM) continue;
+                return children;
+            }
+            const std::size_t count = length / sizeof(struct kinfo_proc);
+            for (std::size_t i = 0; i < count; ++i) {
+                if (table[i].kp_eproc.e_ppid == pid && table[i].kp_proc.p_pid != pid)
+                    children.push_back(table[i].kp_proc.p_pid);
+            }
+            return children;
+        }
+        return children;
+#else
         DIR* proc = ::opendir("/proc");
         if (proc == nullptr) return children;
         while (dirent* entry = ::readdir(proc)) {
@@ -545,6 +574,7 @@ namespace {
         }
         ::closedir(proc);
         return children;
+#endif
     }
 
     /** @brief True when @p pid is @p ancestor or any descendant of it. */

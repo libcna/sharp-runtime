@@ -184,7 +184,7 @@ TEST(ProcessWaitForExitTests, BlockingWait_IsNotCutShortByAnInterruptingSignal) 
     // BSD-semantics handler that sets SA_RESTART, which would not reproduce the defect at all.
     struct sigaction handler {};
     handler.sa_handler = countAlarm;
-    ::sigemptyset(&handler.sa_mask);
+    sigemptyset(&handler.sa_mask);  // unqualified: Darwin's <signal.h> makes it a macro
     handler.sa_flags = 0;
     struct sigaction previous {};
     ASSERT_EQ(::sigaction(SIGALRM, &handler, &previous), 0);
@@ -209,7 +209,7 @@ TEST(ProcessWaitForExitTests, BlockingWait_IsNotCutShortByAnInterruptingSignal) 
 TEST(ProcessWaitForExitTests, TimedWait_IsNotCutShortByAnInterruptingSignal) {
     struct sigaction handler {};
     handler.sa_handler = countAlarm;
-    ::sigemptyset(&handler.sa_mask);
+    sigemptyset(&handler.sa_mask);
     handler.sa_flags = 0;
     struct sigaction previous {};
     ASSERT_EQ(::sigaction(SIGALRM, &handler, &previous), 0);

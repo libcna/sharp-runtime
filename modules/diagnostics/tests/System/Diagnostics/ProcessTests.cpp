@@ -3,21 +3,36 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <string>
+
 #include "System/Diagnostics/Process.hpp"
 #include "System/InvalidOperationException.hpp"
 
 using System::Diagnostics::Process;
 using System::Diagnostics::ProcessStartInfo;
 
+namespace {
+// coreutils' true/false live in /bin on Linux but only in /usr/bin on macOS.
+std::string coreutilsTool(const char* name) {
+    const std::string inBin = std::string("/bin/") + name;
+    return std::filesystem::exists(inBin) ? inBin : std::string("/usr/bin/") + name;
+}
+
+// getcwd() reports the physical directory, and on macOS /tmp is a symlink to /private/tmp
+// (.NET reports /private/tmp there too).
+std::string physicalTmp() { return std::filesystem::canonical("/tmp").string(); }
+}  // namespace
+
 TEST(ProcessTests, Start_TrueExitsZero) {
-    Process p = Process::Start("/bin/true");
+    Process p = Process::Start(coreutilsTool("true"));
     p.WaitForExit();
     EXPECT_TRUE(p.getHasExitedProperty());
     EXPECT_EQ(p.getExitCodeProperty(), 0);
 }
 
 TEST(ProcessTests, Start_FalseExitsNonZero) {
-    Process p = Process::Start("/bin/false");
+    Process p = Process::Start(coreutilsTool("false"));
     p.WaitForExit();
     EXPECT_TRUE(p.getHasExitedProperty());
     EXPECT_NE(p.getExitCodeProperty(), 0);
@@ -95,11 +110,11 @@ TEST(ProcessTests, WorkingDirectory_IsRespected) {
     si.setRedirectStandardOutputProperty(true);
     Process p = Process::Start(si);
     p.WaitForExit();
-    EXPECT_EQ(p.getStandardOutputTextProperty(), "/tmp\n");
+    EXPECT_EQ(p.getStandardOutputTextProperty(), physicalTmp() + "\n");
 }
 
 TEST(ProcessTests, StandardOutputText_WithoutRedirect_Throws) {
-    Process p = Process::Start("/bin/true");
+    Process p = Process::Start(coreutilsTool("true"));
     p.WaitForExit();
     EXPECT_THROW(p.getStandardOutputTextProperty(), System::InvalidOperationException);
 }
