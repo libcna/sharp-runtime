@@ -211,6 +211,27 @@ namespace {
      * none: that is the same "original IP+ICMP request is in the payload" rule .NET follows
      * (`Ping.RawSocket.cs:166-190`).
      */
+    /**
+     * Where the ICMP message starts in what recv() returned. Linux's ping socket delivers the
+     * ICMP message alone. Darwin's SOCK_DGRAM/IPPROTO_ICMP socket delivers an ICMPv4 message
+     * with its IPv4 header in front, as a raw socket does (measured on macOS 27: every reply read
+     * from offset 0 began 0x45 and matched nothing, so every Send timed out). ICMPv6 never
+     * carries its IPv6 header. No ICMPv4 type has 4 in its high nibble, so a leading version-4
+     * nibble is unambiguous.
+     */
+    size_t icmpMessageOffset(const uint8_t* data, size_t size, bool isIPv6) {
+#if defined(SHARP_RUNTIME_PING_LINUX_ICMP)
+        (void)data;
+        (void)size;
+        (void)isIPv6;
+        return 0;
+#else
+        if (isIPv6 || size < 20 || (data[0] >> 4) != 4) return 0;
+        const size_t headerLength = 4u * static_cast<size_t>(data[0] & 0x0F);
+        return headerLength >= 20 && headerLength <= size ? headerLength : 0;
+#endif
+    }
+
     bool replyMatchesRequest(const uint8_t* data, size_t size, bool isIPv6, uint16_t sequence) {
         if (isIPv6) {
             if (size < sizeof(icmp6_hdr)) return false;
@@ -382,10 +403,13 @@ PingReply Ping::sendPingCore(const System::Net::IPAddress& address, const std::v
     std::vector<uint8_t> recvBuf(65535);
     const auto deadline = start + std::chrono::milliseconds(timeout);
     ssize_t received = -1;
+    size_t icmpOffset = 0;
     for (;;) {
         received = ::recv(fd, recvBuf.data(), recvBuf.size(), 0);
         if (received < 0) break;
-        if (replyMatchesRequest(recvBuf.data(), static_cast<size_t>(received), isIPv6, sequence))
+        icmpOffset = icmpMessageOffset(recvBuf.data(), static_cast<size_t>(received), isIPv6);
+        if (replyMatchesRequest(recvBuf.data() + icmpOffset, static_cast<size_t>(received) - icmpOffset,
+                                isIPv6, sequence))
             break;
         // Not ours. Keep the ORIGINAL deadline rather than restarting the timeout, so a stream
         // of foreign datagrams cannot extend this call without bound.
@@ -427,15 +451,17 @@ PingReply Ping::sendPingCore(const System::Net::IPAddress& address, const std::v
             }
         }
     } else {
-        if (static_cast<size_t>(received) >= sizeof(IcmpV4Header)) {
-            const auto* hdr = reinterpret_cast<const IcmpV4Header*>(recvBuf.data());
+        const size_t icmpSize = static_cast<size_t>(received) - icmpOffset;
+        if (icmpSize >= sizeof(IcmpV4Header)) {
+            const auto* hdr = reinterpret_cast<const IcmpV4Header*>(recvBuf.data() + icmpOffset);
 #if defined(SHARP_RUNTIME_PING_LINUX_ICMP)
             status = mapIcmpV4Status(hdr->type, hdr->code);
 #else
             status = mapIcmpV4Status(hdr->icmp_type, hdr->icmp_code);
 #endif
-            if (static_cast<size_t>(received) > sizeof(IcmpV4Header)) {
-                replyBuffer.assign(recvBuf.begin() + sizeof(IcmpV4Header), recvBuf.begin() + received);
+            if (icmpSize > sizeof(IcmpV4Header)) {
+                replyBuffer.assign(recvBuf.begin() + static_cast<std::ptrdiff_t>(icmpOffset + sizeof(IcmpV4Header)),
+                                   recvBuf.begin() + received);
             }
         }
     }

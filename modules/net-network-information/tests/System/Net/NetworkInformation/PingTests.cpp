@@ -10,6 +10,9 @@
 #include <exception>
 #include <fcntl.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <libproc.h>
+#endif
 #include <optional>
 #include <string>
 #include <typeinfo>
@@ -55,9 +58,16 @@ namespace {
         return {};
     }
 
-    /** Open-descriptor count of this process, or -1 when `/proc/self/fd` cannot be read. */
+    /** Open-descriptor count of this process, or -1 when the descriptor listing cannot be read. */
     int countOwnDescriptors() {
+#if defined(__APPLE__)
+        // Darwin has no procfs; /dev/fd lists the same descriptors, without "." and "..".
+        DIR* dir = ::opendir("/dev/fd");
+        constexpr int nonDescriptorEntries = 1; // opendir's own descriptor
+#else
         DIR* dir = ::opendir("/proc/self/fd");
+        constexpr int nonDescriptorEntries = 3; // ".", ".." and opendir's own descriptor
+#endif
         if (dir == nullptr) {
             return -1;
         }
@@ -66,11 +76,20 @@ namespace {
             ++entries;
         }
         ::closedir(dir);
-        return entries - 3; // ".", ".." and opendir's own descriptor
+        return entries - nonDescriptorEntries;
     }
 
-    /** Live thread count of this process, or -1 when `/proc/self/task` cannot be read. */
+    /** Live thread count of this process, or -1 when it cannot be measured. */
     int countOwnThreads() {
+#if defined(__APPLE__)
+        // Darwin has no /proc/self/task; libproc reports the task's live thread count.
+        struct proc_taskinfo info {};
+        if (::proc_pidinfo(::getpid(), PROC_PIDTASKINFO, 0, &info, sizeof(info)) !=
+            static_cast<int>(sizeof(info))) {
+            return -1;
+        }
+        return info.pti_threadnum;
+#else
         DIR* dir = ::opendir("/proc/self/task");
         if (dir == nullptr) {
             return -1;
@@ -81,6 +100,7 @@ namespace {
         }
         ::closedir(dir);
         return entries - 2; // "." and ".."
+#endif
     }
 
     /** Rethrows @p p and returns the mangled dynamic type name of whatever comes out. */
