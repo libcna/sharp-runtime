@@ -213,7 +213,11 @@ public:
      * @throws System::ArgumentNullException if @p innerException is null.
      */
     AggregateException(const std::string& message, std::exception_ptr innerException)
-        : Exception(composeMessage(message, {innerException}), requireNonNullInner(innerException)),
+        // The null check is nested inside the message argument rather than passed as the
+        // second argument: the order in which a call's arguments are evaluated is unspecified,
+        // and when composeMessage ran first (Clang) its collection check reported a null
+        // ELEMENT as ArgumentException before the null ARGUMENT check could run.
+        : Exception(composeMessage(message, {requireNonNullInner(innerException)}), innerException),
           innerExceptions_({innerException}),
           rawMessage_(message) {}
 
