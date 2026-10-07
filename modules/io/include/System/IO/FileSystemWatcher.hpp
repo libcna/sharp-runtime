@@ -4,6 +4,7 @@
 #pragma once
 #include <string>
 #include <atomic>
+#include <map>
 #include <exception>
 #include <thread>
 #include <vector>
@@ -23,15 +24,17 @@ namespace System::IO {
      *
      * C++ counterpart of .NET System.IO.FileSystemWatcher.
      *
-     * @note Status: PARTIAL. On Linux, enabling the watcher (EnableRaisingEvents = true) starts
-     * a real background thread backed by inotify that observes Created/Deleted/Changed/Renamed
-     * events in the watched directory and invokes the registered handler vectors -- matching
-     * real .NET's semantics for the common single-directory, non-recursive case. Deliberately
-     * NOT implemented, matching this project's "document, don't rush" precedent for large
-     * feature gaps: recursive subdirectory watching (IncludeSubdirectories is tracked but has
-     * no effect -- would require walking the whole tree, adding a watch per subdirectory, and
-     * handling directories created/removed while already watching), and any non-Linux backend
-     * (FSEvents on macOS, ReadDirectoryChangesW on Windows) -- on those platforms, setting
+     * @note Status: PARTIAL. On Linux (inotify) and on Darwin (kqueue, AM4-055), enabling the
+     * watcher (EnableRaisingEvents = true) starts a real background thread that observes
+     * Created/Deleted/Changed/Renamed events in the watched directory and invokes the registered
+     * handler vectors -- matching real .NET's semantics for the common single-directory,
+     * non-recursive case. Darwin re-lists the directory when kqueue reports it changed and pairs
+     * a vanished inode with a new name into one Renamed; it cannot observe NotifyFilters.LastAccess
+     * (kqueue reports no reads). Deliberately NOT implemented, matching this project's
+     * "document, don't rush" precedent for large feature gaps: recursive subdirectory watching
+     * (IncludeSubdirectories is tracked but has no effect -- would require walking the whole tree,
+     * adding a watch per subdirectory, and handling directories created/removed while already
+     * watching), and a Windows backend (ReadDirectoryChangesW) -- there, setting
      * EnableRaisingEvents = true throws System::PlatformNotSupportedException rather than
      * silently tracking the flag with no real monitoring, matching CLAUDE.md's
      * platform-abstraction policy (never silently fail on an unsupported platform). This is a
@@ -56,15 +59,36 @@ namespace System::IO {
         // on non-Linux targets (e.g. Emscripten, where startWatchingIfPossible() always throws)
         // these fields are never touched, and declaring them unconditionally left them dead code
         // there, tripping -Werror=unused-private-field.
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
+        // On Darwin inotifyFd_ is the kqueue and watchDescriptor_ the directory's event-only
+        // descriptor; the stop signal there is an EVFILT_USER event, so it has no stopEventFd_.
         int inotifyFd_ = -1;
         int watchDescriptor_ = -1;
+#endif
+#if defined(__linux__)
         int stopEventFd_ = -1;
+#endif
+#if defined(__linux__) || defined(__APPLE__)
         // Set when the watcher thread stopped ITSELF -- a handler called EnableRaisingEvents =
         // false, so the stop was signalled but the thread could not be joined from inside itself
         // (ticket #2347). The thread object stays joinable until an external caller reaps it, so
         // this flag is what tells the arming path "joinable does not mean running here".
         std::atomic<bool> selfStopPending_{false};
+#endif
+#if defined(__APPLE__)
+        /** @brief One directory entry as the Darwin backend last saw it. */
+        struct DarwinWatchedEntry {
+            unsigned long long inode = 0; ///< Identifies the entry across a rename.
+            bool isDirectory = false;     ///< Governs FileName vs DirectoryName (decision 5(b)).
+            int fd = -1;                  ///< O_EVTONLY descriptor watching its content, or -1.
+        };
+        // The directory's last listing. Filled by startWatchingIfPossible() before the thread
+        // starts, then owned by the watch thread until stopWatchingIfRunning() joins it.
+        std::map<std::string, DarwinWatchedEntry> darwinEntries_;
+        /** @brief Records @p name and registers its content watch on the kqueue. */
+        void armDarwinEntry(const std::string& name, bool isDirectory);
+        /** @brief Closes every entry's event descriptor and forgets the listing. */
+        void releaseDarwinEntries();
 #endif
         std::thread watchThread_;
 

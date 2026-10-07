@@ -42,14 +42,18 @@ cycles, and Apple's linker reports the repetition. They are not compiler warning
 | `Process.Kill(true)` tree walk | sysctl `KERN_PROC_ALL` parent links instead of `/proc` | `Process.cpp` |
 | `Ping` | Darwin's ICMP datagram socket returns the IPv4 header; it is skipped | `Ping.cpp` |
 | `NetworkInterface` | `getifaddrs` with `AF_LINK`/`sockaddr_dl`; loopback found by `IFF_LOOPBACK` (`lo0`) | `NetworkInterface.cpp` |
+| `FileSystemWatcher` | kqueue (`EVFILT_VNODE` on the directory and on each entry, `EVFILT_USER` to stop) instead of inotify | `FileSystemWatcher.cpp` |
 | `Regex` | libc++'s ECMAScript parser is strict: lone `]`, `}` and non-quantifier `{` are escaped (literals in .NET); resumed searches state `match_not_bol`/`match_not_bow` because libc++ ignores `match_prev_avail` for `^` | `Regex.hpp` |
 | IPv6 sockets | dual-mode by default (`net.inet6.ip6.v6only = 0`) | tests ask the socket |
 | Object sizes | libc++'s `std::mutex`/`std::function`/`std::string` differ from libstdc++, so layout pins record both via `layoutPin(reference, appleLibcxx)` | `*Tests.cpp` |
 
 ## Known gaps on macOS
 
-- `FileSystemWatcher` has only an inotify backend; its 7 tests fail on macOS with
-  `PlatformNotSupportedException`. A macOS backend would use FSEvents.
+- `FileSystemWatcher` (AM4-055) watches through kqueue: the directory's vnode for added,
+  removed and renamed entries (re-listed and diffed; a vanished inode under a new name is one
+  `Renamed`) and each entry's vnode for content and attribute changes. `NotifyFilters.LastAccess`
+  is not observable (kqueue reports no reads), and `IncludeSubdirectories` is unimplemented on
+  every platform.
 - The `HashCode` per-process-seed and `PosixSignal` re-exec tests are `#ifdef __linux__`
   (they re-exec through `/proc/self/exe`), so they do not run on macOS.
 - `PortableFromCharsTests`' agreement checks against native `std::from_chars` report SKIPPED at

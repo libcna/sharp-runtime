@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/FileSystemWatcher.hpp"
+#include <algorithm>
 #include "System/ArgumentException.hpp"
 #include "System/IO/Directory.hpp"
 #include "System/IO/IOException.hpp"
@@ -18,6 +19,23 @@
 #include <regex>
 #include <sys/eventfd.h>
 #include <sys/inotify.h>
+#include <system_error>
+#include <unistd.h>
+#include <unordered_map>
+#elif defined(__APPLE__)
+// AM4-055: Darwin has no inotify. kqueue reports a directory's own vnode changing when an entry is
+// added, removed or renamed, and each entry's vnode for its own content; the directory is
+// re-listed and diffed against the snapshot taken when watching started.
+#define SHARP_RUNTIME_FSW_DARWIN 1
+#include <cerrno>
+#include <cstdint>
+#include <cstring>
+#include <dirent.h>
+#include <fcntl.h>
+#include <map>
+#include <regex>
+#include <sys/event.h>
+#include <sys/stat.h>
 #include <system_error>
 #include <unistd.h>
 #include <unordered_map>
@@ -162,7 +180,7 @@ namespace System::IO {
         else stopWatchingIfRunning();
     }
 
-#if defined(SHARP_RUNTIME_FSW_LINUX)
+#if defined(SHARP_RUNTIME_FSW_LINUX) || defined(SHARP_RUNTIME_FSW_DARWIN)
 
     namespace {
         // Mirrors Directory::GetFiles's glob-to-regex translation (including the "*.*" DOS-legacy
@@ -233,6 +251,7 @@ namespace System::IO {
         constexpr int kWriteServedFilters =
             static_cast<int>(NotifyFilters::Size) | static_cast<int>(NotifyFilters::LastWrite);
 
+#if defined(SHARP_RUNTIME_FSW_LINUX)
         uint32_t inotifyMaskFor(NotifyFilters filter) {
             const int bits = static_cast<int>(filter);
             uint32_t mask = 0;
@@ -255,6 +274,7 @@ namespace System::IO {
             }
             return mask;
         }
+#endif
 
         /**
          * Decision 5(b). `IN_ISDIR` is set on the event, so the name-class split can only be
@@ -270,6 +290,10 @@ namespace System::IO {
             return (bits & static_cast<int>(governing)) != 0;
         }
     } // namespace
+
+#endif
+
+#if defined(SHARP_RUNTIME_FSW_LINUX)
 
     void FileSystemWatcher::startWatchingIfPossible() {
         // No directory configured yet: preserve the original stub behavior (track the flag,
@@ -545,7 +569,253 @@ namespace System::IO {
         }
     }
 
-#else // !SHARP_RUNTIME_FSW_LINUX
+#elif defined(SHARP_RUNTIME_FSW_DARWIN)
+
+    namespace {
+        // The stop signal: an EVFILT_USER event on the watcher's own kqueue, so watchLoop's
+        // kevent() wakes without a second descriptor (Linux uses an eventfd for the same job).
+        constexpr uintptr_t kDarwinStopIdent = 1;
+
+        // Per-entry vnode events a NotifyFilters value asks for (decision 1(a)/2(a)/3(a) of the
+        // Linux mapping above). LastAccess has no kqueue counterpart -- a read changes no vnode
+        // state kqueue reports -- so it watches nothing here, a documented Darwin limitation.
+        uint32_t darwinEntryFlagsFor(NotifyFilters filter, bool isDirectory) {
+            const int bits = static_cast<int>(filter);
+            uint32_t flags = 0;
+            // A subdirectory's NOTE_WRITE means ITS entries changed, which inotify on the parent
+            // never reports either; only its own attributes count, as IN_ATTRIB does.
+            if (!isDirectory && (bits & kWriteServedFilters) != 0) flags |= NOTE_WRITE | NOTE_EXTEND;
+            const int attributeFilters = kContentClassFilters & ~static_cast<int>(NotifyFilters::LastAccess);
+            if ((bits & attributeFilters) != 0) flags |= NOTE_ATTRIB;
+            return flags;
+        }
+
+        struct DarwinListedEntry {
+            ino_t inode = 0;
+            bool isDirectory = false;
+        };
+
+        std::map<std::string, DarwinListedEntry> listDarwinDirectory(const std::string& directory) {
+            std::map<std::string, DarwinListedEntry> entries;
+            DIR* dir = ::opendir(directory.c_str());
+            if (dir == nullptr) return entries;
+            while (const dirent* item = ::readdir(dir)) {
+                const std::string name = item->d_name;
+                if (name == "." || name == "..") continue;
+                struct stat info{};
+                if (::lstat((directory + "/" + name).c_str(), &info) != 0) continue;
+                entries[name] = DarwinListedEntry{info.st_ino, S_ISDIR(info.st_mode)};
+            }
+            ::closedir(dir);
+            return entries;
+        }
+    } // namespace
+
+    void FileSystemWatcher::armDarwinEntry(const std::string& name, bool isDirectory) {
+        DarwinWatchedEntry& entry = darwinEntries_[name];
+        entry.isDirectory = isDirectory;
+        const uint32_t flags = darwinEntryFlagsFor(notifyFilter_, isDirectory);
+        if (flags == 0 || entry.fd >= 0) return;
+        // O_EVTONLY: a descriptor for event delivery only, which does not keep a volume busy.
+        entry.fd = ::open((directory_ + "/" + name).c_str(), O_EVTONLY | O_CLOEXEC);
+        if (entry.fd < 0) return; // gone again already; the next directory scan settles it
+        struct kevent change{};
+        EV_SET(&change, static_cast<uintptr_t>(entry.fd), EVFILT_VNODE, EV_ADD | EV_CLEAR, flags, 0, nullptr);
+        if (::kevent(inotifyFd_, &change, 1, nullptr, 0, nullptr) != 0) {
+            ::close(entry.fd);
+            entry.fd = -1;
+        }
+    }
+
+    void FileSystemWatcher::releaseDarwinEntries() {
+        for (auto& [name, entry] : darwinEntries_) {
+            (void)name;
+            if (entry.fd >= 0) ::close(entry.fd);
+        }
+        darwinEntries_.clear();
+    }
+
+    void FileSystemWatcher::startWatchingIfPossible() {
+        // Same preconditions, in the same order, as the Linux backend above.
+        if (directory_.empty()) return;
+        if (onWatcherThread()) return;
+        reapSelfStoppedThread();
+        if (watchThread_.joinable()) return;
+        if ((static_cast<int>(notifyFilter_) & (kNameClassFilters | kContentClassFilters)) == 0) return;
+
+        const auto failArming = [this](const std::string& message) {
+            releaseDarwinEntries();
+            if (watchDescriptor_ >= 0) ::close(watchDescriptor_);
+            if (inotifyFd_ >= 0) ::close(inotifyFd_);
+            inotifyFd_ = watchDescriptor_ = -1;
+            enabled_.store(false);
+            if (!Error.empty()) {
+                auto ex = std::make_exception_ptr(System::IO::IOException(message));
+                System::IO::ErrorEventArgs args(ex);
+                for (auto& handler : Error) handler(this, args);
+            }
+        };
+
+        inotifyFd_ = ::kqueue();
+        if (inotifyFd_ < 0) {
+            failArming("Unable to initialize kqueue: " + std::string(std::strerror(errno)));
+            return;
+        }
+        watchDescriptor_ = ::open(directory_.c_str(), O_EVTONLY | O_CLOEXEC);
+        if (watchDescriptor_ < 0) {
+            failArming("Unable to watch directory '" + directory_ + "': " + std::string(std::strerror(errno)));
+            return;
+        }
+        struct kevent changes[2]{};
+        EV_SET(&changes[0], static_cast<uintptr_t>(watchDescriptor_), EVFILT_VNODE, EV_ADD | EV_CLEAR,
+               NOTE_WRITE | NOTE_EXTEND | NOTE_LINK, 0, nullptr);
+        EV_SET(&changes[1], kDarwinStopIdent, EVFILT_USER, EV_ADD | EV_CLEAR, NOTE_FFNOP, 0, nullptr);
+        if (::kevent(inotifyFd_, changes, 2, nullptr, 0, nullptr) != 0) {
+            failArming("Unable to watch directory '" + directory_ + "': " + std::string(std::strerror(errno)));
+            return;
+        }
+
+        // The snapshot is taken HERE, before EnableRaisingEvents returns, so an entry created the
+        // moment after is a difference the first scan reports rather than part of the baseline.
+        for (const auto& [name, listed] : listDarwinDirectory(directory_))
+            armDarwinEntry(name, listed.isDirectory), darwinEntries_[name].inode = listed.inode;
+
+        try {
+            watchThread_ = std::thread(&FileSystemWatcher::watchLoop, this);
+        } catch (const std::system_error&) {
+            failArming("Unable to start the file system watcher thread.");
+        }
+    }
+
+    void FileSystemWatcher::reapSelfStoppedThread() {
+        if (!selfStopPending_.load() || onWatcherThread()) return;
+        if (watchThread_.joinable()) watchThread_.join();
+        releaseDarwinEntries();
+        if (watchDescriptor_ >= 0) ::close(watchDescriptor_);
+        if (inotifyFd_ >= 0) ::close(inotifyFd_);
+        inotifyFd_ = watchDescriptor_ = -1;
+        selfStopPending_.store(false);
+    }
+
+    void FileSystemWatcher::stopWatchingIfRunning() {
+        // Ticket #2347's rules, unchanged from the Linux backend: signal, never self-join.
+        const bool selfStop = onWatcherThread();
+        if (!selfStop) {
+            reapSelfStoppedThread();
+            if (!watchThread_.joinable()) return;
+        }
+        if (inotifyFd_ >= 0) {
+            struct kevent trigger{};
+            EV_SET(&trigger, kDarwinStopIdent, EVFILT_USER, 0, NOTE_TRIGGER, 0, nullptr);
+            (void)::kevent(inotifyFd_, &trigger, 1, nullptr, 0, nullptr);
+        }
+        if (selfStop) {
+            selfStopPending_.store(true);
+            return;
+        }
+        watchThread_.join();
+        releaseDarwinEntries();
+        if (watchDescriptor_ >= 0) ::close(watchDescriptor_);
+        if (inotifyFd_ >= 0) ::close(inotifyFd_);
+        inotifyFd_ = watchDescriptor_ = -1;
+    }
+
+    void FileSystemWatcher::watchLoop() {
+        const WatchThreadMarker marker(this);
+        const auto raise = [this](auto& handlers, const auto& args) {
+            for (auto& handler : handlers)
+                try { handler(this, args); }
+                catch (...) { reportHandlerFault(std::current_exception()); }
+        };
+
+        for (;;) {
+            struct kevent events[32];
+            const int count = ::kevent(inotifyFd_, nullptr, 0, events, 32, nullptr);
+            if (count < 0) {
+                if (errno == EINTR) continue;
+                return;
+            }
+            bool directoryChanged = false;
+            std::vector<std::string> contentChanged;
+            for (int i = 0; i < count; ++i) {
+                if (events[i].filter == EVFILT_USER) return; // stop requested
+                const int fd = static_cast<int>(events[i].ident);
+                if (fd == watchDescriptor_) { directoryChanged = true; continue; }
+                for (const auto& [name, entry] : darwinEntries_)
+                    if (entry.fd == fd) { contentChanged.push_back(name); break; }
+            }
+            // #2105's per-event gate: a handler that stopped this watcher sees nothing more.
+            if (!enabled_.load()) continue;
+
+            if (directoryChanged) {
+                const auto listed = listDarwinDirectory(directory_);
+                std::vector<std::pair<std::string, DarwinWatchedEntry>> removed;
+                for (const auto& [name, entry] : darwinEntries_)
+                    if (listed.find(name) == listed.end() || listed.at(name).inode != entry.inode)
+                        removed.emplace_back(name, entry);
+                std::vector<std::pair<std::string, DarwinListedEntry>> added;
+                for (const auto& [name, entry] : listed) {
+                    const auto known = darwinEntries_.find(name);
+                    if (known == darwinEntries_.end() || known->second.inode != entry.inode)
+                        added.emplace_back(name, entry);
+                }
+                for (const auto& [name, entry] : removed) {
+                    (void)entry;
+                    darwinEntries_.erase(name);
+                }
+
+                // A removed inode that reappears under another name in the same scan is one
+                // rename, as inotify's MOVED_FROM/MOVED_TO cookie pair is; its event descriptor
+                // follows the vnode, so it moves with the entry. The filter rules are the Linux
+                // backend's: the old name must match to start a pair, and a pair whose new name
+                // does not match is dropped, while an unpaired half is a Deleted or a Created.
+                for (auto removedIt = removed.begin(); removedIt != removed.end();) {
+                    const auto addedIt = std::find_if(added.begin(), added.end(), [&](const auto& a) {
+                        return a.second.inode == removedIt->second.inode;
+                    });
+                    if (addedIt == added.end() || !matchesAnyFilter(filters_, removedIt->first)) {
+                        ++removedIt;
+                        continue;
+                    }
+                    DarwinWatchedEntry moved = removedIt->second;
+                    darwinEntries_[addedIt->first] = moved;
+                    if (enabled_.load() && matchesAnyFilter(filters_, addedIt->first) &&
+                        nameClassAdmits(notifyFilter_, moved.isDirectory)) {
+                        RenamedEventArgs args(WatcherChangeTypes::Renamed, directory_, addedIt->first,
+                                              removedIt->first);
+                        raise(Renamed, args);
+                    }
+                    added.erase(addedIt);
+                    removedIt = removed.erase(removedIt);
+                }
+                for (const auto& [name, entry] : removed) {
+                    if (entry.fd >= 0) ::close(entry.fd);
+                    if (!enabled_.load() || !matchesAnyFilter(filters_, name) ||
+                        !nameClassAdmits(notifyFilter_, entry.isDirectory)) continue;
+                    FileSystemEventArgs args(WatcherChangeTypes::Deleted, directory_, name);
+                    raise(Deleted, args);
+                }
+                for (const auto& [name, entry] : added) {
+                    armDarwinEntry(name, entry.isDirectory);
+                    darwinEntries_[name].inode = entry.inode;
+                    if (!enabled_.load() || !matchesAnyFilter(filters_, name) ||
+                        !nameClassAdmits(notifyFilter_, entry.isDirectory)) continue;
+                    FileSystemEventArgs args(WatcherChangeTypes::Created, directory_, name);
+                    raise(Created, args);
+                }
+            }
+
+            for (const auto& name : contentChanged) {
+                if (!enabled_.load()) break;
+                if (darwinEntries_.find(name) == darwinEntries_.end()) continue; // removed above
+                if (!matchesAnyFilter(filters_, name)) continue;
+                FileSystemEventArgs args(WatcherChangeTypes::Changed, directory_, name);
+                raise(Changed, args);
+            }
+        }
+    }
+
+#else // !SHARP_RUNTIME_FSW_LINUX && !SHARP_RUNTIME_FSW_DARWIN
 
     // No OS-level watch backend implemented for this platform (see the class doc-comment).
     // Matches CLAUDE.md's platform-abstraction rule: on an unsupported platform, throw
