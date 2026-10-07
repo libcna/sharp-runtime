@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <any>
 #include <map>
 #include <mutex>
@@ -174,8 +175,8 @@ namespace System::Threading {
             // and performs no delegate-shape check at all (Thread.cs:239-253) -- only
             // Start(parameter) guards. Pinned by a test, because "reject it for symmetry" is the
             // plausible wrong answer.
-            thread_ = std::thread([state = state_, fn = std::move(fn_),
-                                   paramFn = std::move(paramFn_)]() mutable {
+            thread_ = std::thread([state = state_, fn = std::exchange(fn_, nullptr),
+                                   paramFn = std::exchange(paramFn_, nullptr)]() mutable {
                 currentThreadState_ = state;
                 if (fn) fn(); else paramFn(nullptr);
                 state->finished.store(true);
@@ -196,11 +197,12 @@ namespace System::Threading {
             // care of the error reporting."
             //
             // So a SECOND Start(void*) reports the RESTART error, not the wrong-shape error. This
-            // port gets the same rule from the same fact: fn_ is MOVED FROM into the thread body
-            // on the first successful start, so it is empty afterwards and the guard falls
-            // through -- exactly as .NET's startHelper becomes null. A pin asserts both halves,
-            // and it was written asserting the opposite first: the test failed, and the reference
-            // showed the test was wrong rather than the code.
+            // port gets the same rule from the same fact: fn_ is EXCHANGED for an empty function
+            // when the first start hands it to the thread body, so the guard falls through --
+            // exactly as .NET's startHelper becomes null. (Exchanged, not merely moved from: a
+            // moved-from std::function is unspecified, and libc++ leaves a small callable in
+            // it.) A pin asserts both halves, and it was written asserting the opposite first:
+            // the test failed, and the reference showed the test was wrong rather than the code.
             if (fn_) {
                 throw System::InvalidOperationException(
                     "The thread was created with a ThreadStart delegate that does not accept a "
@@ -208,7 +210,8 @@ namespace System::Threading {
             }
             if (started_.exchange(true))
                 throw System::Threading::ThreadStateException("Thread is running or terminated; it cannot restart.");
-            thread_ = std::thread([state = state_, paramFn = std::move(paramFn_), parameter]() mutable {
+            thread_ = std::thread([state = state_, paramFn = std::exchange(paramFn_, nullptr),
+                                   parameter]() mutable {
                 currentThreadState_ = state;
                 paramFn(parameter);
                 state->finished.store(true);
