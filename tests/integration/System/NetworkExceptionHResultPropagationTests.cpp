@@ -30,6 +30,21 @@
 #include "System/Net/WebExceptionStatus.hpp"
 
 namespace {
+// Object sizes are a property of the standard library's own members (std::mutex, std::function,
+// std::string, ...). The literal pins in this file were measured with libstdc++ (the Linux gate);
+// Apple's libc++ lays the same declarations out differently, so each pin records both
+// measurements and neither ABI loses its tripwire. Any other library gets the reference value.
+#if defined(__APPLE__) && defined(_LIBCPP_VERSION)
+constexpr bool kAppleLibcxxLayout = true;
+#else
+constexpr bool kAppleLibcxxLayout = false;
+#endif
+constexpr std::size_t layoutPin(std::size_t reference, std::size_t appleLibcxx) {
+    return kAppleLibcxxLayout ? appleLibcxx : reference;
+}
+}  // namespace
+
+namespace {
 
 using HResult = SharpRuntime::intcs;
 using System::Net::HttpStatusCode;
@@ -225,9 +240,9 @@ TEST(NetworkExceptionHResultPropagationTests, StructuralSurfaceRemainsTheMeasure
                   std::exception_ptr>);
     static_assert(!std::is_nothrow_constructible_v<WebException, const std::string&, std::exception_ptr>);
 
-    EXPECT_EQ(sizeof(HttpRequestException), 176u);
+    EXPECT_EQ(sizeof(HttpRequestException), layoutPin(176, 128));
     EXPECT_EQ(alignof(HttpRequestException), 8u);
-    EXPECT_EQ(sizeof(WebException), 168u);
+    EXPECT_EQ(sizeof(WebException), layoutPin(168, 120));
     EXPECT_EQ(alignof(WebException), 8u);
 }
 

@@ -8,6 +8,21 @@
 #include "System/Collections/Generic/Dictionary.hpp"
 
 namespace {
+// Object sizes are a property of the standard library's own members (std::mutex, std::function,
+// std::string, ...). The literal pins in this file were measured with libstdc++ (the Linux gate);
+// Apple's libc++ lays the same declarations out differently, so each pin records both
+// measurements and neither ABI loses its tripwire. Any other library gets the reference value.
+#if defined(__APPLE__) && defined(_LIBCPP_VERSION)
+constexpr bool kAppleLibcxxLayout = true;
+#else
+constexpr bool kAppleLibcxxLayout = false;
+#endif
+constexpr std::size_t layoutPin(std::size_t reference, std::size_t appleLibcxx) {
+    return kAppleLibcxxLayout ? appleLibcxx : reference;
+}
+}  // namespace
+
+namespace {
 using System::Collections::Generic::Dictionary;
 using D = Dictionary<std::string, int>;
 D MakeDictionary() {
@@ -102,7 +117,7 @@ TEST(DictionaryEntryOrder, FloatingKeyPolicyIncludesNaNInOneLiveSlot) {
 TEST(DictionaryEntryOrder, LayoutGrowthRequiresAFullConsumerRebuild) {
     if constexpr (sizeof(void*) == 8) {
         // Before: Dictionary<int,int> 64/8; iterator 24/8 (prior inventory pin).
-        EXPECT_EQ(sizeof(Dictionary<int,int>), 176u);
+        EXPECT_EQ(sizeof(Dictionary<int,int>), layoutPin(176, 144));
         EXPECT_EQ(alignof(Dictionary<int,int>), 8u);
         EXPECT_EQ(sizeof(Dictionary<int,int>::iterator), 24u);
         EXPECT_EQ(alignof(Dictionary<int,int>::iterator), 8u);

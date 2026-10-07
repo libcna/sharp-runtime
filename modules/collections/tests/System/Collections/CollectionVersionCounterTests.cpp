@@ -110,6 +110,21 @@
 
 #include "../../support/CollectionVersionSeam.hpp"
 
+namespace {
+// Object sizes are a property of the standard library's own members (std::mutex, std::function,
+// std::string, ...). The literal pins in this file were measured with libstdc++ (the Linux gate);
+// Apple's libc++ lays the same declarations out differently, so each pin records both
+// measurements and neither ABI loses its tripwire. Any other library gets the reference value.
+#if defined(__APPLE__) && defined(_LIBCPP_VERSION)
+constexpr bool kAppleLibcxxLayout = true;
+#else
+constexpr bool kAppleLibcxxLayout = false;
+#endif
+constexpr std::size_t layoutPin(std::size_t reference, std::size_t appleLibcxx) {
+    return kAppleLibcxxLayout ? appleLibcxx : reference;
+}
+}  // namespace
+
 using SharpRuntime::intcs;
 using SharpRuntime::uintcs;
 using SharpRuntime::ulongcs;
@@ -632,7 +647,8 @@ TYPED_TEST(CollectionVersionCounter, SelfAssignmentBehavesAsThatCollectionDocume
     auto e = TypeParam::enumerate(a);
     EXPECT_TRUE(e.MoveNext());
     const auto before = versionOf(a);
-    a = a;  // NOLINT(clang-diagnostic-self-assign-overloaded)
+    auto& self = a;  // through an alias: a literal `a = a` is -Wself-assign-overloaded
+    a = self;
     if constexpr (TypeParam::kSelfAssignmentIsNoOp) {
         // LinkedList<T>'s own operator= short-circuits on self-assignment, so nothing is
         // destroyed and nothing must be invalidated.
@@ -890,7 +906,8 @@ TYPED_TEST(CollectionIteratorVersion, SelfAssignmentInvalidatesConservatively) {
     auto a = TypeParam::make();
     auto it = a.begin();
     const auto before = versionOf(a);
-    a = a;  // NOLINT(clang-diagnostic-self-assign-overloaded)
+    auto& self = a;  // through an alias: a literal `a = a` is -Wself-assign-overloaded
+    a = self;
     EXPECT_GT(versionOf(a), before);
     EXPECT_THROW(TypeParam::touch(a, it), System::InvalidOperationException);
 }
@@ -1107,19 +1124,19 @@ TEST(CollectionVersionCounterCompatibility, PublishedObjectSizesAreUnchanged) {
     // PublishedIteratorSizesAreUnchanged below.
     if constexpr (sizeof(void*) == 8) {
         EXPECT_EQ(sizeof(G::List<int>), 40u);
-        EXPECT_EQ(sizeof(G::HashSet<int>), 64u);
+        EXPECT_EQ(sizeof(G::HashSet<int>), layoutPin(64, 48));
         // Dictionary grew from 64 bytes for .NET entry-slot enumeration; pinned separately.
-        EXPECT_EQ(sizeof(G::SortedDictionary<int, int>), 56u);
-        EXPECT_EQ(sizeof(G::SortedList<int, int>), 56u);
-        EXPECT_EQ(sizeof(G::OrderedDictionary<int, int>), 88u);
-        EXPECT_EQ(sizeof(G::Queue<int>), 88u);
-        EXPECT_EQ(sizeof(G::Stack<int>), 88u);
+        EXPECT_EQ(sizeof(G::SortedDictionary<int, int>), layoutPin(56, 32));
+        EXPECT_EQ(sizeof(G::SortedList<int, int>), layoutPin(56, 32));
+        EXPECT_EQ(sizeof(G::OrderedDictionary<int, int>), layoutPin(88, 72));
+        EXPECT_EQ(sizeof(G::Queue<int>), layoutPin(88, 56));
+        EXPECT_EQ(sizeof(G::Stack<int>), layoutPin(88, 56));
         EXPECT_EQ(sizeof(NG::ArrayList), 40u);
-        EXPECT_EQ(sizeof(NG::Hashtable), 72u);
+        EXPECT_EQ(sizeof(NG::Hashtable), layoutPin(72, 56));
         EXPECT_EQ(sizeof(NG::ListDictionaryInternal), 40u);
-        EXPECT_EQ(sizeof(NG::Queue), 96u);
-        EXPECT_EQ(sizeof(NG::Stack), 96u);
-        EXPECT_EQ(sizeof(NG::BitArray), 48u);
+        EXPECT_EQ(sizeof(NG::Queue), layoutPin(96, 64));
+        EXPECT_EQ(sizeof(NG::Stack), layoutPin(96, 64));
+        EXPECT_EQ(sizeof(NG::BitArray), layoutPin(48, 32));
         EXPECT_EQ(alignof(G::List<int>), 8u);
         EXPECT_EQ(alignof(NG::BitArray), 8u);
     } else {

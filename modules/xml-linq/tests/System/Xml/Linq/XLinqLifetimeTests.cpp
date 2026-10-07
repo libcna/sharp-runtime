@@ -585,6 +585,21 @@ TEST(XLinqLifetimeTests, RetainedNode_ReportsNoParentEvenIfTheFreedOwnersStorage
     EXPECT_EQ(t->getDocumentProperty(), nullptr);
 }
 
+// Object sizes are a property of the standard library's own members (here std::string). The
+// literal pins below were measured with libstdc++ (the Linux gate); Apple's libc++ lays the same
+// declarations out differently, so each pin records both measurements and neither ABI loses its
+// tripwire. Any other standard library is unmeasured and gets the reference.
+namespace {
+#if defined(__APPLE__) && defined(_LIBCPP_VERSION)
+constexpr bool kAppleLibcxxLayout = true;
+#else
+constexpr bool kAppleLibcxxLayout = false;
+#endif
+constexpr std::size_t layoutPin(std::size_t reference, std::size_t appleLibcxx) {
+    return kAppleLibcxxLayout ? appleLibcxx : reference;
+}
+}  // namespace
+
 // --- Representation invariants ------------------------------------------------------------
 
 // UPDATED BY #2199 on 2026-08-19, which grew every one of these by exactly ONE POINTER: the
@@ -595,16 +610,16 @@ TEST(XLinqLifetimeTests, RetainedNode_ReportsNoParentEvenIfTheFreedOwnersStorage
 static_assert(sizeof(XObject) == 24, "#1890/#2199: XObject must stay 24 bytes (was 16)");
 static_assert(sizeof(XNode) == 24, "#1890/#2199: XNode must stay 24 bytes (was 16)");
 static_assert(sizeof(XContainer) == 48, "#1890/#2199: XContainer must stay 48 bytes (was 40)");
-static_assert(sizeof(XElement) == 136, "#1890/#2199: XElement must stay 136 bytes (was 128)");
-static_assert(sizeof(XAttribute) == 128, "#1890/#2199: XAttribute must stay 128 bytes (was 120)");
-static_assert(sizeof(XText) == 56, "#1890/#2199: XText must stay 56 bytes (was 48)");
+static_assert(sizeof(XElement) == layoutPin(136, 120), "#1890/#2199: XElement must stay 136 bytes (was 128)");
+static_assert(sizeof(XAttribute) == layoutPin(128, 104), "#1890/#2199: XAttribute must stay 128 bytes (was 120)");
+static_assert(sizeof(XText) == layoutPin(56, 48), "#1890/#2199: XText must stay 56 bytes (was 48)");
 static_assert(sizeof(XDocument) == 64, "#1890/#2199: XDocument must stay 64 bytes (was 56)");
 
 // The growth is exactly one pointer on EVERY type, asserted as a relationship so a second member
 // added later cannot hide behind a literal that someone updated by hand.
 static_assert(sizeof(XObject) == 16 + sizeof(void*));
-static_assert(sizeof(XElement) == 128 + sizeof(void*));
-static_assert(sizeof(XAttribute) == 120 + sizeof(void*));
+static_assert(sizeof(XElement) == layoutPin(128, 112) + sizeof(void*));
+static_assert(sizeof(XAttribute) == layoutPin(120, 96) + sizeof(void*));
 static_assert(alignof(XElement) == 8 && alignof(XAttribute) == 8, "#1890: alignment unchanged");
 static_assert(std::has_virtual_destructor_v<XObject>, "#1890: destruction stays virtual");
 static_assert(std::is_nothrow_destructible_v<XContainer>, "#1890: ~XContainer must be noexcept");
@@ -622,8 +637,8 @@ TEST(XLinqLifetimeTests, PublicLayoutIsUnchangedByTheDetachContract) {
     EXPECT_EQ(sizeof(XObject), 16u + sizeof(void*));
     EXPECT_EQ(sizeof(XNode), 16u + sizeof(void*));
     EXPECT_EQ(sizeof(XContainer), 40u + sizeof(void*));
-    EXPECT_EQ(sizeof(XElement), 128u + sizeof(void*));
-    EXPECT_EQ(sizeof(XAttribute), 120u + sizeof(void*));
-    EXPECT_EQ(sizeof(XText), 48u + sizeof(void*));
+    EXPECT_EQ(sizeof(XElement), layoutPin(128, 112) + sizeof(void*));
+    EXPECT_EQ(sizeof(XAttribute), layoutPin(120, 96) + sizeof(void*));
+    EXPECT_EQ(sizeof(XText), layoutPin(48, 40) + sizeof(void*));
     EXPECT_EQ(sizeof(XDocument), 56u + sizeof(void*));
 }

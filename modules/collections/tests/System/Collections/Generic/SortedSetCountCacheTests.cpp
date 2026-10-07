@@ -40,6 +40,21 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/Generic/SortedSet.hpp"
 
+namespace {
+// Object sizes are a property of the standard library's own members (std::mutex, std::function,
+// std::string, ...). The literal pins in this file were measured with libstdc++ (the Linux gate);
+// Apple's libc++ lays the same declarations out differently, so each pin records both
+// measurements and neither ABI loses its tripwire. Any other library gets the reference value.
+#if defined(__APPLE__) && defined(_LIBCPP_VERSION)
+constexpr bool kAppleLibcxxLayout = true;
+#else
+constexpr bool kAppleLibcxxLayout = false;
+#endif
+constexpr std::size_t layoutPin(std::size_t reference, std::size_t appleLibcxx) {
+    return kAppleLibcxxLayout ? appleLibcxx : reference;
+}
+}  // namespace
+
 using SharpRuntime::intcs;
 using System::Collections::Generic::SortedSet;
 
@@ -681,7 +696,7 @@ TEST(SortedSetCountCacheTests, PublishedObjectLayoutIsUnchanged) {
         GTEST_SKIP() << "layout figures were published for LP64/LLP64 64-bit builds only";
     } else {
         EXPECT_EQ(sizeof(SortedSet<int>), 40u);
-        EXPECT_EQ(sizeof(SortedSet<std::string>), 104u);
+        EXPECT_EQ(sizeof(SortedSet<std::string>), layoutPin(104, 88));
         EXPECT_EQ(sizeof(SortedSet<int>::Iterator), 40u);
         EXPECT_EQ(alignof(SortedSet<int>), 8u);
         EXPECT_EQ(alignof(SortedSet<std::string>), 8u);

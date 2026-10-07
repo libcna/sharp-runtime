@@ -38,6 +38,21 @@
 #include "System/Text/Json/Nodes/JsonValue.hpp"
 #include "System/Text/Json/Utf8JsonWriter.hpp"
 
+namespace {
+// Object sizes are a property of the standard library's own members (std::mutex, std::function,
+// std::string, ...). The literal pins in this file were measured with libstdc++ (the Linux gate);
+// Apple's libc++ lays the same declarations out differently, so each pin records both
+// measurements and neither ABI loses its tripwire. Any other library gets the reference value.
+#if defined(__APPLE__) && defined(_LIBCPP_VERSION)
+constexpr bool kAppleLibcxxLayout = true;
+#else
+constexpr bool kAppleLibcxxLayout = false;
+#endif
+constexpr std::size_t layoutPin(std::size_t reference, std::size_t appleLibcxx) {
+    return kAppleLibcxxLayout ? appleLibcxx : reference;
+}
+}  // namespace
+
 using namespace System::Text::Json;
 using System::Text::Json::Nodes::JsonNode;
 using SharpRuntime::intcs;
@@ -947,7 +962,7 @@ TEST(JsonGatedBehaviourPins, Fix2117_LayoutPin) {
     EXPECT_EQ(alignof(JsonElement), alignof(After));
     EXPECT_EQ(sizeof(After), sizeof(Before) + sizeof(void*))
         << "the shadow pair must actually differ, or this pin asserts nothing";
-    EXPECT_EQ(sizeof(JsonElement), 56u) << "consumers must rebuild; see the migration note";
+    EXPECT_EQ(sizeof(JsonElement), layoutPin(56, 48)) << "consumers must rebuild; see the migration note";
 }
 
 TEST(JsonGatedBehaviourPins, Fix2115_BothOptionsWorkAtBOTHDoorsIdentically) {

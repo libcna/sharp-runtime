@@ -38,6 +38,21 @@
 #include "System/Threading/SemaphoreSlim.hpp"
 #include "System/Threading/ThreadLocal.hpp"
 
+namespace {
+// Object sizes are a property of the standard library's own members (std::mutex, std::function,
+// std::string, ...). The literal pins in this file were measured with libstdc++ (the Linux gate);
+// Apple's libc++ lays the same declarations out differently, so each pin records both
+// measurements and neither ABI loses its tripwire. Any other library gets the reference value.
+#if defined(__APPLE__) && defined(_LIBCPP_VERSION)
+constexpr bool kAppleLibcxxLayout = true;
+#else
+constexpr bool kAppleLibcxxLayout = false;
+#endif
+constexpr std::size_t layoutPin(std::size_t reference, std::size_t appleLibcxx) {
+    return kAppleLibcxxLayout ? appleLibcxx : reference;
+}
+}  // namespace
+
 using namespace System::Threading;
 
 // ===========================================================================
@@ -58,15 +73,15 @@ using namespace System::Threading;
 // ReaderWriterWriterPreferenceTests.Decl1957_TheWaiterCountsLayout, migration note recording the
 // full-consumer-rebuild requirement, and the full gate.
 TEST(ThreadingSharedStateTests, RepairedTypes_LayoutUnchanged) {
-    EXPECT_EQ(sizeof(ReaderWriterLockSlim), 128u);   // #2389: was 120
-    EXPECT_EQ(sizeof(SemaphoreSlim), 104u);
-    EXPECT_EQ(sizeof(ManualResetEventSlim), 112u);
-    EXPECT_EQ(sizeof(CountdownEvent), 104u);
-    EXPECT_EQ(sizeof(Barrier), 160u);
+    EXPECT_EQ(sizeof(ReaderWriterLockSlim), layoutPin(128, 152));   // #2389: was 120
+    EXPECT_EQ(sizeof(SemaphoreSlim), layoutPin(104, 128));
+    EXPECT_EQ(sizeof(ManualResetEventSlim), layoutPin(112, 136));
+    EXPECT_EQ(sizeof(CountdownEvent), layoutPin(104, 128));
+    EXPECT_EQ(sizeof(Barrier), layoutPin(160, 184));
     // #1958/SR-AUD-220 grew this 56 -> 128: trackAllValues_ was accepted and never read, and
     // making it mean something needs a mutex (40) and a vector (24) for the instance-wide value
     // registry. A real object-layout change under SA-3; consumers must be recompiled.
-    EXPECT_EQ(sizeof(ThreadLocal<int>), 128u);   // #1958/SR-AUD-220: was 56
+    EXPECT_EQ(sizeof(ThreadLocal<int>), layoutPin(128, 152));   // #1958/SR-AUD-220: was 56
 
     EXPECT_EQ(alignof(ReaderWriterLockSlim), 8u);
     EXPECT_EQ(alignof(SemaphoreSlim), 8u);

@@ -158,6 +158,21 @@ static_assert(!HasEquality<XObjectChangeEventHandler>::value,
               "identify a registration, so SR-AUD-336's second blocker no longer holds and "
               "#2199's approval XL-2 must be re-derived.");
 
+namespace {
+// Object sizes are a property of the standard library's own members (std::mutex, std::function,
+// std::string, ...). The literal pins below were measured with libstdc++ (the Linux gate); Apple's
+// libc++ lays the same declarations out differently, so each pin records both measurements and
+// neither ABI loses its tripwire. Any other standard library is unmeasured and gets the reference.
+#if defined(__APPLE__) && defined(_LIBCPP_VERSION)
+constexpr bool kAppleLibcxxLayout = true;
+#else
+constexpr bool kAppleLibcxxLayout = false;
+#endif
+constexpr std::size_t layoutPin(std::size_t reference, std::size_t appleLibcxx) {
+    return kAppleLibcxxLayout ? appleLibcxx : reference;
+}
+}  // namespace
+
 TEST(XLinqChangeNotificationTests, HandlerTypeCannotIdentifyARegistration) {
     // The runtime face of the static_asserts above, so the reason is visible in test output and
     // not only in a compile error nobody reads.
@@ -743,11 +758,11 @@ TEST(XLinqChangeNotificationTests, Fix2199_TheLayoutGrowthApprovalWasPaidExactly
     // chain is on the record and a second growth cannot hide inside a relative assertion.
     static_assert(sizeof(System::Xml::Linq::XObject) == 24);          // was 16
     static_assert(sizeof(XNode) == 24);                               // was 16
-    static_assert(sizeof(XElement) == 136);                           // was 128
-    static_assert(sizeof(XAttribute) == 128);                         // was 120
-    static_assert(sizeof(XText) == 56);                               // was 48
-    static_assert(sizeof(XComment) == 56);                            // was 48
-    static_assert(sizeof(XCData) == 56);                              // was 48
+    static_assert(sizeof(XElement) == layoutPin(136, 120));           // was 128 (Apple: 112)
+    static_assert(sizeof(XAttribute) == layoutPin(128, 104));         // was 120 (Apple: 96)
+    static_assert(sizeof(XText) == layoutPin(56, 48));                // was 48 (Apple: 40)
+    static_assert(sizeof(XComment) == layoutPin(56, 48));             // was 48 (Apple: 40)
+    static_assert(sizeof(XCData) == layoutPin(56, 48));               // was 48 (Apple: 40)
     static_assert(sizeof(XDocument) == 64);                           // was 56
 }
 

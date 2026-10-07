@@ -12,6 +12,21 @@
 #include "System/InvalidOperationException.hpp"
 #include <memory>
 
+namespace {
+// Object sizes are a property of the standard library's own members (std::mutex, std::function,
+// std::string, ...). The literal pins in this file were measured with libstdc++ (the Linux gate);
+// Apple's libc++ lays the same declarations out differently, so each pin records both
+// measurements and neither ABI loses its tripwire. Any other library gets the reference value.
+#if defined(__APPLE__) && defined(_LIBCPP_VERSION)
+constexpr bool kAppleLibcxxLayout = true;
+#else
+constexpr bool kAppleLibcxxLayout = false;
+#endif
+constexpr std::size_t layoutPin(std::size_t reference, std::size_t appleLibcxx) {
+    return kAppleLibcxxLayout ? appleLibcxx : reference;
+}
+}  // namespace
+
 
 using System::UriParser;
 using System::NotImplementedException;
@@ -145,7 +160,7 @@ class PlainParser final : public System::UriParser {};
 // SA-15.3's layout condition. The two members are what let a parser remember its own
 // registration, and they are private, so this asserts the SHAPE a consumer must rebuild for.
 TEST(UriParserA4Tests, LayoutIsPinnedBecauseTheRegistrationStateIsNew) {
-    EXPECT_EQ(sizeof(System::UriParser), 48u);
+    EXPECT_EQ(sizeof(System::UriParser), layoutPin(48, 40));
     EXPECT_EQ(alignof(System::UriParser), 8u);
     // A vptr plus a std::string plus an intcs, with the relationship stated rather than only the
     // literal -- so a member added later cannot hide behind a hand-updated number.

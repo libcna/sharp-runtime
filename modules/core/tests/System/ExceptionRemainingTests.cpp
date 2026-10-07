@@ -55,6 +55,21 @@
 #include "System/UnauthorizedAccessException.hpp"
 #include "System/Globalization/CultureNotFoundException.hpp"
 
+namespace {
+// Object sizes are a property of the standard library's own members (std::mutex, std::function,
+// std::string, ...). The literal pins in this file were measured with libstdc++ (the Linux gate);
+// Apple's libc++ lays the same declarations out differently, so each pin records both
+// measurements and neither ABI loses its tripwire. Any other library gets the reference value.
+#if defined(__APPLE__) && defined(_LIBCPP_VERSION)
+constexpr bool kAppleLibcxxLayout = true;
+#else
+constexpr bool kAppleLibcxxLayout = false;
+#endif
+constexpr std::size_t layoutPin(std::size_t reference, std::size_t appleLibcxx) {
+    return kAppleLibcxxLayout ? appleLibcxx : reference;
+}
+}  // namespace
+
 using System::Exception;
 
 // Helper macro: default ctor produces non-empty what()
@@ -1060,7 +1075,7 @@ TEST(AggregateExceptionLayoutTests, Fix2309_TheRawMessageFieldGrowsTheObject) {
     // SA-3's pin. The second std::string is the only escape from the composition/preservation
     // conflict, and it costs 32 bytes on each of the two public types that hold one by value.
     // Consumers must rebuild; no source change is needed.
-    EXPECT_EQ(sizeof(System::AggregateException), 224u) << "was 192 before #2309";
+    EXPECT_EQ(sizeof(System::AggregateException), layoutPin(224, 168)) << "was 192 before #2309";
     EXPECT_EQ(alignof(System::AggregateException), 8u);
 }
 

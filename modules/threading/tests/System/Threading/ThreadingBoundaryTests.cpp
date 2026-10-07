@@ -58,6 +58,21 @@
 #include "System/TimeProvider.hpp"
 #include "System/TimeSpan.hpp"
 
+namespace {
+// Object sizes are a property of the standard library's own members (std::mutex, std::function,
+// std::string, ...). The literal pins below were measured with libstdc++ (the Linux gate); Apple's
+// libc++ lays the same declarations out differently, so each pin records both measurements and
+// neither ABI loses its tripwire. Any other standard library is unmeasured and gets the reference.
+#if defined(__APPLE__) && defined(_LIBCPP_VERSION)
+constexpr bool kAppleLibcxxLayout = true;
+#else
+constexpr bool kAppleLibcxxLayout = false;
+#endif
+constexpr std::size_t layoutPin(std::size_t reference, std::size_t appleLibcxx) {
+    return kAppleLibcxxLayout ? appleLibcxx : reference;
+}
+}  // namespace
+
 using namespace System::Threading;
 
 namespace {
@@ -300,7 +315,7 @@ TEST(ThreadingEmptyCallableTests, SynchronizationContext_SendNonEmpty_StillRunsS
     SynchronizationContext ctx;
     int hits = 0;
     int state = 5;
-    ctx.Send([&hits, &state](void* s) { hits += *static_cast<int*>(s); }, &state);
+    ctx.Send([&hits](void* s) { hits += *static_cast<int*>(s); }, &state);
     EXPECT_EQ(hits, 5);
 }
 
@@ -774,10 +789,10 @@ TEST(PeriodicTimerSingleConsumerTests, Decl1957_TheGuardCostsNoLayout) {
     // SA-3's pinned measurement. The new bool fits in padding the type already had, so the size
     // is unchanged and no consumer needs a rebuild for layout -- measured 128 before and 128
     // after (build-probe/1957_probe1_layout.cpp).
-    static_assert(sizeof(System::Threading::PeriodicTimer) == 128,
+    static_assert(sizeof(System::Threading::PeriodicTimer) == layoutPin(128, 152),
                   "#1957/SR-AUD-201 must not grow PeriodicTimer");
     static_assert(alignof(System::Threading::PeriodicTimer) == 8);
-    EXPECT_EQ(sizeof(System::Threading::PeriodicTimer), 128u);
+    EXPECT_EQ(sizeof(System::Threading::PeriodicTimer), layoutPin(128, 152));
 }
 
 TEST(PeriodicTimerSingleConsumerTests, Fix1957_ASecondConcurrentConsumerThrows) {
@@ -876,10 +891,10 @@ TEST(PeriodicTimerSingleConsumerTests, Fix1957_SingleConsumerUseIsCompletelyUnch
 // =============================================================================================
 
 TEST(BarrierPostPhaseReadabilityTests, Decl1957_TheAtomicPhaseIsLayoutNeutral) {
-    static_assert(sizeof(System::Threading::Barrier) == 160,
+    static_assert(sizeof(System::Threading::Barrier) == layoutPin(160, 184),
                   "#1957/SR-AUD-210 must not change Barrier's layout");
     static_assert(alignof(System::Threading::Barrier) == 8);
-    EXPECT_EQ(sizeof(System::Threading::Barrier), 160u);
+    EXPECT_EQ(sizeof(System::Threading::Barrier), layoutPin(160, 184));
 }
 
 TEST(BarrierPostPhaseReadabilityTests, Fix1957_ThePostPhaseActionCanReadThePhaseNumber) {
@@ -1050,10 +1065,10 @@ TEST(ReaderWriterWriterPreferenceTests, Decl1957_TheWaiterCountsLayout) {
     // #2389 then added waitingReaders_ and waitingUpgraders_ for Dispose's waiter check, and
     // those did NOT fit: 120 -> 128. That is a real object-layout change under SA-3, and every
     // consumer must be recompiled. Pinned here so a third counter cannot arrive unnoticed.
-    static_assert(sizeof(System::Threading::ReaderWriterLockSlim) == 128,
+    static_assert(sizeof(System::Threading::ReaderWriterLockSlim) == layoutPin(128, 152),
                   "#2389 grew ReaderWriterLockSlim 120 -> 128; a further change needs its own pin");
     static_assert(alignof(System::Threading::ReaderWriterLockSlim) == 8);
-    EXPECT_EQ(sizeof(System::Threading::ReaderWriterLockSlim), 128u);
+    EXPECT_EQ(sizeof(System::Threading::ReaderWriterLockSlim), layoutPin(128, 152));
 }
 
 TEST(ReaderWriterWriterPreferenceTests, Fix1957_ANewReaderWaitsBehindABlockedWriter) {
@@ -1184,8 +1199,8 @@ TEST(ReaderWriterWriterPreferenceTests, Fix1957_AnUpgraderWaitingForWriteAlsoBlo
 
 TEST(DisposalIsARealStateTests, Decl1956_TheClosedFlagOnMutexIsLayoutNeutral) {
     // #1956's own figure, unchanged: the flag landed in padding Mutex already had.
-    static_assert(sizeof(System::Threading::Mutex) == 64, "#1956 must not grow Mutex");
-    EXPECT_EQ(sizeof(System::Threading::Mutex), 64u);
+    static_assert(sizeof(System::Threading::Mutex) == layoutPin(64, 152), "#1956 must not grow Mutex");
+    EXPECT_EQ(sizeof(System::Threading::Mutex), layoutPin(64, 152));
 }
 
 TEST(HierarchyTests, Fix1958_209_TheTwoEventsAreEventWaitHandlesAndCostExactlyThat) {
@@ -1210,10 +1225,10 @@ TEST(HierarchyTests, Fix1958_209_TheTwoEventsAreEventWaitHandlesAndCostExactlyTh
     // That was asserted at 104 first and the build rejected it -- #1956's flags fitted on three
     // other types and the expectation was carried over rather than measured. Every consumer of
     // any of the three must rebuild, and `cna` holds EventWaitHandle BY VALUE in six places.
-    static_assert(sizeof(System::Threading::EventWaitHandle) == 112,
+    static_assert(sizeof(System::Threading::EventWaitHandle) == layoutPin(112, 136),
                   "#1958/SR-AUD-209: EventWaitHandle grew by its closed_ flag");
-    EXPECT_EQ(sizeof(System::Threading::AutoResetEvent), 112u);
-    EXPECT_EQ(sizeof(System::Threading::ManualResetEvent), 112u);
+    EXPECT_EQ(sizeof(System::Threading::AutoResetEvent), layoutPin(112, 136));
+    EXPECT_EQ(sizeof(System::Threading::ManualResetEvent), layoutPin(112, 136));
 
     // The point of the whole finding: both are now WaitHandles, so WaitAll/WaitAny can accept
     // them. Before this they could not, which is what made SR-AUD-209 the one divergence in the
@@ -1571,9 +1586,9 @@ TEST(ReaderWriterDisposeWaiterCheckTests, Decl2389_TheHeldModeCheckStillFiresOnI
 // =============================================================================================
 
 TEST(ThreadLocalValuesTests, Decl1958_TheRegistryGrowsTheType) {
-    static_assert(sizeof(System::Threading::ThreadLocal<int>) == 128,
+    static_assert(sizeof(System::Threading::ThreadLocal<int>) == layoutPin(128, 152),
                   "#1958/SR-AUD-220 grew ThreadLocal 56 -> 128; a further change needs its own pin");
-    EXPECT_EQ(sizeof(System::Threading::ThreadLocal<int>), 128u);
+    EXPECT_EQ(sizeof(System::Threading::ThreadLocal<int>), layoutPin(128, 152));
 }
 
 TEST(ThreadLocalValuesTests, Fix1958_ValuesThrowsWhenNotTracking) {
@@ -1717,9 +1732,9 @@ TEST(ThreadLocalValuesTests, Fix1958_DisposeReleasesTheTrackedValues) {
 // =============================================================================================
 
 TEST(ThreadParameterizedStartTests, Decl1958_TheSecondCallableGrowsTheType) {
-    static_assert(sizeof(System::Threading::Thread) == 136,
+    static_assert(sizeof(System::Threading::Thread) == layoutPin(136, 128),
                   "#1958/SR-AUD-194 grew Thread 104 -> 136; a further change needs its own pin");
-    EXPECT_EQ(sizeof(System::Threading::Thread), 136u);
+    EXPECT_EQ(sizeof(System::Threading::Thread), layoutPin(136, 128));
 }
 
 TEST(ThreadParameterizedStartTests, Fix1958_TheParameterActuallyReachesTheBody) {

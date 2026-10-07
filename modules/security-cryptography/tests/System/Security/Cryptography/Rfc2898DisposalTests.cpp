@@ -29,6 +29,21 @@
 #include "System/Security/Cryptography/CryptographicException.hpp"
 #include "../../../support/KeyMaterialSeam.hpp"
 
+namespace {
+// Object sizes are a property of the standard library's own members (std::mutex, std::function,
+// std::string, ...). The literal pins in this file were measured with libstdc++ (the Linux gate);
+// Apple's libc++ lays the same declarations out differently, so each pin records both
+// measurements and neither ABI loses its tripwire. Any other library gets the reference value.
+#if defined(__APPLE__) && defined(_LIBCPP_VERSION)
+constexpr bool kAppleLibcxxLayout = true;
+#else
+constexpr bool kAppleLibcxxLayout = false;
+#endif
+constexpr std::size_t layoutPin(std::size_t reference, std::size_t appleLibcxx) {
+    return kAppleLibcxxLayout ? appleLibcxx : reference;
+}
+}  // namespace
+
 using namespace System::Security::Cryptography;
 using SharpRuntime::bytecs;
 using SharpRuntime::intcs;
@@ -270,6 +285,6 @@ TEST(Rfc2898VectorTests, ARejectedGetBytesArgumentLeavesTheInstanceUsable) {
 TEST(Rfc2898LayoutTests, TheDisposedFlagCostNothing) {
     // The repair's whole premise. If a future change appends a member instead of using the hole,
     // or reorders these, this fails and the plan's section 4.1 has to be revisited deliberately.
-    EXPECT_EQ(sizeof(Rfc2898DeriveBytes), 160u);
+    EXPECT_EQ(sizeof(Rfc2898DeriveBytes), layoutPin(160, 152));
     EXPECT_EQ(alignof(Rfc2898DeriveBytes), 8u);
 }

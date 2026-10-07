@@ -76,6 +76,21 @@
 // `template<> struct CollectionVersionAccess<...>` in a test translation unit.
 #include "../../support/CollectionVersionSeam.hpp"
 
+namespace {
+// Object sizes are a property of the standard library's own members (std::mutex, std::function,
+// std::string, ...). The literal pins in this file were measured with libstdc++ (the Linux gate);
+// Apple's libc++ lays the same declarations out differently, so each pin records both
+// measurements and neither ABI loses its tripwire. Any other library gets the reference value.
+#if defined(__APPLE__) && defined(_LIBCPP_VERSION)
+constexpr bool kAppleLibcxxLayout = true;
+#else
+constexpr bool kAppleLibcxxLayout = false;
+#endif
+constexpr std::size_t layoutPin(std::size_t reference, std::size_t appleLibcxx) {
+    return kAppleLibcxxLayout ? appleLibcxx : reference;
+}
+}  // namespace
+
 using SharpRuntime::bytecs;
 using SharpRuntime::intcs;
 using SharpRuntime::uintcs;
@@ -169,7 +184,7 @@ TEST(BitArrayVersionWidening, ThePublicEnumeratorGrewToFortyBytesOnLp64) {
     if constexpr (sizeof(void*) == 8) {
         EXPECT_EQ(sizeof(NG::BitArray::Enumerator), 40u);
         EXPECT_EQ(alignof(NG::BitArray::Enumerator), 8u);
-        EXPECT_EQ(sizeof(NG::BitArray), 48u);
+        EXPECT_EQ(sizeof(NG::BitArray), layoutPin(48, 32));
         EXPECT_EQ(alignof(NG::BitArray), 8u);
     } else {
         SUCCEED() << "published sizes are LP64-only";

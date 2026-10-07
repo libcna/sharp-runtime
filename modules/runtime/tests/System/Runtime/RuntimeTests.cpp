@@ -1171,15 +1171,30 @@ TEST(ConditionalWeakTableEnumeratorTests, Fix1981_OrdinaryEnumerationIsUnchanged
     EXPECT_EQ(sum, 30);
 }
 
+namespace {
+// Object sizes are a property of the standard library's own members (std::mutex, std::function,
+// std::string, ...). The literal pins below were measured with libstdc++ (the Linux gate); Apple's
+// libc++ lays the same declarations out differently, so each pin records both measurements and
+// neither ABI loses its tripwire. Any other standard library is unmeasured and gets the reference.
+#if defined(__APPLE__) && defined(_LIBCPP_VERSION)
+constexpr bool kAppleLibcxxLayout = true;
+#else
+constexpr bool kAppleLibcxxLayout = false;
+#endif
+constexpr std::size_t layoutPin(std::size_t reference, std::size_t appleLibcxx) {
+    return kAppleLibcxxLayout ? appleLibcxx : reference;
+}
+}  // namespace
+
 TEST(ConditionalWeakTableEnumeratorTests, Decl1981_TheTablesOwnLayoutIsUnchanged) {
     // SA-3's pinned measurement. The Enumerator is a PRIVATE nested class that GetEnumerator()
     // heap-allocates and hands back as an IEnumerator<Pair>*, so no consumer can name it, size it
     // or hold one by value: its layout change is invisible through every public spelling. What a
     // consumer CAN size is the table, and that did not move -- 72 before the repair and 72 after
     // (build-probe/1981_probe1_layout.cpp).
-    static_assert(sizeof(WeakTable) == 72, "#1981 must not change the table's own layout");
+    static_assert(sizeof(WeakTable) == layoutPin(72, 96), "#1981 must not change the table's own layout");
     static_assert(alignof(WeakTable) == 8);
-    EXPECT_EQ(sizeof(WeakTable), 72u);
+    EXPECT_EQ(sizeof(WeakTable), layoutPin(72, 96));
 }
 
 // =============================================================================================
@@ -1463,13 +1478,13 @@ TEST(RuntimeG3Tests, AmbiguousImplementationExceptionHasDotNetsShape) {
 // A consumer must rebuild for both changes: G-3 moved the vtable, and SR-AUD-164 moved layouts.
 TEST(RuntimeG3Tests, G3LayoutsAndLaterNullableGrowthArePinned) {
     using namespace System::Runtime::Versioning;
-    EXPECT_EQ(sizeof(System::Exception), 168u);
-    EXPECT_EQ(sizeof(System::SystemException), 168u)
+    EXPECT_EQ(sizeof(System::Exception), layoutPin(168, 120));
+    EXPECT_EQ(sizeof(System::SystemException), layoutPin(168, 120))
         << "SystemException adding no members is WHY the reparenting costs no bytes";
-    EXPECT_EQ(sizeof(System::Runtime::AmbiguousImplementationException), 168u);
+    EXPECT_EQ(sizeof(System::Runtime::AmbiguousImplementationException), layoutPin(168, 120));
 
     EXPECT_EQ(sizeof(System::Attribute), 8u);
-    EXPECT_EQ(sizeof(OSPlatformAttribute), 40u);
+    EXPECT_EQ(sizeof(OSPlatformAttribute), layoutPin(40, 32));
     // The base is Attribute plus one std::string, and the derived ones add only their own extras.
     EXPECT_EQ(sizeof(SupportedOSPlatformAttribute), sizeof(OSPlatformAttribute));
     EXPECT_EQ(sizeof(SupportedOSPlatformGuardAttribute), sizeof(OSPlatformAttribute));

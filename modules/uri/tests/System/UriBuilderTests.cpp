@@ -8,6 +8,21 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/UriFormatException.hpp"
 
+namespace {
+// Object sizes are a property of the standard library's own members (std::mutex, std::function,
+// std::string, ...). The literal pins in this file were measured with libstdc++ (the Linux gate);
+// Apple's libc++ lays the same declarations out differently, so each pin records both
+// measurements and neither ABI loses its tripwire. Any other library gets the reference value.
+#if defined(__APPLE__) && defined(_LIBCPP_VERSION)
+constexpr bool kAppleLibcxxLayout = true;
+#else
+constexpr bool kAppleLibcxxLayout = false;
+#endif
+constexpr std::size_t layoutPin(std::size_t reference, std::size_t appleLibcxx) {
+    return kAppleLibcxxLayout ? appleLibcxx : reference;
+}
+}  // namespace
+
 using System::UriBuilder;
 using System::ArgumentOutOfRangeException;
 using System::UriFormatException;
@@ -495,7 +510,7 @@ TEST(UriBuilderTest, Layout_SizeOfUriBuilderIsPinned) {
     // docs/SystemUriNamespaceReviewPlan.md §9.2 claimed sizeof(System::UriBuilder) == 232 was
     // "re-asserted by permanent tests"; measured on 2026-08-03 no such test existed. Added
     // here so the claim becomes true, alongside UriTests.Layout_SizeOfUriIsPinned.
-    EXPECT_EQ(sizeof(System::UriBuilder), 232u);
+    EXPECT_EQ(sizeof(System::UriBuilder), layoutPin(232, 176));
 }
 
 // ===========================================================================
