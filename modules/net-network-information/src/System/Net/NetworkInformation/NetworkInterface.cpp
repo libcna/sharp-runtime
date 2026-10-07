@@ -9,24 +9,33 @@
 // No Windows PAL implemented yet.
 #elif defined(__EMSCRIPTEN__)
 // No network interface enumeration available under Emscripten.
-#elif defined(__linux__)
-#define SHARP_RUNTIME_NETWORKINTERFACE_LINUX 1
+#elif defined(__linux__) || defined(__APPLE__)
+// Both enumerate with getifaddrs(); only the link-layer record differs -- AF_PACKET /
+// sockaddr_ll on Linux, AF_LINK / sockaddr_dl on Darwin -- along with where the speed comes
+// from and what the loopback interface is called.
+#define SHARP_RUNTIME_NETWORKINTERFACE_IFADDRS 1
 #include <cstdio>
 #include <cstring>
 #include <ifaddrs.h>
-#include <linux/if_packet.h>
 #include <map>
 #include <net/if.h>
-#include <net/if_arp.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#  if defined(__linux__)
+#    include <linux/if_packet.h>
+#    include <net/if_arp.h>
+#  else
+#    include <net/if_dl.h>
+#    include <net/if_types.h>
+#  endif
 #endif
 
 namespace System::Net::NetworkInformation {
 
-#if defined(SHARP_RUNTIME_NETWORKINTERFACE_LINUX)
+#if defined(SHARP_RUNTIME_NETWORKINTERFACE_IFADDRS)
 namespace {
 
+#if defined(__linux__)
     SharpRuntime::longcs readSpeed(const std::string& name) {
         std::string path = "/sys/class/net/" + name + "/speed";
         FILE* f = std::fopen(path.c_str(), "r");
@@ -64,6 +73,47 @@ namespace {
                 return NetworkInterfaceType::Unknown;
         }
     }
+#else
+    // sockaddr_dl's sdl_type is an IFT_* value, which for most types IS the IANA ifType number
+    // that NetworkInterfaceType uses, but not for all (the BSD tunnels IFT_GIF/IFT_STF are local
+    // numbers). Mapped explicitly, as .NET's BSD PAL does.
+    NetworkInterfaceType mapInterfaceType(unsigned char ifType, bool isLoopback) {
+        if (isLoopback) {
+            return NetworkInterfaceType::Loopback;
+        }
+        switch (ifType) {
+            case IFT_ETHER:
+            case IFT_L2VLAN:
+                return NetworkInterfaceType::Ethernet;
+            case IFT_ISO88025:
+                return NetworkInterfaceType::TokenRing;
+            case IFT_FDDI:
+                return NetworkInterfaceType::Fddi;
+            case IFT_ISDNBASIC:
+                return NetworkInterfaceType::BasicIsdn;
+            case IFT_ISDNPRIMARY:
+                return NetworkInterfaceType::PrimaryIsdn;
+            case IFT_PPP:
+                return NetworkInterfaceType::Ppp;
+            case IFT_LOOP:
+                return NetworkInterfaceType::Loopback;
+            case IFT_SLIP:
+                return NetworkInterfaceType::Slip;
+            case IFT_GIF:
+            case IFT_STF:
+                return NetworkInterfaceType::Tunnel;
+#if defined(IFT_IEEE80211)
+            // Darwin has no IFT_IEEE80211 -- it reports Wi-Fi as IFT_ETHER -- other BSDs do.
+            case IFT_IEEE80211:
+                return NetworkInterfaceType::Wireless80211;
+#endif
+            case IFT_IEEE1394:
+                return NetworkInterfaceType::HighPerformanceSerialBus;
+            default:
+                return NetworkInterfaceType::Unknown;
+        }
+    }
+#endif
 
     struct InterfaceAccumulator {
         NetworkInterfaceType type = NetworkInterfaceType::Unknown;
@@ -111,6 +161,21 @@ std::vector<std::shared_ptr<NetworkInterface>> NetworkInterface::GetAllNetworkIn
             acc.supportsIPv4 = true;
         } else if (cur->ifa_addr->sa_family == AF_INET6) {
             acc.supportsIPv6 = true;
+#if defined(__APPLE__)
+        } else if (cur->ifa_addr->sa_family == AF_LINK) {
+            const auto* dl = reinterpret_cast<const sockaddr_dl*>(cur->ifa_addr);
+            acc.type = mapInterfaceType(dl->sdl_type, isLoopback);
+            if (dl->sdl_alen > 0) {
+                const auto* bytes = reinterpret_cast<const unsigned char*>(LLADDR(dl));
+                std::vector<SharpRuntime::bytecs> mac(bytes, bytes + dl->sdl_alen);
+                acc.physicalAddress = PhysicalAddress(mac);
+            }
+            // The AF_LINK entry's ifa_data is the interface's if_data; 0 means "not reported".
+            if (cur->ifa_data != nullptr) {
+                const auto baud = static_cast<const if_data*>(cur->ifa_data)->ifi_baudrate;
+                acc.speed = baud > 0 ? static_cast<SharpRuntime::longcs>(baud) : -1;
+            }
+#else
         } else if (cur->ifa_addr->sa_family == AF_PACKET) {
             const auto* ll = reinterpret_cast<sockaddr_ll*>(cur->ifa_addr);
             acc.type = mapHardwareType(ll->sll_hatype, isLoopback);
@@ -119,6 +184,7 @@ std::vector<std::shared_ptr<NetworkInterface>> NetworkInterface::GetAllNetworkIn
                 acc.physicalAddress = PhysicalAddress(mac);
             }
             acc.speed = readSpeed(name);
+#endif
         }
 
         if (isLoopback && acc.type == NetworkInterfaceType::Unknown) {
@@ -161,7 +227,23 @@ SharpRuntime::intcs NetworkInterface::getIPv6LoopbackInterfaceIndexProperty() {
 }
 
 SharpRuntime::intcs NetworkInterface::getLoopbackInterfaceIndexProperty() {
+#if defined(__linux__)
     unsigned int index = if_nametoindex("lo");
+#else
+    // Darwin calls it lo0, and nothing guarantees the name; the interface flagged IFF_LOOPBACK
+    // is the one that is meant.
+    unsigned int index = 0;
+    ifaddrs* addrs = nullptr;
+    if (getifaddrs(&addrs) != 0) {
+        throw NetworkInformationException();
+    }
+    for (ifaddrs* cur = addrs; cur != nullptr && index == 0; cur = cur->ifa_next) {
+        if (cur->ifa_name != nullptr && (cur->ifa_flags & IFF_LOOPBACK) != 0) {
+            index = if_nametoindex(cur->ifa_name);
+        }
+    }
+    freeifaddrs(addrs);
+#endif
     if (index == 0) {
         throw NetworkInformationException();
     }
@@ -176,27 +258,27 @@ bool NetworkInterface::Supports(NetworkInterfaceComponent networkInterfaceCompon
 
 std::vector<std::shared_ptr<NetworkInterface>> NetworkInterface::GetAllNetworkInterfaces() {
     throw System::PlatformNotSupportedException(
-        "NetworkInterface.GetAllNetworkInterfaces() is only implemented on Linux in this runtime.");
+        "NetworkInterface.GetAllNetworkInterfaces() is only implemented on Linux and macOS in this runtime.");
 }
 
 bool NetworkInterface::GetIsNetworkAvailable() {
     throw System::PlatformNotSupportedException(
-        "NetworkInterface.GetIsNetworkAvailable() is only implemented on Linux in this runtime.");
+        "NetworkInterface.GetIsNetworkAvailable() is only implemented on Linux and macOS in this runtime.");
 }
 
 SharpRuntime::intcs NetworkInterface::getIPv6LoopbackInterfaceIndexProperty() {
     throw System::PlatformNotSupportedException(
-        "NetworkInterface.IPv6LoopbackInterfaceIndex is only implemented on Linux in this runtime.");
+        "NetworkInterface.IPv6LoopbackInterfaceIndex is only implemented on Linux and macOS in this runtime.");
 }
 
 SharpRuntime::intcs NetworkInterface::getLoopbackInterfaceIndexProperty() {
     throw System::PlatformNotSupportedException(
-        "NetworkInterface.LoopbackInterfaceIndex is only implemented on Linux in this runtime.");
+        "NetworkInterface.LoopbackInterfaceIndex is only implemented on Linux and macOS in this runtime.");
 }
 
 bool NetworkInterface::Supports(NetworkInterfaceComponent) const {
     throw System::PlatformNotSupportedException(
-        "NetworkInterface.Supports() is only implemented on Linux in this runtime.");
+        "NetworkInterface.Supports() is only implemented on Linux and macOS in this runtime.");
 }
 
 #endif
