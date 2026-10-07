@@ -73,6 +73,17 @@
 #include "System/IO/TextWriter.hpp"
 #include "System/IO/UnmanagedMemoryStream.hpp"
 
+namespace {
+// The process's own open descriptors: procfs on Linux, /dev/fd on Darwin (which has no procfs).
+// Every count below is a before/after difference, so the listings' different bookkeeping
+// entries cancel out.
+#if defined(__APPLE__)
+constexpr const char* kOwnDescriptorDirectory = "/dev/fd";
+#else
+constexpr const char* kOwnDescriptorDirectory = "/proc/self/fd";
+#endif
+}  // namespace
+
 using namespace System::IO;
 
 namespace {
@@ -122,7 +133,7 @@ protected:
     static int fdCount() {
         int n = 0;
         std::error_code ec;
-        for (auto& entry : std::filesystem::directory_iterator("/proc/self/fd", ec)) {
+        for (auto& entry : std::filesystem::directory_iterator(kOwnDescriptorDirectory, ec)) {
             (void)entry;
             ++n;
         }
@@ -1212,7 +1223,7 @@ TEST_F(ClosedFileStreamFixture, RepeatedRejectionsLeakNoDescriptor) {
     // cycles — and #2099's acceptance criteria asks for the number to be REPORTED, not asserted.
     auto fdCount = [] {
         int n = 0; std::error_code ec;
-        for (auto& e : std::filesystem::directory_iterator("/proc/self/fd", ec)) { (void)e; ++n; }
+        for (auto& e : std::filesystem::directory_iterator(kOwnDescriptorDirectory, ec)) { (void)e; ++n; }
         return n;
     };
     const int before = fdCount();
@@ -1407,7 +1418,7 @@ void readByte(const std::filesystem::path& p) {
 int watcherFdCount() {
     int n = 0;
     std::error_code ec;
-    for (auto& entry : std::filesystem::directory_iterator("/proc/self/fd", ec)) {
+    for (auto& entry : std::filesystem::directory_iterator(kOwnDescriptorDirectory, ec)) {
         (void)entry;
         ++n;
     }
@@ -2144,7 +2155,7 @@ TEST_F(IoReviewFixture, AThrowingFileStreamConstructorLeaksNoDescriptor) {
     // construction would be unmissable at either count, and the larger number costs nothing.
     auto fdCount = [] {
         int n = 0; std::error_code ec;
-        for (auto& e : std::filesystem::directory_iterator("/proc/self/fd", ec)) { (void)e; ++n; }
+        for (auto& e : std::filesystem::directory_iterator(kOwnDescriptorDirectory, ec)) { (void)e; ++n; }
         return n;
     };
     const std::string missing = under("no-such-file.txt");

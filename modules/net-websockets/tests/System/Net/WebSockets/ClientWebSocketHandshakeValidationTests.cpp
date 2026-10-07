@@ -112,12 +112,18 @@ size_t HeaderFieldCount(const std::string& request) {
     return fields;
 }
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 constexpr bool kDescriptorCountAvailable = true;
 SharpRuntime::intcs openDescriptorCount() {
     SharpRuntime::intcs count = 0;
     std::error_code ec;
-    for (auto it = std::filesystem::directory_iterator("/proc/self/fd", ec);
+    // Darwin has no procfs; its /dev/fd lists the same descriptors. Only differences are compared.
+#  if defined(__APPLE__)
+    const char* const ownDescriptors = "/dev/fd";
+#  else
+    const char* const ownDescriptors = "/proc/self/fd";
+#  endif
+    for (auto it = std::filesystem::directory_iterator(ownDescriptors, ec);
          !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
         ++count;
     }
@@ -339,7 +345,7 @@ TEST(ClientWebSocketHandshakeValidationTests, TheUriRejectionOpensNoSocketAndSen
     // tracks memory, not descriptors — so a clean LSan run would say nothing here and must not
     // be substituted. Where /proc/self/fd is unavailable the assertion is SKIPPED rather than
     // passed: a missing instrument is not a measurement.
-    if (!kDescriptorCountAvailable) GTEST_SKIP() << "/proc/self/fd is unavailable";
+    if (!kDescriptorCountAvailable) GTEST_SKIP() << "no per-process descriptor listing on this platform";
 
     const SharpRuntime::intcs before = openDescriptorCount();
     int threw = 0;

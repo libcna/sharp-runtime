@@ -33,7 +33,9 @@ TEST(NotifyCollectionChangedEventArgsBatch23Test, Reset_Valid) {
 }
 
 TEST(NotifyCollectionChangedEventArgsBatch23Test, Reset_WrongAction_Throws) {
-    EXPECT_THROW(NotifyCollectionChangedEventArgs<int>(NotifyCollectionChangedAction::Add),
+    // (void): a lone `T(Name::Value);` statement is the declaration of a variable named
+    // Name::Value, which Clang rejects (GCC re-reads it as the intended expression).
+    EXPECT_THROW((void)NotifyCollectionChangedEventArgs<int>(NotifyCollectionChangedAction::Add),
                  System::ArgumentException);
 }
 

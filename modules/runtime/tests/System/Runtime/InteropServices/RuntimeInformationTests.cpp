@@ -52,8 +52,16 @@ TEST(OSPlatformTests, DistinctPlatformsAreUnequal) {
     EXPECT_FALSE(OSPlatform::Linux.Equals(OSPlatform::Windows));
 }
 
-TEST(RuntimeInformationTests, IsOSPlatform_MatchesLinuxOnThisSandbox) {
+// The compiled target decides the answer. This used to be IsOSPlatform_MatchesLinuxOnThisSandbox,
+// asserting the Linux machine the suite was written on, and so failed on every other host.
+TEST(RuntimeInformationTests, IsOSPlatform_MatchesTheCompiledTarget) {
+#if defined(__APPLE__)
+    EXPECT_TRUE(RuntimeInformation::IsOSPlatform(OSPlatform::OSX));
+    EXPECT_FALSE(RuntimeInformation::IsOSPlatform(OSPlatform::Linux));
+#elif defined(__linux__)
     EXPECT_TRUE(RuntimeInformation::IsOSPlatform(OSPlatform::Linux));
+    EXPECT_FALSE(RuntimeInformation::IsOSPlatform(OSPlatform::OSX));
+#endif
     EXPECT_FALSE(RuntimeInformation::IsOSPlatform(OSPlatform::Windows));
 }
 
@@ -69,8 +77,12 @@ TEST(RuntimeInformationTests, ProcessArchitecture_MatchesOSArchitecture) {
 // Interop.Sys.GetOSArchitecture()), not just an alias for ProcessArchitecture -- on this x86_64
 // Linux sandbox it must resolve to X64 specifically, not merely "equal to whatever
 // ProcessArchitecture happens to return" (which would pass vacuously if both were wrong the same way).
-TEST(RuntimeInformationTests, OSArchitecture_IsX64OnThisSandbox) {
+TEST(RuntimeInformationTests, OSArchitecture_MatchesTheCompiledTarget) {
+#if defined(__x86_64__)
     EXPECT_EQ(RuntimeInformation::getOSArchitectureProperty(), Architecture::X64);
+#elif defined(__aarch64__) || defined(__arm64__)
+    EXPECT_EQ(RuntimeInformation::getOSArchitectureProperty(), Architecture::Arm64);
+#endif
 }
 
 // ===========================================================================

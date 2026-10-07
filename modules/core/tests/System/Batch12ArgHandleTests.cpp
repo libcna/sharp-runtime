@@ -39,7 +39,7 @@ namespace {
 // ===========================================================================
 
 TEST(RuntimeArgumentHandleTests, DefaultConstruct_DoesNotThrow) {
-    EXPECT_NO_THROW(System::RuntimeArgumentHandle{});
+    EXPECT_NO_THROW((void)System::RuntimeArgumentHandle{});
 }
 
 TEST(RuntimeArgumentHandleTests, IsDefaultConstructible) {

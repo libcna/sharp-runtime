@@ -332,7 +332,6 @@ TEST(ThreadingTests, Monitor_AnotherThread_CanEnter_WhileFirstThreadIsWaiting) {
     // must be able to Enter() and later Exit() without a spurious SynchronizationLockException.
     int obj = 0;
     std::atomic<bool> waiterEntered{false};
-    std::atomic<bool> signaled{false};
     std::thread waiter([&] {
         Monitor::Enter(&obj);
         waiterEntered = true;

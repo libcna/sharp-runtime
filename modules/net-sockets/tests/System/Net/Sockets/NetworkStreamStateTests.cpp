@@ -40,12 +40,19 @@ namespace {
 // Counts open descriptors by reading /proc/self/fd directly. The directory handle opendir() itself
 // holds is one of the entries, so it is subtracted along with "." and "..".
 int OpenDescriptorCount() {
+#if defined(__APPLE__)
+    // Darwin has no procfs; /dev/fd lists the same descriptors, without "." and "..".
+    DIR* dir = ::opendir("/dev/fd");
+    constexpr int nonDescriptorEntries = 1;  // opendir's own descriptor
+#else
     DIR* dir = ::opendir("/proc/self/fd");
+    constexpr int nonDescriptorEntries = 3;  // ".", ".." and opendir's own descriptor
+#endif
     if (dir == nullptr) return -1;
     int entries = 0;
     while (::readdir(dir) != nullptr) ++entries;
     ::closedir(dir);
-    return entries - 3;
+    return entries - nonDescriptorEntries;
 }
 
 // A connected, blocking, stream-oriented socket pair -- the shape NetworkStream is meant to wrap,
@@ -209,7 +216,15 @@ TEST(NetworkStreamConstructionTests, THECONTROLAConnectedBlockingStreamSocketSti
     StreamPair shutPair;
     ASSERT_GE(shutPair.fds[0], 0);
     ASSERT_EQ(0, ::shutdown(shutPair.fds[0], SHUT_RDWR));
+#if defined(__APPLE__)
+    // Darwin does drop the peer binding: after SHUT_RDWR, getpeername() fails with EINVAL for
+    // AF_UNIX and TCP sockets alike (measured on macOS 27), and that call is the only "connected"
+    // signal a raw descriptor carries. The construction is refused, and -- the property the other
+    // rows pin -- the caller keeps the descriptor.
+    EXPECT_THROW(NetworkStream s(shutPair.fds[0]), System::IO::IOException);
+#else
     EXPECT_NO_THROW(NetworkStream s(shutPair.release(0)));
+#endif
 
     ::close(listener);
     ::close(client);

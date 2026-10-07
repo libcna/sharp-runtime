@@ -1318,19 +1318,25 @@ TEST(HttpClientHandlerCookieTests, UseCookies_False_DoesNotSendCapturedCookie) {
 //
 // The instrument is the process's own open-descriptor count. LSan does NOT
 // cover this: it tracks memory, not descriptors, so a clean LSan run would say
-// nothing about it and must not be substituted. Where /proc/self/fd does not
-// exist (any non-Linux platform) the assertion is SKIPPED rather than failed --
-// a missing instrument is not a passing measurement.
+// nothing about it and must not be substituted. The listing is /proc/self/fd on
+// Linux and /dev/fd on Darwin; where neither exists the assertion is SKIPPED
+// rather than failed -- a missing instrument is not a passing measurement.
 // ---------------------------------------------------------------------------
 
 namespace {
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 constexpr bool kDescriptorCountAvailable = true;
 SharpRuntime::intcs openDescriptorCount() {
     SharpRuntime::intcs count = 0;
     std::error_code ec;
-    for (auto it = std::filesystem::directory_iterator("/proc/self/fd", ec);
+    // Darwin has no procfs; its /dev/fd lists the same descriptors. Only differences are compared.
+#  if defined(__APPLE__)
+    const char* const ownDescriptors = "/dev/fd";
+#  else
+    const char* const ownDescriptors = "/proc/self/fd";
+#  endif
+    for (auto it = std::filesystem::directory_iterator(ownDescriptors, ec);
          !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
         ++count;
     }

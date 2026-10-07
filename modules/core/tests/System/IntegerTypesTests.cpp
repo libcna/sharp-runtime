@@ -79,7 +79,7 @@ TEST(Int32Tests2, TryParse_Invalid_ReturnsFalse) {
 // Int128 (basic smoke test — may be stub)
 // ---------------------------------------------------------------------------
 TEST(Int128Tests2, DefaultCtor_DoesNotThrow) {
-    EXPECT_NO_THROW(System::Int128 v);
+    EXPECT_NO_THROW([[maybe_unused]] System::Int128 v);
 }
 
 TEST(Int128Tests2, Abs_PositiveValue_ReturnsSameValue) {

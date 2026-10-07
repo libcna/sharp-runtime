@@ -159,14 +159,14 @@ TEST(PeriodicTimerTests, Constructor_NegativePeriod_ThrowsArgumentOutOfRangeExce
 }
 
 TEST(PeriodicTimerTests, Constructor_InfiniteTimeSpan_DoesNotThrow) {
-    EXPECT_NO_THROW(PeriodicTimer timer(TimeSpan(System::Threading::Timeout::InfiniteTimeSpan)));
+    EXPECT_NO_THROW(PeriodicTimer timer{TimeSpan(System::Threading::Timeout::InfiniteTimeSpan)});
 }
 
 // A PeriodicTimer constructed with Timeout.InfiniteTimeSpan never ticks on its own, but
 // Dispose() must still unblock a pending WaitForNextTick() call -- verified against
 // PeriodicTimer.cs's Dispose(), which calls State.Signal(stopping: true) unconditionally.
 TEST(PeriodicTimerTests, InfinitePeriod_WaitForNextTick_UnblocksOnDispose) {
-    PeriodicTimer timer(TimeSpan(System::Threading::Timeout::InfiniteTimeSpan));
+    PeriodicTimer timer{TimeSpan(System::Threading::Timeout::InfiniteTimeSpan)};
     std::atomic<bool> result{true};
     std::atomic<bool> finished{false};
     std::thread waiter([&] {

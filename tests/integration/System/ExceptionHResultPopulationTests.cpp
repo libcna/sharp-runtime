@@ -60,7 +60,7 @@ using SharpRuntime::intcs;
 
 constexpr intcs kCorEException = static_cast<intcs>(0x80131500u);
 constexpr intcs kCorESystem = static_cast<intcs>(0x80131501u);
-constexpr intcs kCorEApplication = static_cast<intcs>(0x80131600u);
+[[maybe_unused]] constexpr intcs kCorEApplication = static_cast<intcs>(0x80131600u);
 constexpr intcs kCorEArgument = static_cast<intcs>(0x80070057u);
 constexpr intcs kCorEFormat = static_cast<intcs>(0x80131537u);
 constexpr intcs kCorEInvalidOperation = static_cast<intcs>(0x80131509u);

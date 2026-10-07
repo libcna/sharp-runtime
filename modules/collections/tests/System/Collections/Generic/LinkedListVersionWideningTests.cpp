@@ -529,7 +529,8 @@ TEST(LinkedListVersionWidening, SelfAssignmentIsStillANoOp) {
     Enumerating<int> e(a);
     ASSERT_TRUE(e->MoveNext());
 
-    a = a;  // NOLINT(clang-diagnostic-self-assign-overloaded)
+    auto& self = a;  // through an alias: a literal `a = a` is -Wself-assign-overloaded
+    a = self;
     EXPECT_EQ(versionOf(a), kAliasStep + 11);
     EXPECT_NO_THROW(e->MoveNext());
     EXPECT_EQ(a.getCountProperty(), 3);

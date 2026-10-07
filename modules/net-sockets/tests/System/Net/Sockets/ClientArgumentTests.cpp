@@ -98,7 +98,13 @@ TEST(ClientPortDomainTests, THECONTROLTheBoundaryPortsAreStillAccepted) {
     // connect() only records the default remote, so it succeeds outright.
     UdpClient udp;
     EXPECT_NO_THROW(udp.Connect("127.0.0.1", 65535));
+#if defined(__APPLE__)
+    // Darwin's connect() itself refuses a zero remote port (EADDRNOTAVAIL) where Linux records
+    // it. The refusal must come from the network layer, not the argument check.
+    EXPECT_THROW(udp.Connect("127.0.0.1", 0), System::Net::Sockets::SocketException);
+#else
     EXPECT_NO_THROW(udp.Connect("127.0.0.1", 0));
+#endif
 
     // TCP must get past the argument check and fail for a NETWORK reason instead -- proof that
     // the value was accepted as a port rather than rejected as an argument.
@@ -126,12 +132,19 @@ TEST(ClientPortDomainTests, THEPINTheEndpointOverloadsValidateThroughIPEndPointA
 
 namespace {
 int OpenDescriptorCount() {
+#if defined(__APPLE__)
+    // Darwin has no procfs; /dev/fd lists the same descriptors, without "." and "..".
+    DIR* dir = ::opendir("/dev/fd");
+    constexpr int nonDescriptorEntries = 1;  // opendir's own descriptor
+#else
     DIR* dir = ::opendir("/proc/self/fd");
+    constexpr int nonDescriptorEntries = 3;  // ".", ".." and opendir's own descriptor
+#endif
     if (dir == nullptr) return -1;
     int entries = 0;
     while (::readdir(dir) != nullptr) ++entries;
     ::closedir(dir);
-    return entries - 3;
+    return entries - nonDescriptorEntries;
 }
 
 // Binds an ephemeral loopback port, learns its number, then releases it -- giving a port number

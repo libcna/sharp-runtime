@@ -162,8 +162,10 @@ TEST(DefaultValueAttributeTests, Constructor_Char) {
 }
 
 TEST(DefaultValueAttributeTests, Constructor_Long) {
-    DefaultValueAttribute attr(100L);
-    EXPECT_EQ(std::any_cast<long>(attr.getValueProperty()), 100L);
+    // C#'s 100L is Int64 -- longcs -- and not C++'s `long`: on Darwin int64_t is `long long`, so a
+    // `long` argument matches no overload exactly and is ambiguous across every integral one.
+    DefaultValueAttribute attr(SharpRuntime::longcs{100});
+    EXPECT_EQ(std::any_cast<SharpRuntime::longcs>(attr.getValueProperty()), 100);
 }
 
 TEST(DefaultValueAttributeTests, Constructor_UnsignedValues) {

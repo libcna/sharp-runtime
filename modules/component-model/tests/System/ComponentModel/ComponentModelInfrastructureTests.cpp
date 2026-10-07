@@ -280,7 +280,9 @@ TEST(ExpandableObjectConverterTests, ConvenienceOverloadFiltersNonBrowsablePrope
 TEST(TypeDescriptorTests, UnknownAndIntrinsicTypesUseDeterministicConverters) {
     const auto unknown = TypeDescriptor::GetConverter(System::Type::From<UnknownType>());
     ASSERT_NE(unknown, nullptr);
-    EXPECT_EQ(typeid(*unknown), typeid(TypeConverter));
+    // Dereferenced first: typeid(*sharedPtr) evaluates operator*, a side effect Clang flags.
+    const TypeConverter& unknownConverter = *unknown;
+    EXPECT_EQ(typeid(unknownConverter), typeid(TypeConverter));
     EXPECT_EQ(unknown, TypeDescriptor::GetConverter(System::Type::From<UnknownType>()));
 
     const auto integer = TypeDescriptor::GetConverter(System::Type::From<SharpRuntime::intcs>());
