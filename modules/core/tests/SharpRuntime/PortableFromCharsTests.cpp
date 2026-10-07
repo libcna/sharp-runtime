@@ -21,6 +21,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -48,12 +49,28 @@ Outcome runFallback(const char* first, const char* last) {
     return {r.ec, r.ptr - first, v, v != sentinel};
 }
 
-/** The same range through the platform's real std::from_chars, for agreement assertions. */
-Outcome runNative(const char* first, const char* last) {
-    constexpr double sentinel = -12345.6789;
-    double v = sentinel;
-    const std::from_chars_result r = std::from_chars(first, last, v);
-    return {r.ec, r.ptr - first, v, v != sentinel};
+/** The fallback over a whole literal, whose end is computed from the same object as its start. */
+Outcome runFallbackOver(std::string_view text) {
+    return runFallback(text.data(), text.data() + text.size());
+}
+
+/**
+ * The same range through the platform's real std::from_chars, for agreement assertions -- or
+ * nothing, where this build has no usable native floating overload to agree with. libc++ (LLVM
+ * 20+) declares it at every Apple deployment target but makes it strictly unavailable below
+ * macOS/iOS 26, which no runtime availability check can reach; FromCharsFloat takes the
+ * fallback there. A template so that branch is discarded rather than compiled.
+ */
+template <class T = double>
+std::optional<Outcome> runNative(const char* first, const char* last) {
+    if constexpr (SharpRuntime::StdFromCharsFloatUsable && SharpRuntime::HasFromCharsOverload<T>) {
+        constexpr T sentinel = static_cast<T>(-12345.6789);
+        T v = sentinel;
+        const std::from_chars_result r = std::from_chars(first, last, v);
+        return Outcome{r.ec, r.ptr - first, static_cast<double>(v), v != sentinel};
+    } else {
+        return std::nullopt;
+    }
 }
 
 /**
@@ -65,12 +82,15 @@ void expectAgreesWithNative(std::string_view backing, std::size_t rangeLength,
     const char* first = backing.data();
     const char* last = backing.data() + rangeLength;
     const Outcome fb = runFallback(first, last);
-    const Outcome nat = runNative(first, last);
-    EXPECT_EQ(static_cast<int>(nat.ec), static_cast<int>(fb.ec)) << what << " (status)";
-    EXPECT_EQ(nat.consumed, fb.consumed) << what << " (consumed)";
-    EXPECT_EQ(nat.wrote, fb.wrote) << what << " (wrote output?)";
-    if (nat.wrote && fb.wrote) {
-        EXPECT_DOUBLE_EQ(nat.value, fb.value) << what << " (value)";
+    const std::optional<Outcome> nat = runNative(first, last);
+    if (!nat) {
+        GTEST_SKIP() << "no usable native floating std::from_chars in this build to agree with";
+    }
+    EXPECT_EQ(static_cast<int>(nat->ec), static_cast<int>(fb.ec)) << what << " (status)";
+    EXPECT_EQ(nat->consumed, fb.consumed) << what << " (consumed)";
+    EXPECT_EQ(nat->wrote, fb.wrote) << what << " (wrote output?)";
+    if (nat->wrote && fb.wrote) {
+        EXPECT_DOUBLE_EQ(nat->value, fb.value) << what << " (value)";
     }
 }
 
@@ -169,7 +189,7 @@ TEST(PortableFromCharsMatrixTests, EmptyRange) {
 TEST(PortableFromCharsMatrixTests, SingleCharacterAndShortestValidInput) {
     expectAgreesWithNative("0", 1, "\"0\"");
     expectAgreesWithNative("7", 1, "\"7\"");
-    const Outcome one = runFallback("7", "7" + 1);
+    const Outcome one = runFallbackOver("7");
     EXPECT_EQ(std::errc{}, one.ec);
     EXPECT_EQ(1, one.consumed);
     EXPECT_DOUBLE_EQ(7.0, one.value);
@@ -196,7 +216,7 @@ TEST(PortableFromCharsMatrixTests, MalformedSuffixStopsAtTheJunkAndReportsHowMuc
     // std::from_chars deliberately permits a trailing remainder and reports it via `ptr`; both
     // in-repository callers require ptr == last, so the contract is the caller's to enforce.
     expectAgreesWithNative("1.5abc", 6, "\"1.5abc\"");
-    const Outcome fb = runFallback("1.5abc", "1.5abc" + 6);
+    const Outcome fb = runFallbackOver("1.5abc");
     EXPECT_EQ(std::errc{}, fb.ec);
     EXPECT_EQ(3, fb.consumed);
     EXPECT_DOUBLE_EQ(1.5, fb.value);
@@ -219,7 +239,7 @@ TEST(PortableFromCharsMatrixTests, LeadingSignAsymmetryMatchesFromChars) {
     // A minus sign is parsed; a plus sign is not. That asymmetry is std::from_chars's, and the
     // fallback has always corrected strtod for it -- this pins it.
     expectAgreesWithNative("-1.5", 4, "\"-1.5\"");
-    const Outcome plus = runFallback("+1.5", "+1.5" + 4);
+    const Outcome plus = runFallbackOver("+1.5");
     EXPECT_EQ(std::errc::invalid_argument, plus.ec);
     EXPECT_EQ(0, plus.consumed);
     EXPECT_FALSE(plus.wrote);
@@ -240,9 +260,11 @@ TEST(PortableFromCharsMatrixTests, VeryLongDigitRunTakesTheHeapPathAndStaysExact
     // allocating would change the value, which is why the implementation does not truncate.
     std::string big(700, '9');
     const Outcome fb = runFallback(big.data(), big.data() + big.size());
-    const Outcome nat = runNative(big.data(), big.data() + big.size());
-    EXPECT_EQ(static_cast<int>(nat.ec), static_cast<int>(fb.ec));
-    EXPECT_EQ(nat.consumed, fb.consumed);
+    const std::optional<Outcome> nat = runNative(big.data(), big.data() + big.size());
+    if (nat) {
+        EXPECT_EQ(static_cast<int>(nat->ec), static_cast<int>(fb.ec));
+        EXPECT_EQ(nat->consumed, fb.consumed);
+    }
     // 700 nines overflows double, so both report out of range and neither writes the output.
     EXPECT_EQ(std::errc::result_out_of_range, fb.ec);
     EXPECT_FALSE(fb.wrote);
@@ -269,14 +291,14 @@ TEST(PortableFromCharsMatrixTests, AllZeroInput) {
     expectAgreesWithNative("0000", 4, "\"0000\"");
     expectAgreesWithNative("0.000", 5, "\"0.000\"");
     expectAgreesWithNative("-0", 2, "\"-0\"");
-    const Outcome negZero = runFallback("-0", "-0" + 2);
+    const Outcome negZero = runFallbackOver("-0");
     EXPECT_EQ(std::errc{}, negZero.ec);
     EXPECT_TRUE(std::signbit(negZero.value)) << "the sign of a negative zero must survive";
 }
 
 TEST(PortableFromCharsMatrixTests, MaximumRepresentableAndOneAbove) {
     expectAgreesWithNative("1.7976931348623157e308", 22, "DBL_MAX");
-    const Outcome max = runFallback("1.7976931348623157e308", "1.7976931348623157e308" + 22);
+    const Outcome max = runFallbackOver("1.7976931348623157e308");
     EXPECT_EQ(std::errc{}, max.ec);
     EXPECT_DOUBLE_EQ(std::numeric_limits<double>::max(), max.value);
 
@@ -286,6 +308,41 @@ TEST(PortableFromCharsMatrixTests, MaximumRepresentableAndOneAbove) {
     EXPECT_EQ(std::errc::result_out_of_range, fb.ec);
     EXPECT_EQ(5, fb.consumed);
     EXPECT_FALSE(fb.wrote);
+}
+
+// AM4-002: strtod/strtof report ERANGE for a result that lands in the SUBNORMAL range, while
+// std::from_chars returns such a value as an ordinary success -- it is representable. Measured
+// against Apple libc++'s native from_chars: "1e-320" -> 9.99989e-321 and "4.9e-324" -> denorm_min
+// succeed; "2e-324" and "1e-400" underflow to zero and are out of range.
+TEST(PortableFromCharsMatrixTests, SubnormalResultsAreValuesAndOnlyUnderflowToZeroIsOutOfRange) {
+    const Outcome sub = runFallbackOver("1e-320");
+    EXPECT_EQ(std::errc{}, sub.ec);
+    EXPECT_TRUE(sub.wrote);
+    EXPECT_DOUBLE_EQ(1e-320, sub.value);
+    EXPECT_EQ(6, sub.consumed);
+
+    const Outcome negative = runFallbackOver("-1e-320");
+    EXPECT_EQ(std::errc{}, negative.ec);
+    EXPECT_DOUBLE_EQ(-1e-320, negative.value);
+
+    const Outcome smallest = runFallbackOver("4.9e-324");
+    EXPECT_EQ(std::errc{}, smallest.ec);
+    EXPECT_EQ(std::numeric_limits<double>::denorm_min(), smallest.value);
+
+    for (const char* toZero : {"2e-324", "1e-400"}) {
+        const Outcome under = runFallbackOver(toZero);
+        EXPECT_EQ(std::errc::result_out_of_range, under.ec) << toZero;
+        EXPECT_FALSE(under.wrote) << toZero;
+    }
+
+    float single = -1.0f;
+    const char singleText[] = "1e-40";
+    const std::from_chars_result r =
+        PortableFromCharsFloat(singleText, singleText + sizeof(singleText) - 1, single);
+    EXPECT_EQ(std::errc{}, r.ec);
+    EXPECT_FLOAT_EQ(1e-40f, single);
+
+    expectAgreesWithNative("1e-320", 6, "a subnormal double");
 }
 
 TEST(PortableFromCharsMatrixTests, MinimumNegativeAndOneBelow) {
@@ -399,13 +456,13 @@ TEST(PortableFromCharsGrammarTests, HexadecimalPrefixStopsAtTheXExactlyAsFromCha
         expectAgreesWithNative(std::string_view(text, n), n, text);
     }
     // Spelled out for the headline case, so the intended answer is readable and not only implied.
-    const Outcome fb = runFallback("0x10", "0x10" + 4);
+    const Outcome fb = runFallbackOver("0x10");
     EXPECT_EQ(std::errc{}, fb.ec);
     EXPECT_EQ(1, fb.consumed);
     EXPECT_DOUBLE_EQ(0.0, fb.value);
     // The sign is still consumed and carried, so "-0x10" yields a negative zero over two
     // characters.
-    const Outcome neg = runFallback("-0x10", "-0x10" + 5);
+    const Outcome neg = runFallbackOver("-0x10");
     EXPECT_EQ(std::errc{}, neg.ec);
     EXPECT_EQ(2, neg.consumed);
     EXPECT_TRUE(std::signbit(neg.value));

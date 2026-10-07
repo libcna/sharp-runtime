@@ -13,10 +13,19 @@
 // actually contains a floating-point candidate (detected via a `requires` expression, not a
 // version/platform guess), and falls back to strtof/strtod otherwise -- so this stays correct on
 // every platform/deployment-target combination without forcing a higher minimum runtime OS.
+//
+// The `requires` probe alone stopped being sufficient with LLVM 20's libc++ (Xcode 26+): the
+// floating-point from_chars is now DECLARED at every deployment target, carrying
+// `availability(macos/ios, strict, introduced=26.0)`. Availability is not a substitution
+// failure, so the probe succeeds and the call is then a hard "unavailable" error below
+// macOS/iOS 26. libc++ publishes the same decision as `_LIBCPP_AVAILABILITY_HAS_FROM_CHARS_
+// FLOATING_POINT` (0 or 1); StdFromCharsFloatUsable folds it in, and is simply true on every
+// standard library that does not define it.
 #pragma once
 
 #include <charconv>
 #include <cerrno>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -31,6 +40,12 @@ namespace SharpRuntime
     {
         std::from_chars(first, last, value);
     };
+
+#if defined(_LIBCPP_AVAILABILITY_HAS_FROM_CHARS_FLOATING_POINT)
+    inline constexpr bool StdFromCharsFloatUsable = _LIBCPP_AVAILABILITY_HAS_FROM_CHARS_FLOATING_POINT;
+#else
+    inline constexpr bool StdFromCharsFloatUsable = true;
+#endif
 
     // strtof/strtod take NO end pointer: they scan until a NUL and there is no way to tell them
     // where the caller's range stops. This function used to hand them `first` and simply discard
@@ -134,7 +149,11 @@ namespace SharpRuntime
 
         if (endPtr == buffer)
             return {first, std::errc::invalid_argument};
-        if (errno == ERANGE)
+        // strtod/strtof also set ERANGE when the result underflows into the SUBNORMAL range, but
+        // a subnormal is representable and std::from_chars returns it as an ordinary value
+        // ("1e-320" -> 9.99989e-321, errc{}). Only overflow (+/-HUGE_VAL) and underflow all the
+        // way to zero are out of range there, so only those are reported as such here.
+        if (errno == ERANGE && (parsed == T{} || !std::isfinite(parsed)))
             return {consumedEnd, std::errc::result_out_of_range};
         value = parsed;
         return {consumedEnd, std::errc{}};
@@ -148,7 +167,7 @@ namespace SharpRuntime
     template <class T>
     inline std::from_chars_result FromCharsFloat(const char* first, const char* last, T& value) noexcept
     {
-        if constexpr (HasFromCharsOverload<T>)
+        if constexpr (StdFromCharsFloatUsable && HasFromCharsOverload<T>)
             return std::from_chars(first, last, value);
         else
             return PortableFromCharsFloat(first, last, value);
