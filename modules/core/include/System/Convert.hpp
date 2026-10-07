@@ -21,7 +21,6 @@ namespace System {
     using SharpRuntime::longcs;
     using SharpRuntime::shortcs;
     using SharpRuntime::bytecs;
-    using SharpRuntime::Single;
     using SharpRuntime::sbytecs;
     using SharpRuntime::ushortcs;
     using SharpRuntime::uintcs;
@@ -362,29 +361,33 @@ namespace System {
         // ===================================================================
         // ToSingle
         // ===================================================================
+        // SharpRuntime::Single (the float alias) is spelled out rather than brought into this
+        // namespace with a using-declaration: System::Single is also the static-utility class in
+        // System/Single.hpp, and a translation unit that sees both would find "Single" ambiguous
+        // (BitConverter.hpp makes the same choice for the same reason).
 
         /** @brief Returns the same float. */
-        [[nodiscard]] static Single ToSingle(float value)     { return value; }
+        [[nodiscard]] static SharpRuntime::Single ToSingle(float value)     { return value; }
         /** @brief Converts a double to float. */
-        [[nodiscard]] static Single ToSingle(double value)    { return static_cast<Single>(value); }
+        [[nodiscard]] static SharpRuntime::Single ToSingle(double value)    { return static_cast<SharpRuntime::Single>(value); }
         /** @brief Converts a 32-bit integer to float. */
-        [[nodiscard]] static Single ToSingle(intcs value)     { return static_cast<Single>(value); }
+        [[nodiscard]] static SharpRuntime::Single ToSingle(intcs value)     { return static_cast<SharpRuntime::Single>(value); }
         /** @brief Converts a 16-bit integer to float. */
-        [[nodiscard]] static Single ToSingle(shortcs value)   { return static_cast<Single>(value); }
+        [[nodiscard]] static SharpRuntime::Single ToSingle(shortcs value)   { return static_cast<SharpRuntime::Single>(value); }
         /** @brief Converts a byte to float. */
-        [[nodiscard]] static Single ToSingle(bytecs value)    { return static_cast<Single>(value); }
+        [[nodiscard]] static SharpRuntime::Single ToSingle(bytecs value)    { return static_cast<SharpRuntime::Single>(value); }
         /** @brief Converts a 64-bit integer to float. */
-        [[nodiscard]] static Single ToSingle(longcs value)    { return static_cast<Single>(value); }
+        [[nodiscard]] static SharpRuntime::Single ToSingle(longcs value)    { return static_cast<SharpRuntime::Single>(value); }
         /** @brief Converts a Boolean to float (true → 1.0f, false → 0.0f). */
-        [[nodiscard]] static Single ToSingle(bool value)      { return value ? 1.0f : 0.0f; }
+        [[nodiscard]] static SharpRuntime::Single ToSingle(bool value)      { return value ? 1.0f : 0.0f; }
         /**
          * @brief Converts a string to float.
          *
          * @throws FormatException if the string is not a valid number.
          */
-        [[nodiscard]] static Single ToSingle(const std::string& value);
+        [[nodiscard]] static SharpRuntime::Single ToSingle(const std::string& value);
         /** @brief Converts a C-string to float. Delegates to the std::string overload. */
-        [[nodiscard]] static Single ToSingle(const char* value) { return ToSingle(std::string(value)); }
+        [[nodiscard]] static SharpRuntime::Single ToSingle(const char* value) { return ToSingle(std::string(value)); }
 
         // ===================================================================
         // ToUInt32

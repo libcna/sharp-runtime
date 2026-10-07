@@ -138,8 +138,8 @@ namespace System {
         return Double::Parse(value);
     }
 
-    Single Convert::ToSingle(const std::string& value) {
-        return static_cast<Single>(ToDouble(value));
+    SharpRuntime::Single Convert::ToSingle(const std::string& value) {
+        return static_cast<SharpRuntime::Single>(ToDouble(value));
     }
 
     bytecs Convert::ToByte(intcs value) {

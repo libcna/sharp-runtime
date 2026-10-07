@@ -267,12 +267,11 @@ namespace System {
             }
         }
 
-        /**
-         * @brief Implicit conversion to ReadOnlySpan&lt;T&gt;.
-         *
-         * C++ counterpart of .NET implicit Span&lt;T&gt; → ReadOnlySpan&lt;T&gt; operator.
-         */
-        operator ReadOnlySpan<T>() const noexcept;  // defined after ReadOnlySpan
+        // The implicit Span<T> -> ReadOnlySpan<T> conversion is ReadOnlySpan's converting
+        // constructor. It used to be spelled here as well, as a conversion operator, and two
+        // equally good conversions make every copy-initialization (`ReadOnlySpan<T> r = span;`,
+        // passing a Span to a ReadOnlySpan parameter) ambiguous: Clang rejects it, GCC silently
+        // picks the constructor.
 
         // -----------------------------------------------------------------------
         // Comparison operators
@@ -346,7 +345,7 @@ namespace System {
          * C++ counterpart of .NET implicit Span&lt;T&gt; → ReadOnlySpan&lt;T&gt; conversion.
          * @param span The source Span; must outlive this span.
          */
-        ReadOnlySpan(const Span<T>& span)  // NOLINT(google-explicit-constructor)
+        ReadOnlySpan(const Span<T>& span) noexcept  // NOLINT(google-explicit-constructor)
             : ptr_(span.getPointer()), length_(span.getLengthProperty()) {}
 
         // -----------------------------------------------------------------------
@@ -513,11 +512,5 @@ namespace System {
             return !(*this == o);
         }
     };
-
-    // Out-of-line definition: Span<T> → ReadOnlySpan<T> conversion (ReadOnlySpan now complete).
-    template<typename T>
-    inline Span<T>::operator ReadOnlySpan<T>() const noexcept {
-        return ReadOnlySpan<T>(ptr_, length_);
-    }
 
 } // namespace System

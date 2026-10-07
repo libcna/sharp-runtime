@@ -80,7 +80,17 @@ namespace System {
             if constexpr (detail::activatorForwardsToConstructor<T, Args...>) {
                 return T(std::forward<Args>(args)...);
             } else {
+                // Brace elision is this branch's purpose (see above), so Clang's style warning
+                // asking for the inner braces is silenced for this statement only; otherwise
+                // every consumer building with -Werror fails on, e.g., std::array<int, 3>.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-braces"
+#endif
                 return T{std::forward<Args>(args)...};
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
             }
         }
 

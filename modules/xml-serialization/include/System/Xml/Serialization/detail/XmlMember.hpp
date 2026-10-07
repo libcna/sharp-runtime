@@ -160,6 +160,10 @@ namespace System::Xml::Serialization::detail {
  * Place inside the class body. A friend function cannot be *defined* inside a local class, so
  * a registered type must live at namespace or class scope, never inside a function body.
  *
+ * Both hidden friends are `[[maybe_unused]]`: for a type with internal linkage that is only ever
+ * nested (never serialized as a root), Clang otherwise reports the root-name function as an
+ * unneeded internal declaration, which fails a consumer's -Werror build.
+ *
  * The root name is an explicit string rather than anything derived from the C++ type name.
  * That is what makes a C# generic instantiation expressible: `WorldEntry<Chest>` registers as
  * `"WorldEntryOfChest"`, and a root-level `std::vector` of it then serializes as
@@ -167,10 +171,11 @@ namespace System::Xml::Serialization::detail {
  * out once instead of guessed from C++ RTTI (which is neither stable nor .NET-shaped).
  */
 #define SHARP_XML_SERIALIZABLE(TypeName, rootElementName, ...)                 \
-    friend constexpr const char* SharpXmlRootName(const TypeName*) {           \
+    [[maybe_unused]] friend constexpr const char* SharpXmlRootName(            \
+        const TypeName*) {                                                     \
         return rootElementName;                                                \
     }                                                                          \
-    friend constexpr auto SharpXmlMembers(const TypeName*) {                   \
+    [[maybe_unused]] friend constexpr auto SharpXmlMembers(const TypeName*) {  \
         return std::make_tuple(__VA_ARGS__);                                   \
     }
 
