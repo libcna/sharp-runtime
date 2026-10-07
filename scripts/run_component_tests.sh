@@ -11,7 +11,11 @@ if [[ "$BUILD_DIR" != /* ]]; then
     BUILD_DIR="$REPO_ROOT/$BUILD_DIR"
 fi
 
-mapfile -d '' TEST_BINARIES < <(
+# A read loop rather than `mapfile -d ''`: macOS still ships bash 3.2, which has no mapfile.
+TEST_BINARIES=()
+while IFS= read -r -d '' TEST_BINARY; do
+    TEST_BINARIES+=("$TEST_BINARY")
+done < <(
     find "$BUILD_DIR" -maxdepth 1 -type f -perm -111 \
         \( -name 'SharpRuntimeTests_*' -o -name 'SharpRuntimeIntegrationTests' \) \
         -print0 |
