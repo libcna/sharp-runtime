@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <cctype>
 #include <regex>
 #include <string>
 #include <utility>
@@ -76,6 +77,39 @@ namespace System::Text::RegularExpressions {
                     out += c;
                     continue;
                 }
+                if (c == ']' && !inClass) {
+                    // A ']' outside a class is a literal in .NET (Regex.Escape leaves it alone),
+                    // but a SyntaxCharacter in strict ECMAScript: libstdc++ accepts it under
+                    // Annex B, libc++ rejects the pattern. Escaping it means the same everywhere.
+                    out += "\\]";
+                    continue;
+                }
+                if (c == '{' && !inClass) {
+                    // The same rule for braces: .NET reads '{' as a quantifier only in the forms
+                    // {n}, {n,} and {n,m}, and as a literal otherwise, and any '}' that closes no
+                    // quantifier is a literal too. A quantifier is copied whole; anything else is
+                    // escaped, so libc++'s strict parser sees what .NET means.
+                    size_t j = i + 1;
+                    const size_t firstDigit = j;
+                    while (j < pattern.size() && pattern[j] >= '0' && pattern[j] <= '9') ++j;
+                    bool quantifier = j > firstDigit;
+                    if (quantifier && j < pattern.size() && pattern[j] == ',') {
+                        ++j;
+                        while (j < pattern.size() && pattern[j] >= '0' && pattern[j] <= '9') ++j;
+                    }
+                    quantifier = quantifier && j < pattern.size() && pattern[j] == '}';
+                    if (quantifier) {
+                        out.append(pattern, i, j - i + 1);
+                        i = j;
+                    } else {
+                        out += "\\{";
+                    }
+                    continue;
+                }
+                if (c == '}' && !inClass) {
+                    out += "\\}";
+                    continue;
+                }
                 if (c == '(' && !inClass) {
                     if (i + 1 < pattern.size() && pattern[i + 1] == '?') {
                         bool isAngle = i + 2 < pattern.size() && pattern[i + 2] == '<';
@@ -128,8 +162,27 @@ namespace System::Text::RegularExpressions {
             const std::vector<std::pair<std::string, intcs>>& groupNames) {
             if (offset > input.size()) return RegularExpressions::Match();
             std::smatch m;
-            auto flags = offset > 0 ? std::regex_constants::match_prev_avail
-                                    : std::regex_constants::match_default;
+            auto flags = std::regex_constants::match_default;
+            if (offset > 0) {
+#if defined(_LIBCPP_VERSION)
+                // libc++ treats `first` as the start of input whenever match_prev_avail is set
+                // (and then discards match_not_bol), so '^' matched at every resumption point.
+                // Without match_prev_avail it honours match_not_bol / match_not_bow, which state
+                // the preceding character's effect instead: the resumption point begins a line
+                // only right after a newline in multiline mode, and begins a word only if the
+                // preceding character is not a word character. The one case those flags cannot
+                // express is a word character before `first` and a non-word character at it,
+                // where \b holds but libc++ will not report it.
+                const char previous = input[offset - 1];
+                const bool beginsLine = (regex.flags() & std::regex::multiline) && previous == '\n';
+                const bool previousIsWord =
+                    previous == '_' || std::isalnum(static_cast<unsigned char>(previous)) != 0;
+                if (!beginsLine) flags |= std::regex_constants::match_not_bol;
+                if (previousIsWord) flags |= std::regex_constants::match_not_bow;
+#else
+                flags = std::regex_constants::match_prev_avail;
+#endif
+            }
             if (!std::regex_search(input.cbegin() + static_cast<std::ptrdiff_t>(offset), input.cend(), m, regex, flags))
                 return RegularExpressions::Match();
 

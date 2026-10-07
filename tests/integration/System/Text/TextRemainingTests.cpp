@@ -37,6 +37,7 @@ using System::Text::RegularExpressions::Match;
 using System::Text::RegularExpressions::MatchCollection;
 using System::Text::RegularExpressions::RegexParseException;
 using System::Text::RegularExpressions::RegexParseError;
+using System::Text::RegularExpressions::RegexOptions;
 
 // ===========================================================================
 // NormalizationForm
@@ -496,6 +497,46 @@ TEST(RegexTests, NextMatch_AnchorDoesNotFalsePositiveOnResumedSearch) {
         m = m.NextMatch();
     }
     EXPECT_EQ(count, 1);
+}
+
+// AM4-011: libc++ resumes a search with match_not_bol / match_not_bow instead of
+// match_prev_avail (see Regex::matchFrom). What that must preserve: a multiline '^' still matches
+// right after a newline, and \b still sees the character before the resumption point.
+TEST(RegexTests, NextMatch_MultilineAnchorStillMatchesRightAfterANewline) {
+    Regex re("^\\w", RegexOptions::Multiline);
+    Match m = re.Match("ab\ncd");
+    std::vector<std::string> found;
+    while (m.getSuccessProperty()) {
+        found.push_back(m.getValueProperty());
+        m = m.NextMatch();
+    }
+    EXPECT_EQ(found, (std::vector<std::string>{"a", "c"}));
+}
+
+TEST(RegexTests, NextMatch_WordBoundarySeesTheCharacterBeforeTheResumptionPoint) {
+    Regex re("\\b\\w");
+    Match m = re.Match("ab cd");
+    std::vector<std::string> found;
+    while (m.getSuccessProperty()) {
+        found.push_back(m.getValueProperty());
+        m = m.NextMatch();
+    }
+    EXPECT_EQ(found, (std::vector<std::string>{"a", "c"}));
+}
+
+// AM4-011: .NET reads '{' as a quantifier only as {n}, {n,} or {n,m} and every other brace, like
+// a ']' outside a class, as a literal. Strict ECMAScript (libc++) rejects such patterns, so the
+// translation escapes them -- and must leave real quantifiers alone.
+TEST(RegexTests, BracesAndBracketsOutsideAQuantifierOrClassAreLiterals) {
+    EXPECT_TRUE(Regex("^a{2}$").IsMatch("aa"));
+    EXPECT_FALSE(Regex("^a{2}$").IsMatch("a{2}"));
+    EXPECT_TRUE(Regex("^a{1,}$").IsMatch("aaa"));
+    EXPECT_TRUE(Regex("^a{1,2}b$").IsMatch("aab"));
+    EXPECT_TRUE(Regex("^a{b}$").IsMatch("a{b}"));
+    EXPECT_TRUE(Regex("^x}$").IsMatch("x}"));
+    EXPECT_TRUE(Regex("^{$").IsMatch("{"));
+    EXPECT_TRUE(Regex("^a]$").IsMatch("a]"));
+    EXPECT_TRUE(Regex("^[{}]+$").IsMatch("{}"));
 }
 
 // Match owns a continuation for NextMatch(). It must retain the compiled regex state rather than
