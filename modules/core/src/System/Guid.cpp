@@ -18,7 +18,7 @@
 #if defined(_WIN32)
 #include <windows.h>
 #include <bcrypt.h>
-#elif defined(__ANDROID__)
+#elif defined(__ANDROID__) || defined(__APPLE__)
 #include <cstdlib>
 #else
 #include <cerrno>
@@ -414,10 +414,16 @@ namespace System {
                     length -= chunk;
                 }
             }
-#elif defined(__ANDROID__)
+#elif defined(__ANDROID__) || defined(__APPLE__)
             // Bionic provides arc4random_buf() at every Android API level.
             // getentropy() is unavailable below API 28, while Sharp Runtime
             // supports Android API 24.
+            //
+            // Apple: getentropy() is declared only by macOS's <sys/random.h>,
+            // and the iOS SDKs ship no such header, so it is not public API
+            // there. arc4random_buf() is declared by <stdlib.h> on every Apple
+            // OS, is reseeded from the kernel CSPRNG, cannot fail, and is what
+            // libc++'s std::random_device uses on Apple (_LIBCPP_USING_ARC4_RANDOM).
             ::arc4random_buf(buffer, length);
 #else
             // getentropy() rather than getrandom(): getrandom() is Linux-only

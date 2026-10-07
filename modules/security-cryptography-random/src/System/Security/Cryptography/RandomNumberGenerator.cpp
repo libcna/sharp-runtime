@@ -7,7 +7,7 @@
 #if defined(_WIN32)
 #include <windows.h>
 #include <bcrypt.h>
-#elif defined(__ANDROID__)
+#elif defined(__ANDROID__) || defined(__APPLE__)
 #include <cstdlib>
 #else
 #include <cerrno>
@@ -68,9 +68,12 @@ namespace {
             if (status < 0) {
                 throw CryptographicException("BCryptGenRandom failed.");
             }
-#elif defined(__ANDROID__)
+#elif defined(__ANDROID__) || defined(__APPLE__)
             // Bionic's CSPRNG is available at every supported Android API
-            // level; getentropy() is declared only from API 28 onward.
+            // level; getentropy() is declared only from API 28 onward. On Apple
+            // getentropy() is declared only by macOS's <sys/random.h> and is not
+            // public API on iOS; arc4random_buf() is the kernel-seeded CSPRNG on
+            // every Apple OS (see Guid.cpp).
             ::arc4random_buf(data.data(), data.size());
 #else
             constexpr size_t maxChunk = 256;
