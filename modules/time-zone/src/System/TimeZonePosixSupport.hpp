@@ -62,6 +62,26 @@ namespace System::detail {
     };
 
     /**
+     * @brief Seconds since the Unix epoch of a proleptic-Gregorian UTC date and time.
+     *
+     * This is what timegm() computes, written out because Darwin's timegm() -- and its mktime()
+     * -- refuse every year before 1900 with -1 (measured on macOS 27), where glibc's cover the
+     * whole range DateTime can represent. Fields are not normalised: callers validate by round
+     * trip, exactly as they did with timegm(). (Hinnant's days_from_civil.)
+     */
+    inline long long utcSecondsFromCivil(int year, int month, int day, int hour, int minute,
+                                         int second) {
+        const long long y   = static_cast<long long>(year) - (month <= 2 ? 1 : 0);
+        const long long era = (y >= 0 ? y : y - 399) / 400;
+        const long long yoe = y - era * 400;
+        const long long mp  = month > 2 ? month - 3 : month + 9;
+        const long long doy = (153 * mp + 2) / 5 + day - 1;
+        const long long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        const long long days = era * 146097 + doe - 719468;
+        return ((days * 24 + hour) * 60 + minute) * 60 + second;
+    }
+
+    /**
      * @brief The offset, DST flag and abbreviation the currently selected zone gives an instant.
      */
     struct ZoneSample {
@@ -78,12 +98,7 @@ namespace System::detail {
      * processTimeZoneMutex() and have selected the zone they mean to sample.
      */
     inline ZoneSample sampleZoneAtMonth(int year, int month) {
-        struct tm utc {};
-        utc.tm_year = year - 1900;
-        utc.tm_mon  = month;
-        utc.tm_mday = 15;
-        utc.tm_hour = 12;
-        time_t instant = timegm(&utc);
+        time_t instant = static_cast<time_t>(utcSecondsFromCivil(year, month + 1, 15, 12, 0, 0));
         struct tm local {};
         localtime_r(&instant, &local);
         ZoneSample s;
@@ -230,17 +245,41 @@ namespace System::detail {
                    t.tm_hour == hour && t.tm_min == minute && t.tm_sec == second;
         };
 
+        // mktime() returns -1 both for failure and for the valid instant 1969-12-31T23:59:59Z.
+        // glibc marks a failure by leaving tm_isdst negative, but Darwin's mktime() overwrites it
+        // with 0 (and tm_gmtoff with 0), so that test alone took every Darwin failure -- every
+        // year before 1900 -- as a resolved time at offset zero. A -1 is a real answer only if
+        // that instant reproduces the requested wall clock.
+        auto resolvedByMktime = [&](struct tm& t) {
+            const time_t answer = mktime(&t);
+            if (answer != static_cast<time_t>(-1)) return true;
+            struct tm check {};
+            return localtime_r(&answer, &check) != nullptr && reproducesRequest(check);
+        };
+
         struct tm local {};
         fill(local, -1);
-        time_t instant = mktime(&local);
-        if (instant == static_cast<time_t>(-1) && local.tm_isdst < 0) return false;
+        if (!resolvedByMktime(local)) {
+            // Darwin's mktime() refuses every year before 1900, which glibc's resolves. localtime_r
+            // still answers there, so solve wall = instant + offset(instant) directly: guess with
+            // the offset at the wall clock read as UTC, correct once with the offset at the guess,
+            // and accept only an instant that reproduces the requested wall clock.
+            const long long wall = utcSecondsFromCivil(year, month, day, hour, minute, second);
+            struct tm probe {};
+            time_t guess = static_cast<time_t>(wall);
+            for (int step = 0; step < 2; ++step) {
+                if (localtime_r(&guess, &probe) == nullptr) return false;
+                guess = static_cast<time_t>(wall - probe.tm_gmtoff);
+            }
+            if (localtime_r(&guess, &probe) == nullptr || !reproducesRequest(probe)) return false;
+            local = probe;
+        }
 
         if (local.tm_isdst > 0) {
             struct tm standard {};
             fill(standard, 0);
-            time_t standardInstant = mktime(&standard);
-            if (!(standardInstant == static_cast<time_t>(-1) && standard.tm_isdst < 0) &&
-                standard.tm_isdst == 0 && reproducesRequest(standard)) {
+            if (resolvedByMktime(standard) && standard.tm_isdst == 0 &&
+                reproducesRequest(standard)) {
                 local = standard;
             }
         }
@@ -266,15 +305,8 @@ namespace System::detail {
      */
     inline bool resolveUtcInstant(int year, int month, int day, int hour, int minute,
                                   int second, ZoneSample& out) {
-        struct tm utc {};
-        utc.tm_year = year - 1900;
-        utc.tm_mon  = month - 1;
-        utc.tm_mday = day;
-        utc.tm_hour = hour;
-        utc.tm_min  = minute;
-        utc.tm_sec  = second;
-
-        const time_t instant = timegm(&utc);
+        const time_t instant =
+            static_cast<time_t>(utcSecondsFromCivil(year, month, day, hour, minute, second));
         struct tm roundTrip {};
         if (gmtime_r(&instant, &roundTrip) == nullptr ||
             roundTrip.tm_year != year - 1900 || roundTrip.tm_mon != month - 1 ||
