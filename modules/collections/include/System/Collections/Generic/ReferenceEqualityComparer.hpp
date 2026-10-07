@@ -41,9 +41,13 @@ public:
      *
      * C++ counterpart of .NET ReferenceEqualityComparer.GetHashCode(object).
      * @param obj The pointer whose address is used as the hash input.
-     * @return A hash code derived from the pointer value.
+     * @return A hash code derived from the pointer value; 0 for a null pointer.
      */
     [[nodiscard]] intcs GetHashCode(T* const& obj) const override {
+        // .NET forwards to RuntimeHelpers.GetHashCode, which is 0 for null. libstdc++'s pointer
+        // hash is the identity, so that held by accident there; libc++ mixes the bits, so it is
+        // stated rather than inherited.
+        if (obj == nullptr) return 0;
         return static_cast<intcs>(std::hash<T*>{}(obj));
     }
 

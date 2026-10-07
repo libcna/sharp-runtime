@@ -547,5 +547,6 @@ TEST(ReferenceEqualityComparerTest, HashIsPointerBased) {
 TEST(ReferenceEqualityComparerTest, NullPointerHash) {
     auto& cmp = ReferenceEqualityComparer<int>::Instance();
     int* p = nullptr;
-    EXPECT_EQ(cmp.GetHashCode(p), std::hash<int*>{}(nullptr));
+    // RuntimeHelpers.GetHashCode(null) is 0, on every standard library.
+    EXPECT_EQ(cmp.GetHashCode(p), 0);
 }
