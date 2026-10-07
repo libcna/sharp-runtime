@@ -367,7 +367,8 @@ TEST(EnvironmentTests, SetCurrentDirectory_ThenGetReflectsChange) {
     std::string original = Environment::GetCurrentDirectory();
     // Change to /tmp and verify
     Environment::SetCurrentDirectory("/tmp");
-    EXPECT_EQ(Environment::GetCurrentDirectory(), "/tmp");
+    // getcwd() reports the physical directory: /private/tmp on macOS, where /tmp is a symlink.
+    EXPECT_EQ(Environment::GetCurrentDirectory(), std::filesystem::canonical("/tmp").string());
     // Restore
     Environment::SetCurrentDirectory(original);
 }

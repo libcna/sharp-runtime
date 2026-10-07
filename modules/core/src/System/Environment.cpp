@@ -40,9 +40,13 @@
 #  include <sys/resource.h>
 #  include <sys/utsname.h>
 #  include <cstdio>
+#  if defined(__APPLE__)
+#    include <mach-o/dyld.h>  // _NSGetExecutablePath: Darwin has no /proc/self/exe
+#  endif
 #endif
 #include <cerrno>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <cwchar>
 #include <sstream>
@@ -752,6 +756,20 @@ std::string Environment::getProcessPathProperty() {
     }
 #elif defined(__EMSCRIPTEN__)
     return "";
+#elif defined(__APPLE__)
+    // Darwin has no procfs, so the readlink below always failed and ProcessPath was empty.
+    // .NET's minipal_getexepath asks dyld for the launch path -- which reports the size it needs
+    // instead of truncating -- and canonicalizes it with realpath(), giving the same absolute,
+    // symlink-free answer /proc/self/exe gives on Linux.
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::vector<char> launchPath(static_cast<std::size_t>(size) + 1u, '\0');
+    if (_NSGetExecutablePath(launchPath.data(), &size) != 0) return "";
+    char* resolved = ::realpath(launchPath.data(), nullptr);
+    if (resolved == nullptr) return "";
+    std::string result(resolved);
+    std::free(resolved);
+    return result;
 #else
     std::vector<char> buf(4096);
     for (;;) {
