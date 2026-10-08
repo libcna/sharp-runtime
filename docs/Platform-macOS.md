@@ -65,8 +65,14 @@ cycles, and Apple's linker reports the repetition. They are not compiler warning
     raise no `Changed`; a symbolic link is not followed.
   - A watched directory that can no longer be listed (removed, renamed away, unreadable) raises
     `Error` once instead of reporting its entries as deleted.
-  - `NotifyFilters.LastAccess` is not observable (kqueue reports no reads), and
-    `IncludeSubdirectories` is unimplemented on every platform.
+  - The directory is re-listed until its timestamps did not move during the listing (AM4-126):
+    `readdir` is not a snapshot, and a rename landing mid-listing used to be reported as
+    `Deleted` + `Created` about one time in six.
+  - `NotifyFilters.LastAccess` sees an explicit access-time change (`utimes`) through the same
+    attribute event every content filter shares, as on Linux, but not a read: kqueue reports no
+    reads, so Linux's `IN_ACCESS` case (`Decision4c_IN_ACCESS_ArrivesOnlyWhenLastAccessIsNamed`) is
+    the one behavioural watcher test that stays Linux-only. `IncludeSubdirectories` is
+    unimplemented on every platform.
 - The `HashCode` per-process-seed and `PosixSignal` re-exec tests are `#ifdef __linux__`
   (they re-exec through `/proc/self/exe`), so they do not run on macOS.
 - `PortableFromCharsTests`' agreement checks against native `std::from_chars` report SKIPPED at

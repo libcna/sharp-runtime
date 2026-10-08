@@ -1263,7 +1263,7 @@ TEST_F(ClosedFileStreamFixture, RepeatedRejectionsLeakNoDescriptor) {
 
 namespace {
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 
 /// Collects watcher callbacks off the watcher thread and lets a test wait for a NAMED event.
 class WatchRecorder {
@@ -1402,6 +1402,7 @@ bool awaitCounter(const std::atomic<int>& counter,
     return true;
 }
 
+#if defined(__linux__)
 /// Reads one byte from an existing file: exactly one in-mask inotify event (IN_ACCESS), and the
 /// only way to observe #2346's decision 4(c) from a test.
 void readByte(const std::filesystem::path& p) {
@@ -1412,6 +1413,7 @@ void readByte(const std::filesystem::path& p) {
     ASSERT_GE(n, 0);
     ::close(fd);
 }
+#endif
 
 /// The number of descriptors this process currently holds. Declared here rather than reused
 /// from the #2100 fixture, which owns its copy as a private static member.
@@ -1442,7 +1444,7 @@ protected:
 
 } // namespace
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 
 // ===========================================================================
 // #2105 — can a handler be invoked after EnableRaisingEvents = false RETURNS?
@@ -1765,7 +1767,7 @@ TEST_F(WatcherReconfigurationFixture, APathChangeIsSafeWhileEventsAreStillArrivi
 // SR-AUD-346 therefore stays CONFIRMED; these tests pin only the class boundary.
 // ===========================================================================================
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 
 TEST_F(WatcherReconfigurationFixture, ASizeOnlyWatcherRaisesNoCreatedDeletedOrRenamed) {
     // The finding's own headline. The sentinel is an IN_MODIFY, which a Size-only mask still
@@ -1879,6 +1881,9 @@ TEST_F(WatcherReconfigurationFixture, Decision1a_IN_MODIFY_ServesSizeAndLastWrit
     }
 }
 
+// A read is IN_ACCESS on Linux; kqueue reports no reads at all (plans/plan_apple_m4.md AM4-126,
+// docs/Platform-macOS.md), so this one stays Linux-only.
+#if defined(__linux__)
 TEST_F(WatcherReconfigurationFixture, Decision4c_IN_ACCESS_ArrivesOnlyWhenLastAccessIsNamed) {
     // 4(c). Before #2346, IN_ACCESS was in no mask at all, so LastAccess was a named filter that
     // could not fire for its own operation. Adding it to the whole content class (option b)
@@ -1925,6 +1930,7 @@ TEST_F(WatcherReconfigurationFixture, Decision4c_IN_ACCESS_ArrivesOnlyWhenLastAc
         w.setEnableRaisingEventsProperty(false);
     }
 }
+#endif // __linux__
 
 TEST_F(WatcherReconfigurationFixture, Decision5b_FileNameAndDirectoryNameDiscriminateOnIN_ISDIR) {
     // 5(b). IN_ISDIR travels on the event, so this is the one decision that could not be made in
@@ -2176,7 +2182,7 @@ TEST_F(IoReviewFixture, AThrowingFileStreamConstructorLeaksNoDescriptor) {
     EXPECT_FALSE(std::filesystem::exists(missing));
 }
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 
 TEST_F(WatcherReconfigurationFixture, NoHandlerRunsForActivityAfterEnableRaisingEventsGoesFalse) {
     // #2105's original observable pin. Deterministic: after the setter returns, activity in

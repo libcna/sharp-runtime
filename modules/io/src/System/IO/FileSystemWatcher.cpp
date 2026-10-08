@@ -580,16 +580,18 @@ namespace System::IO {
         constexpr uintptr_t kDarwinStopIdent = 1;
 
         // Per-entry vnode events a NotifyFilters value asks for (decision 1(a)/2(a)/3(a) of the
-        // Linux mapping above). LastAccess has no kqueue counterpart -- a read changes no vnode
-        // state kqueue reports -- so it watches nothing here, a documented Darwin limitation.
+        // Linux mapping above). NOTE_ATTRIB, like IN_ATTRIB, does not say which attribute
+        // changed, so it serves every content-class filter -- LastAccess included (AM4-126): an
+        // explicit access-time change (utimes) is one of the changes it reports. What kqueue has
+        // no counterpart for is IN_ACCESS: a plain read changes no vnode state it reports, so a
+        // LastAccess watcher does not see reads, a documented Darwin limitation.
         uint32_t darwinEntryFlagsFor(NotifyFilters filter, bool isDirectory) {
             const int bits = static_cast<int>(filter);
             uint32_t flags = 0;
             // A subdirectory's NOTE_WRITE means ITS entries changed, which inotify on the parent
             // never reports either; only its own attributes count, as IN_ATTRIB does.
             if (!isDirectory && (bits & kWriteServedFilters) != 0) flags |= NOTE_WRITE | NOTE_EXTEND;
-            const int attributeFilters = kContentClassFilters & ~static_cast<int>(NotifyFilters::LastAccess);
-            if ((bits & attributeFilters) != 0) flags |= NOTE_ATTRIB;
+            if ((bits & kContentClassFilters) != 0) flags |= NOTE_ATTRIB;
             return flags;
         }
 
@@ -622,22 +624,43 @@ namespace System::IO {
             gDarwinEntryDescriptors.fetch_sub(1);
         }
 
+        bool sameDirectoryVersion(const struct stat& a, const struct stat& b) {
+            return a.st_mtimespec.tv_sec == b.st_mtimespec.tv_sec && a.st_mtimespec.tv_nsec == b.st_mtimespec.tv_nsec &&
+                   a.st_ctimespec.tv_sec == b.st_ctimespec.tv_sec && a.st_ctimespec.tv_nsec == b.st_ctimespec.tv_nsec;
+        }
+
         // nullopt when the directory cannot be listed at all (removed, renamed away, permissions,
         // no descriptor left): that is not "every entry was deleted" and must not be reported so.
+        //
+        // AM4-126: readdir is not a snapshot. An entry renamed while the directory is being read
+        // can be named by readdir and gone by its lstat, with the new name already passed -- the
+        // old name then looks deleted and the new one turns up in the next scan as created, so a
+        // rename was reported as Deleted + Created about one time in six. A listing is kept only
+        // when the directory's timestamps did not move while it was taken; a directory that keeps
+        // changing gets the last of a bounded number of attempts, as before.
         std::optional<std::map<std::string, DarwinListedEntry>> listDarwinDirectory(const std::string& directory) {
+            constexpr int kConsistentListingAttempts = 16;
             std::map<std::string, DarwinListedEntry> entries;
-            DIR* dir = ::opendir(directory.c_str());
-            if (dir == nullptr) return std::nullopt;
-            while (const dirent* item = ::readdir(dir)) {
-                const std::string name = item->d_name;
-                if (name == "." || name == "..") continue;
-                struct stat info{};
-                if (::lstat((directory + "/" + name).c_str(), &info) != 0) continue;
-                entries[name] = DarwinListedEntry{info.st_ino, S_ISDIR(info.st_mode),
-                                                  S_ISREG(info.st_mode) || S_ISDIR(info.st_mode)};
+            for (int attempt = 1;; ++attempt) {
+                entries.clear();
+                DIR* dir = ::opendir(directory.c_str());
+                if (dir == nullptr) return std::nullopt;
+                struct stat before{};
+                const bool versioned = ::fstat(::dirfd(dir), &before) == 0;
+                while (const dirent* item = ::readdir(dir)) {
+                    const std::string name = item->d_name;
+                    if (name == "." || name == "..") continue;
+                    struct stat info{};
+                    if (::lstat((directory + "/" + name).c_str(), &info) != 0) continue;
+                    entries[name] = DarwinListedEntry{info.st_ino, S_ISDIR(info.st_mode),
+                                                      S_ISREG(info.st_mode) || S_ISDIR(info.st_mode)};
+                }
+                struct stat after{};
+                const bool stable = versioned && ::fstat(::dirfd(dir), &after) == 0 &&
+                                    sameDirectoryVersion(before, after);
+                ::closedir(dir);
+                if (stable || attempt == kConsistentListingAttempts) return entries;
             }
-            ::closedir(dir);
-            return entries;
         }
 
         std::exception_ptr darwinCoverageFault(const std::string& directory, std::size_t unwatched) {
