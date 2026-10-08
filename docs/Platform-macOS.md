@@ -10,15 +10,19 @@ counterpart and records what differs.
 
 ## Build and run
 
+Any build directory works; `BUILD` below is only a name for it (an out-of-source directory keeps
+the checkout clean).
+
 ```bash
-cmake -S . -B ~/Desktop/build/sharp-runtime-macos-debug -G Ninja \
+BUILD=../build/sharp-runtime-macos-debug
+cmake -S . -B "$BUILD" -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3 \
   -DSHARP_RUNTIME_COMPONENTS=All \
   -DSHARP_RUNTIME_BUILD_TESTS=ON \
   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-cmake --build ~/Desktop/build/sharp-runtime-macos-debug --target SharpRuntimeTests --parallel 3
-SHARP_RUNTIME_ALLOW_SKIPS=1 scripts/run_component_tests.sh ~/Desktop/build/sharp-runtime-macos-debug
+cmake --build "$BUILD" --target SharpRuntimeTests --parallel
+SHARP_RUNTIME_ALLOW_SKIPS=1 scripts/run_component_tests.sh "$BUILD"
 ```
 
 The runner fails on any skipped test by default, which is the CI gate's rule. On macOS 25 tests
