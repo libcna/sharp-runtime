@@ -477,3 +477,48 @@ TEST(TimeZoneTest, FindSystemTimeZoneById_LeavesTzUnsetWhenItWasUnset) {
 }
 
 #endif // !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#include "../../src/System/TimeZonePosixSupport.hpp"
+
+// AM4-128: utcSecondsFromCivil replaced timegm() on every POSIX host, Linux included, because
+// Darwin's timegm() refuses years before 1900. It is pinned here against fixed instants across
+// the whole DateTime range and against the host's own timegm() wherever that answers.
+TEST(TimeZonePosixSupportTests, UtcSecondsFromCivilMatchesKnownInstants) {
+    using System::detail::utcSecondsFromCivil;
+    EXPECT_EQ(utcSecondsFromCivil(1970, 1, 1, 0, 0, 0), 0);
+    EXPECT_EQ(utcSecondsFromCivil(1969, 12, 31, 23, 59, 59), -1);
+    EXPECT_EQ(utcSecondsFromCivil(2000, 2, 29, 0, 0, 0), 951782400);    // a leap century
+    EXPECT_EQ(utcSecondsFromCivil(2000, 3, 1, 0, 0, 0), 951868800);
+    EXPECT_EQ(utcSecondsFromCivil(1900, 3, 1, 0, 0, 0) - utcSecondsFromCivil(1900, 2, 28, 0, 0, 0),
+              86400) << "1900 is not a leap year";
+    EXPECT_EQ(utcSecondsFromCivil(1, 1, 1, 0, 0, 0), -62135596800LL);    // DateTime.MinValue
+    EXPECT_EQ(utcSecondsFromCivil(9999, 12, 31, 23, 59, 59), 253402300799LL); // DateTime.MaxValue
+    EXPECT_EQ(utcSecondsFromCivil(1600, 3, 1, 0, 0, 0) - utcSecondsFromCivil(1600, 2, 28, 0, 0, 0),
+              2 * 86400) << "1600 is a leap year";
+}
+
+TEST(TimeZonePosixSupportTests, UtcSecondsFromCivilAgreesWithTimegmWhereverTheHostAnswers) {
+    int compared = 0;
+    for (int year = 1; year <= 9999; year += (year >= 1890 && year <= 2110) ? 1 : 7) {
+        for (int month = 1; month <= 12; ++month) {
+            for (int day : {1, 15, 28}) {
+                std::tm fields{};
+                fields.tm_year = year - 1900;
+                fields.tm_mon = month - 1;
+                fields.tm_mday = day;
+                fields.tm_hour = 13;
+                fields.tm_min = 7;
+                fields.tm_sec = 42;
+                const time_t host = ::timegm(&fields);
+                if (host == static_cast<time_t>(-1)) continue; // Darwin, before 1900
+                ++compared;
+                ASSERT_EQ(System::detail::utcSecondsFromCivil(year, month, day, 13, 7, 42),
+                          static_cast<long long>(host))
+                    << year << "-" << month << "-" << day;
+            }
+        }
+    }
+    EXPECT_GT(compared, 7000) << "the host's timegm() answered for too few dates to compare";
+}
+#endif
