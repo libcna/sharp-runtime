@@ -32,6 +32,10 @@
 #include <memory>
 #include <new>
 #include <type_traits>
+#if defined(__APPLE__)
+#include <locale.h>
+#include <xlocale.h>
+#endif
 
 namespace SharpRuntime
 {
@@ -138,10 +142,22 @@ namespace SharpRuntime
         errno = 0;
         char* endPtr = nullptr;
         T parsed;
+#if defined(__APPLE__)
+        // AM4-112: strtof/strtod follow the process's LC_NUMERIC, so under a comma-decimal locale
+        // ("de_DE", "cs_CZ") a host application had set, "1.5" read as 1 -- std::from_chars is
+        // locale-independent. Apple is where this fallback is compiled (libc++ below macOS/iOS 26),
+        // and its xlocale *_l functions parse in an explicit C locale, created once.
+        static const locale_t cLocale = ::newlocale(LC_ALL_MASK, "C", nullptr);
+        if constexpr (std::is_same_v<T, float>)
+            parsed = ::strtof_l(buffer, &endPtr, cLocale);
+        else
+            parsed = static_cast<T>(::strtod_l(buffer, &endPtr, cLocale));
+#else
         if constexpr (std::is_same_v<T, float>)
             parsed = std::strtof(buffer, &endPtr);
         else
             parsed = static_cast<T>(std::strtod(buffer, &endPtr));
+#endif
 
         // Rebase into the caller's range. The consumed count cannot exceed `length`, because the
         // copy is exactly that long and its terminator stops the parse.

@@ -16,6 +16,8 @@
 // a real `std::from_chars`, the test asserts the fallback agrees with it rather than asserting a
 // hand-written expectation -- the helper's whole contract is to be a drop-in.
 #include <gtest/gtest.h>
+#include <clocale>
+#include <string>
 
 #include <charconv>
 #include <cmath>
@@ -496,4 +498,28 @@ TEST(PortableFromCharsGrammarTests, TheHexGuardDoesNotDisturbTheRangeBound) {
     EXPECT_EQ(std::errc{}, fb.ec);
     EXPECT_EQ(1, fb.consumed);
     EXPECT_DOUBLE_EQ(0.0, fb.value);
+}
+
+// AM4-112: the result must not depend on the process locale. std::from_chars never does; the strtod
+// fallback used where libc++ withholds it did, so "1.5" read as 1 under a comma-decimal LC_NUMERIC.
+TEST(PortableFromCharsLocaleTests, ADecimalPointParsesUnderACommaDecimalLocale) {
+    const char* previous = std::setlocale(LC_NUMERIC, nullptr);
+    const std::string saved = previous != nullptr ? previous : "C";
+    const char* chosen = nullptr;
+    for (const char* name : {"de_DE.UTF-8", "cs_CZ.UTF-8", "fr_FR.UTF-8", "de_DE.utf8", "fr_FR.utf8"}) {
+        if (std::setlocale(LC_NUMERIC, name) != nullptr) { chosen = name; break; }
+    }
+    if (chosen == nullptr) GTEST_SKIP() << "no comma-decimal locale is installed on this host";
+    const char text[] = "1.5";
+    double d = 0.0;
+    float f = 0.0f;
+    const std::from_chars_result rd = PortableFromCharsFloat(text, text + 3, d);
+    const std::from_chars_result rf = PortableFromCharsFloat(text, text + 3, f);
+    std::setlocale(LC_NUMERIC, saved.c_str());
+    EXPECT_EQ(rd.ec, std::errc{}) << chosen;
+    EXPECT_EQ(rd.ptr, text + 3) << chosen;
+    EXPECT_EQ(d, 1.5) << chosen;
+    EXPECT_EQ(rf.ec, std::errc{}) << chosen;
+    EXPECT_EQ(rf.ptr, text + 3) << chosen;
+    EXPECT_EQ(f, 1.5f) << chosen;
 }
