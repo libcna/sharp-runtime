@@ -18,8 +18,12 @@ cmake -S . -B ~/Desktop/build/sharp-runtime-macos-debug -G Ninja \
   -DSHARP_RUNTIME_BUILD_TESTS=ON \
   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 cmake --build ~/Desktop/build/sharp-runtime-macos-debug --target SharpRuntimeTests --parallel 3
-scripts/run_component_tests.sh ~/Desktop/build/sharp-runtime-macos-debug
+SHARP_RUNTIME_ALLOW_SKIPS=1 scripts/run_component_tests.sh ~/Desktop/build/sharp-runtime-macos-debug
 ```
+
+The runner fails on any skipped test by default, which is the CI gate's rule. On macOS 25 tests
+skip by design (listed under "Known gaps" below), so `SHARP_RUNTIME_ALLOW_SKIPS=1` lets skips be
+reported without failing the run; failures still fail it.
 
 `13.3` is CNA's macOS floor. At that deployment target Apple's libc++ has no usable
 floating-point `std::from_chars`, so `Double`/`Single` parsing runs through

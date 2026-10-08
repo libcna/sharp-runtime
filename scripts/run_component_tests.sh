@@ -52,7 +52,15 @@ for TEST_BINARY in "${TEST_BINARIES[@]}"; do
 
     echo "    $TEST_NAME: $TEST_RUN run, $TEST_PASSED passed, $TEST_FAILED failed, $TEST_SKIPPED skipped"
 
-    if [ "$TEST_EXIT_STATUS" -ne 0 ] || [ "$TEST_FAILED" -ne 0 ] || [ "$TEST_SKIPPED" -ne 0 ]; then
+    # A skip fails the run unless SHARP_RUNTIME_ALLOW_SKIPS=1 (AM4-114): the CI gate keeps its
+    # zero-skip rule, while a host whose skips are by design (macOS: no native floating
+    # from_chars below 26, see docs/Platform-macOS.md) can still run the suite to a verdict.
+    SKIPS_FAIL=1
+    if [ "${SHARP_RUNTIME_ALLOW_SKIPS:-0}" = "1" ]; then
+        SKIPS_FAIL=0
+    fi
+    if [ "$TEST_EXIT_STATUS" -ne 0 ] || [ "$TEST_FAILED" -ne 0 ] ||
+       { [ "$SKIPS_FAIL" -eq 1 ] && [ "$TEST_SKIPPED" -ne 0 ]; }; then
         echo "FAIL: $TEST_NAME is not a zero-failure/zero-skip result "\
              "(exit=$TEST_EXIT_STATUS, failed=$TEST_FAILED, skipped=$TEST_SKIPPED)" >&2
         grep -E "FAILED|\[  FAILED  \]" "$TEST_LOG" >&2 || true
