@@ -10,6 +10,19 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#include <algorithm>
+#include <cerrno>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <mutex>
+#include <vector>
+#if defined(__linux__) || defined(__APPLE__)
+#include <fcntl.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 #include "TestTemporaryDirectory.hpp"
 #include "System/IO/Directory.hpp"
 #include "System/IO/File.hpp"
@@ -857,6 +870,164 @@ TEST(FileSystemWatcherTests, Destructor_StopsWatchThreadCleanly) {
     System::IO::Directory::Delete(dir, true);
     SUCCEED();
 }
+
+#if defined(__linux__) || defined(__APPLE__)
+namespace {
+    // Collects every event a watcher raises, for tests that must also prove an event did NOT come.
+    struct WatcherLog {
+        std::mutex mutex;
+        std::vector<std::string> events;
+        std::atomic<int> errors{0};
+        std::atomic<int> overflowErrors{0};
+        void add(const std::string& event) {
+            std::lock_guard<std::mutex> lock(mutex);
+            events.push_back(event);
+        }
+        bool contains(const std::string& event) {
+            std::lock_guard<std::mutex> lock(mutex);
+            return std::find(events.begin(), events.end(), event) != events.end();
+        }
+        void attach(FileSystemWatcher& fsw) {
+            fsw.Created.push_back([this](void*, const FileSystemEventArgs& e) { add("Created " + e.getNameProperty()); });
+            fsw.Deleted.push_back([this](void*, const FileSystemEventArgs& e) { add("Deleted " + e.getNameProperty()); });
+            fsw.Changed.push_back([this](void*, const FileSystemEventArgs& e) { add("Changed " + e.getNameProperty()); });
+            fsw.Renamed.push_back([this](void*, const System::IO::RenamedEventArgs& e) {
+                add("Renamed " + e.getOldNameProperty() + " -> " + e.getNameProperty());
+            });
+            fsw.Error.push_back([this](void*, const System::IO::ErrorEventArgs& e) {
+                ++errors;
+                try { std::rethrow_exception(e.GetException()); }
+                catch (const System::IO::InternalBufferOverflowException&) { ++overflowErrors; }
+                catch (...) {}
+            });
+        }
+    };
+
+    // Creates `name` in `dir` and waits for its Created: every event raised before it has been
+    // delivered by then, so a test can assert that an earlier event did NOT arrive.
+    bool FlushWith(WatcherLog& log, const std::string& dir, const std::string& name) {
+        System::IO::File::WriteAllText(dir + "/" + name, "flush");
+        for (int i = 0; i < 200; ++i) {
+            if (log.contains("Created " + name)) return true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return log.contains("Created " + name);
+    }
+}
+
+// AM4-101 (S-H3): the Darwin backend opened every entry's vnode with a blocking open(), and opening
+// a FIFO blocks until a writer appears -- EnableRaisingEvents never returned, and a FIFO created
+// later froze the watch thread, so stopping it hung in join(). Linux's inotify never opens entries.
+TEST(FileSystemWatcherTests, EndToEnd_AFifoInTheDirectoryBlocksNeitherArmingNorStopping) {
+    std::string dir = tf("fsw_fifo_dir");
+    System::IO::Directory::CreateDirectory(dir);
+    ASSERT_EQ(::mkfifo((dir + "/before").c_str(), 0600), 0);
+    WatcherLog log;
+    std::atomic<bool> finished{false};
+    std::thread scenario([&] {
+        FileSystemWatcher fsw(dir);
+        log.attach(fsw);
+        fsw.setEnableRaisingEventsProperty(true);
+        ::mkfifo((dir + "/after").c_str(), 0600);
+        FlushWith(log, dir, "sentinel.txt");
+        fsw.setEnableRaisingEventsProperty(false);
+        finished.store(true);
+    });
+    for (int i = 0; i < 500 && !finished.load(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    if (!finished.load()) {
+        // The scenario thread is blocked inside the watcher; nothing can unwind it safely.
+        std::fprintf(stderr, "FileSystemWatcher blocked on a FIFO in the watched directory\n");
+        std::abort();
+    }
+    scenario.join();
+    EXPECT_TRUE(log.contains("Created after"));
+    EXPECT_TRUE(log.contains("Created sentinel.txt"));
+    System::IO::Directory::Delete(dir, true);
+}
+
+// AM4-101 (S-M2): rename(tmp, name) over an existing entry -- an editor's atomic save -- is one
+// Renamed on Linux (IN_MOVED_FROM/IN_MOVED_TO, no IN_DELETE for the replaced entry). The Darwin
+// backend also reported the replaced entry as Deleted.
+TEST(FileSystemWatcherTests, EndToEnd_AnAtomicReplaceIsOneRenamedAndNotAlsoADeleted) {
+    std::string dir = tf("fsw_replace_dir");
+    System::IO::Directory::CreateDirectory(dir);
+    System::IO::File::WriteAllText(dir + "/settings.txt", "old");
+    System::IO::File::WriteAllText(dir + "/settings.tmp", "new");
+    FileSystemWatcher fsw(dir);
+    WatcherLog log;
+    log.attach(fsw);
+    fsw.setEnableRaisingEventsProperty(true);
+
+    ASSERT_EQ(std::rename((dir + "/settings.tmp").c_str(), (dir + "/settings.txt").c_str()), 0);
+    ASSERT_TRUE(FlushWith(log, dir, "sentinel.txt"));
+
+    EXPECT_TRUE(log.contains("Renamed settings.tmp -> settings.txt"));
+    EXPECT_FALSE(log.contains("Deleted settings.txt"));
+    EXPECT_FALSE(log.contains("Deleted settings.tmp"));
+    fsw.setEnableRaisingEventsProperty(false);
+    System::IO::Directory::Delete(dir, true);
+}
+#endif
+
+#if defined(__APPLE__)
+// AM4-101 (S-H2): kqueue needs a descriptor per watched file, and the Darwin backend took one per
+// entry with no bound, so watching a directory of a few hundred files under macOS's default soft
+// limit (256) left the whole process without descriptors. The watchers now hold at most half the
+// soft limit, and an entry left without a content watch is reported through Error.
+TEST(FileSystemWatcherTests, DarwinWatcherStaysWithinItsDescriptorBudgetAndSaysSo) {
+    struct rlimit original{};
+    ASSERT_EQ(::getrlimit(RLIMIT_NOFILE, &original), 0);
+    std::string dir = tf("fsw_budget_dir");
+    System::IO::Directory::CreateDirectory(dir);
+    for (int i = 0; i < 200; ++i) System::IO::File::WriteAllText(dir + "/f" + std::to_string(i) + ".txt", "x");
+
+    struct rlimit lowered = original;
+    lowered.rlim_cur = std::min<rlim_t>(original.rlim_cur, 128);
+    ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &lowered), 0);
+    int probe = -1;
+    {
+        FileSystemWatcher fsw(dir);
+        WatcherLog log;
+        log.attach(fsw);
+        fsw.setEnableRaisingEventsProperty(true);
+        probe = ::open((dir + "/f0.txt").c_str(), O_RDONLY | O_CLOEXEC);
+        EXPECT_GE(probe, 0) << "the watcher left the process without a descriptor: " << std::strerror(errno);
+        if (probe >= 0) ::close(probe);
+        EXPECT_GE(log.overflowErrors.load(), 1) << "an entry without a content watch must be reported";
+        EXPECT_TRUE(FlushWith(log, dir, "sentinel.txt")) << "Created still works beyond the budget";
+        fsw.setEnableRaisingEventsProperty(false);
+    }
+    ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &original), 0);
+    System::IO::Directory::Delete(dir, true);
+}
+
+// AM4-101 (S-M1): a directory that can no longer be listed -- here renamed away while watched --
+// used to read as an empty listing, so every entry was reported Deleted. It is reported once,
+// through Error, and no entry is reported deleted.
+TEST(FileSystemWatcherTests, DarwinWatcherReportsAnUnlistableDirectoryWithoutInventingDeletions) {
+    std::string dir = tf("fsw_unlistable_dir");
+    std::string moved = tf("fsw_unlistable_dir_moved");
+    System::IO::Directory::CreateDirectory(dir);
+    System::IO::File::WriteAllText(dir + "/a.txt", "a");
+    System::IO::File::WriteAllText(dir + "/b.txt", "b");
+    FileSystemWatcher fsw(dir);
+    WatcherLog log;
+    log.attach(fsw);
+    fsw.setEnableRaisingEventsProperty(true);
+
+    ASSERT_EQ(std::rename(dir.c_str(), moved.c_str()), 0);
+    // The watch follows the directory's vnode, so a change inside it still wakes the watcher, whose
+    // directory path no longer names anything.
+    System::IO::File::WriteAllText(moved + "/c.txt", "c");
+    for (int i = 0; i < 200 && log.errors.load() == 0; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+    EXPECT_EQ(log.errors.load(), 1);
+    EXPECT_FALSE(log.contains("Deleted a.txt"));
+    EXPECT_FALSE(log.contains("Deleted b.txt"));
+    fsw.setEnableRaisingEventsProperty(false);
+    System::IO::Directory::Delete(moved, true);
+}
+#endif
 
 // ===========================================================================
 // EndOfStreamException

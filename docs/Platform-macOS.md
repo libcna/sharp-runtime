@@ -49,11 +49,20 @@ cycles, and Apple's linker reports the repetition. They are not compiler warning
 
 ## Known gaps on macOS
 
-- `FileSystemWatcher` (AM4-055) watches through kqueue: the directory's vnode for added,
-  removed and renamed entries (re-listed and diffed; a vanished inode under a new name is one
-  `Renamed`) and each entry's vnode for content and attribute changes. `NotifyFilters.LastAccess`
-  is not observable (kqueue reports no reads), and `IncludeSubdirectories` is unimplemented on
-  every platform.
+- `FileSystemWatcher` (AM4-055, hardened by AM4-101) watches through kqueue: the directory's
+  vnode for added, removed and renamed entries (re-listed and diffed; a vanished inode under a new
+  name is one `Renamed`, and a rename onto an existing name is that `Renamed` alone, as on Linux)
+  and each regular file's or subdirectory's vnode for content and attribute changes.
+  - kqueue needs one descriptor per watched file. All watchers in a process together hold at most
+    half of `RLIMIT_NOFILE`'s soft limit (256 for a process launchd starts); entries beyond that
+    still raise `Created`/`Deleted`/`Renamed` but not `Changed`, and `Error` reports them with an
+    `InternalBufferOverflowException`. Raise the limit (`setrlimit`) to watch larger directories.
+  - FIFOs, sockets, devices and symbolic links are never opened (opening a FIFO blocks), so they
+    raise no `Changed`; a symbolic link is not followed.
+  - A watched directory that can no longer be listed (removed, renamed away, unreadable) raises
+    `Error` once instead of reporting its entries as deleted.
+  - `NotifyFilters.LastAccess` is not observable (kqueue reports no reads), and
+    `IncludeSubdirectories` is unimplemented on every platform.
 - The `HashCode` per-process-seed and `PosixSignal` re-exec tests are `#ifdef __linux__`
   (they re-exec through `/proc/self/exe`), so they do not run on macOS.
 - `PortableFromCharsTests`' agreement checks against native `std::from_chars` report SKIPPED at

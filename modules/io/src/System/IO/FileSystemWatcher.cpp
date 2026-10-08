@@ -6,6 +6,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/IO/Directory.hpp"
 #include "System/IO/IOException.hpp"
+#include "System/IO/InternalBufferOverflowException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/PlatformNotSupportedException.hpp"
 
@@ -33,8 +34,10 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <map>
+#include <optional>
 #include <regex>
 #include <sys/event.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <system_error>
 #include <unistd.h>
@@ -593,44 +596,88 @@ namespace System::IO {
         struct DarwinListedEntry {
             ino_t inode = 0;
             bool isDirectory = false;
+            // A regular file or a directory: the only kinds whose vnode is opened for a content
+            // watch. Opening a FIFO blocks until a writer appears, and a socket or device has no
+            // content Changed could describe (AM4-101).
+            bool hasContent = false;
         };
 
-        std::map<std::string, DarwinListedEntry> listDarwinDirectory(const std::string& directory) {
+        // Every Darwin watcher's per-entry descriptors, process-wide. kqueue needs one descriptor
+        // per watched file, and the default soft limit of a launchd-started process is 256, so a
+        // directory of a few hundred files used to exhaust the whole process (EMFILE everywhere).
+        // The watchers together now hold at most half the soft limit (AM4-101).
+        std::atomic<long> gDarwinEntryDescriptors{0};
+
+        long darwinEntryDescriptorBudget() {
+            struct rlimit limit{};
+            if (::getrlimit(RLIMIT_NOFILE, &limit) != 0) return 64;
+            const rlim_t soft = limit.rlim_cur == RLIM_INFINITY ? (rlim_t{1} << 20) : limit.rlim_cur;
+            return static_cast<long>(std::min<rlim_t>(soft / 2, rlim_t{1} << 16));
+        }
+
+        void closeDarwinEntryDescriptor(int& fd) {
+            if (fd < 0) return;
+            ::close(fd);
+            fd = -1;
+            gDarwinEntryDescriptors.fetch_sub(1);
+        }
+
+        // nullopt when the directory cannot be listed at all (removed, renamed away, permissions,
+        // no descriptor left): that is not "every entry was deleted" and must not be reported so.
+        std::optional<std::map<std::string, DarwinListedEntry>> listDarwinDirectory(const std::string& directory) {
             std::map<std::string, DarwinListedEntry> entries;
             DIR* dir = ::opendir(directory.c_str());
-            if (dir == nullptr) return entries;
+            if (dir == nullptr) return std::nullopt;
             while (const dirent* item = ::readdir(dir)) {
                 const std::string name = item->d_name;
                 if (name == "." || name == "..") continue;
                 struct stat info{};
                 if (::lstat((directory + "/" + name).c_str(), &info) != 0) continue;
-                entries[name] = DarwinListedEntry{info.st_ino, S_ISDIR(info.st_mode)};
+                entries[name] = DarwinListedEntry{info.st_ino, S_ISDIR(info.st_mode),
+                                                  S_ISREG(info.st_mode) || S_ISDIR(info.st_mode)};
             }
             ::closedir(dir);
             return entries;
         }
+
+        std::exception_ptr darwinCoverageFault(const std::string& directory, std::size_t unwatched) {
+            return std::make_exception_ptr(System::IO::InternalBufferOverflowException(
+                "FileSystemWatcher on '" + directory + "': " + std::to_string(unwatched) +
+                " entr" + (unwatched == 1 ? "y has" : "ies have") + " no content watch, because the "
+                "process-wide budget of per-file descriptors (half of RLIMIT_NOFILE) is spent; Changed "
+                "is not raised for them. Raise the descriptor limit or watch a smaller directory."));
+        }
     } // namespace
 
-    void FileSystemWatcher::armDarwinEntry(const std::string& name, bool isDirectory) {
+    bool FileSystemWatcher::armDarwinEntry(const std::string& name, bool isDirectory, bool hasContent) {
         DarwinWatchedEntry& entry = darwinEntries_[name];
         entry.isDirectory = isDirectory;
-        const uint32_t flags = darwinEntryFlagsFor(notifyFilter_, isDirectory);
-        if (flags == 0 || entry.fd >= 0) return;
+        const uint32_t flags = hasContent ? darwinEntryFlagsFor(notifyFilter_, isDirectory) : 0;
+        if (flags == 0 || entry.fd >= 0) return true;
+        if (gDarwinEntryDescriptors.fetch_add(1) >= darwinEntryDescriptorBudget()) {
+            gDarwinEntryDescriptors.fetch_sub(1);
+            return false;
+        }
         // O_EVTONLY: a descriptor for event delivery only, which does not keep a volume busy.
-        entry.fd = ::open((directory_ + "/" + name).c_str(), O_EVTONLY | O_CLOEXEC);
-        if (entry.fd < 0) return; // gone again already; the next directory scan settles it
+        // O_NONBLOCK and O_SYMLINK close the window between the listing's lstat and this open: an
+        // entry replaced by a FIFO cannot block the watcher, and a symbolic link is never followed.
+        entry.fd = ::open((directory_ + "/" + name).c_str(), O_EVTONLY | O_CLOEXEC | O_NONBLOCK | O_SYMLINK);
+        if (entry.fd < 0) {
+            gDarwinEntryDescriptors.fetch_sub(1);
+            // Gone again already: the next directory scan settles it. Out of descriptors: no
+            // content watch, which the caller reports.
+            return errno != EMFILE && errno != ENFILE;
+        }
         struct kevent change{};
         EV_SET(&change, static_cast<uintptr_t>(entry.fd), EVFILT_VNODE, EV_ADD | EV_CLEAR, flags, 0, nullptr);
-        if (::kevent(inotifyFd_, &change, 1, nullptr, 0, nullptr) != 0) {
-            ::close(entry.fd);
-            entry.fd = -1;
-        }
+        if (::kevent(inotifyFd_, &change, 1, nullptr, 0, nullptr) != 0) closeDarwinEntryDescriptor(entry.fd);
+        return true;
     }
 
     void FileSystemWatcher::releaseDarwinEntries() {
         for (auto& [name, entry] : darwinEntries_) {
             (void)name;
-            if (entry.fd >= 0) ::close(entry.fd);
+            closeDarwinEntryDescriptor(entry.fd);
         }
         darwinEntries_.clear();
     }
@@ -677,8 +724,17 @@ namespace System::IO {
 
         // The snapshot is taken HERE, before EnableRaisingEvents returns, so an entry created the
         // moment after is a difference the first scan reports rather than part of the baseline.
-        for (const auto& [name, listed] : listDarwinDirectory(directory_))
-            armDarwinEntry(name, listed.isDirectory), darwinEntries_[name].inode = listed.inode;
+        const auto snapshot = listDarwinDirectory(directory_);
+        if (!snapshot) {
+            failArming("Unable to list directory '" + directory_ + "': " + std::string(std::strerror(errno)));
+            return;
+        }
+        std::size_t unwatched = 0;
+        for (const auto& [name, listed] : *snapshot) {
+            if (!armDarwinEntry(name, listed.isDirectory, listed.hasContent)) ++unwatched;
+            darwinEntries_[name].inode = listed.inode;
+        }
+        if (unwatched != 0) reportHandlerFault(darwinCoverageFault(directory_, unwatched));
 
         try {
             watchThread_ = std::thread(&FileSystemWatcher::watchLoop, this);
@@ -728,6 +784,7 @@ namespace System::IO {
                 catch (...) { reportHandlerFault(std::current_exception()); }
         };
 
+        bool listingFailed = false;
         for (;;) {
             struct kevent events[32];
             const int count = ::kevent(inotifyFd_, nullptr, 0, events, 32, nullptr);
@@ -748,7 +805,21 @@ namespace System::IO {
             if (!enabled_.load()) continue;
 
             if (directoryChanged) {
-                const auto listed = listDarwinDirectory(directory_);
+                const auto listing = listDarwinDirectory(directory_);
+                if (!listing) {
+                    // The directory itself went away or became unreadable. Its entries were not
+                    // deleted by that, so none is reported; the snapshot stays, and Error says why
+                    // -- once per failure, not on every later event.
+                    if (!listingFailed) {
+                        listingFailed = true;
+                        reportHandlerFault(std::make_exception_ptr(System::IO::IOException(
+                            "FileSystemWatcher can no longer list '" + directory_ + "': " +
+                            std::string(std::strerror(errno)))));
+                    }
+                    continue;
+                }
+                listingFailed = false;
+                const auto& listed = *listing;
                 std::vector<std::pair<std::string, DarwinWatchedEntry>> removed;
                 for (const auto& [name, entry] : darwinEntries_)
                     if (listed.find(name) == listed.end() || listed.at(name).inode != entry.inode)
@@ -769,6 +840,7 @@ namespace System::IO {
                 // follows the vnode, so it moves with the entry. The filter rules are the Linux
                 // backend's: the old name must match to start a pair, and a pair whose new name
                 // does not match is dropped, while an unpaired half is a Deleted or a Created.
+                std::vector<std::string> renamedOnto;
                 for (auto removedIt = removed.begin(); removedIt != removed.end();) {
                     const auto addedIt = std::find_if(added.begin(), added.end(), [&](const auto& a) {
                         return a.second.inode == removedIt->second.inode;
@@ -778,6 +850,7 @@ namespace System::IO {
                         continue;
                     }
                     DarwinWatchedEntry moved = removedIt->second;
+                    renamedOnto.push_back(addedIt->first);
                     darwinEntries_[addedIt->first] = moved;
                     if (enabled_.load() && matchesAnyFilter(filters_, addedIt->first) &&
                         nameClassAdmits(notifyFilter_, moved.isDirectory)) {
@@ -788,21 +861,27 @@ namespace System::IO {
                     added.erase(addedIt);
                     removedIt = removed.erase(removedIt);
                 }
-                for (const auto& [name, entry] : removed) {
-                    if (entry.fd >= 0) ::close(entry.fd);
+                for (auto& [name, entry] : removed) {
+                    closeDarwinEntryDescriptor(entry.fd);
+                    // An entry replaced by a rename onto its name (rename(tmp, name), the usual
+                    // atomic save) is one Renamed, as inotify reports it: MOVED_TO overwrites the
+                    // old entry without an IN_DELETE of its own.
+                    if (std::find(renamedOnto.begin(), renamedOnto.end(), name) != renamedOnto.end()) continue;
                     if (!enabled_.load() || !matchesAnyFilter(filters_, name) ||
                         !nameClassAdmits(notifyFilter_, entry.isDirectory)) continue;
                     FileSystemEventArgs args(WatcherChangeTypes::Deleted, directory_, name);
                     raise(Deleted, args);
                 }
+                std::size_t unwatched = 0;
                 for (const auto& [name, entry] : added) {
-                    armDarwinEntry(name, entry.isDirectory);
+                    if (!armDarwinEntry(name, entry.isDirectory, entry.hasContent)) ++unwatched;
                     darwinEntries_[name].inode = entry.inode;
                     if (!enabled_.load() || !matchesAnyFilter(filters_, name) ||
                         !nameClassAdmits(notifyFilter_, entry.isDirectory)) continue;
                     FileSystemEventArgs args(WatcherChangeTypes::Created, directory_, name);
                     raise(Created, args);
                 }
+                if (unwatched != 0 && enabled_.load()) reportHandlerFault(darwinCoverageFault(directory_, unwatched));
             }
 
             for (const auto& name : contentChanged) {

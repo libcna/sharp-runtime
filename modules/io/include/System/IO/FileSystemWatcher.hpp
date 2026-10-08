@@ -85,8 +85,16 @@ namespace System::IO {
         // The directory's last listing. Filled by startWatchingIfPossible() before the thread
         // starts, then owned by the watch thread until stopWatchingIfRunning() joins it.
         std::map<std::string, DarwinWatchedEntry> darwinEntries_;
-        /** @brief Records @p name and registers its content watch on the kqueue. */
-        void armDarwinEntry(const std::string& name, bool isDirectory);
+        /**
+         * @brief Records @p name and registers its content watch on the kqueue.
+         * @param name Entry name.
+         * @param isDirectory Whether the entry is a directory.
+         * @param hasContent Whether the entry is a regular file or a directory -- the only kinds
+         *        whose vnode is opened; a FIFO, socket, device or symbolic link is never opened.
+         * @return false when the process-wide descriptor budget left the entry without a content
+         *         watch (its Created/Deleted/Renamed still arrive; its Changed cannot).
+         */
+        bool armDarwinEntry(const std::string& name, bool isDirectory, bool hasContent);
         /** @brief Closes every entry's event descriptor and forgets the listing. */
         void releaseDarwinEntries();
 #endif
