@@ -170,19 +170,27 @@ namespace {
         }
     }
 
-    /// Whether a freshly created AF_INET6 socket is dual-mode (IPV6_V6ONLY == 0). That is an OS
-    /// default rather than a constant -- 0 on macOS and on a stock Linux, 1 on Windows and
-    /// wherever net.ipv6.bindv6only is set -- and the library asks the socket rather than
-    /// assuming (detail::SocketIsDualMode), so the rows that depend on it ask too.
-    bool FreshIPv6SocketIsDualMode() {
+    /// Whether an AF_INET6 socket bound to [::1]:0 is dual-mode (IPV6_V6ONLY == 0) -- the socket the
+    /// library inspects (detail::SocketIsDualMode) for a TcpClient bound to ::1, so the rows that
+    /// depend on it ask the same question. It is not a constant: a fresh socket's default is 0 on
+    /// macOS and on a stock Linux and 1 on Windows or where net.ipv6.bindv6only is set, and Linux
+    /// then sets IPV6_V6ONLY on any socket bound to a specific IPv6 address, while Darwin leaves the
+    /// option alone. A probe of an unbound socket therefore answers differently on Linux.
+    bool LoopbackBoundIPv6SocketIsDualMode() {
 #if defined(_WIN32)
         return false;
 #else
         const int probe = ::socket(AF_INET6, SOCK_STREAM, 0);
         if (probe < 0) return false;
+        sockaddr_in6 loopback{};
+        loopback.sin6_family = AF_INET6;
+        loopback.sin6_addr = in6addr_loopback;
+        loopback.sin6_port = 0;
         int v6only = 1;
         socklen_t length = sizeof(v6only);
-        const bool readable = ::getsockopt(probe, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, &length) == 0;
+        const bool readable =
+            ::bind(probe, reinterpret_cast<const sockaddr*>(&loopback), sizeof(loopback)) == 0 &&
+            ::getsockopt(probe, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, &length) == 0;
         ::close(probe);
         return readable && v6only == 0;
 #endif
@@ -284,7 +292,7 @@ TEST(SocketsGatedBehaviourPins, Fix2363_TheFamilyRefusalSurvivesOnlyWhereASocket
     // hard-coding IPv4 as the one acceptable family.
     {
         TcpClient bound(IPEndPoint(v6, 0));
-        if (FreshIPv6SocketIsDualMode()) {
+        if (LoopbackBoundIPv6SocketIsDualMode()) {
             // A dual-mode IPv6 socket ACCEPTS an IPv4 endpoint (as ::ffff:127.0.0.1), exactly
             // as .NET's CanTryAddressFamily does; whether the OS can then route it from ::1 is a
             // network question, and macOS answers EAFNOSUPPORT.
