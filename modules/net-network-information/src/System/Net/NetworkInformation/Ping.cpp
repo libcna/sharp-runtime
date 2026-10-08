@@ -17,6 +17,7 @@
 // No raw/ping-socket support available under Emscripten.
 #else
 #define SHARP_RUNTIME_PING_POSIX 1
+#include <algorithm>
 #include <arpa/inet.h>
 #include <atomic>
 #include <cerrno>
@@ -80,14 +81,27 @@ void Ping::checkArgs(const System::Net::IPAddress& address, SharpRuntime::intcs 
 namespace {
 
     // Real struct name differs (Linux: `icmphdr`, BSD/Darwin: `icmp`) -- see the platform-detect
-    // block above the includes for why. This alias lets sizeof(IcmpV4Header)/pointer-cast call
-    // sites stay identical on both platforms; the few field-name-dependent lines (construction,
+    // block above the includes for why. This alias lets the header's declaration and copies stay
+    // identical on both platforms (sized by kIcmpV4HeaderSize below, never by sizeof, which differs);
+    // the few field-name-dependent lines (construction,
     // parsing) are still written per-platform explicitly, deliberately not hidden behind further
     // macros, so they stay easy to read and verify against each platform's real header.
 #if defined(SHARP_RUNTIME_PING_LINUX_ICMP)
     using IcmpV4Header = ::icmphdr;
 #else
     using IcmpV4Header = ::icmp;
+#endif
+
+    // AM4-103: an ICMPv4 echo/error header is 8 bytes on the wire (RFC 792). Linux's `icmphdr` is
+    // exactly that, but BSD/Darwin's `struct icmp` carries the variable parts of every message type
+    // in one union and is 28 bytes, so sizing packets and offsets with sizeof(IcmpV4Header) sent
+    // 20 extra bytes, parsed error replies at the wrong offset (TtlExpired/Unreachable read as
+    // TimedOut) and pushed a 65,500-byte buffer past IPv4's limit. Only the first 8 bytes of the
+    // struct -- type, code, checksum, identifier, sequence -- are ever written or read.
+    constexpr size_t kIcmpV4HeaderSize = 8;
+    static_assert(sizeof(IcmpV4Header) >= kIcmpV4HeaderSize, "the platform ICMP header must cover the wire header");
+#if defined(SHARP_RUNTIME_PING_LINUX_ICMP)
+    static_assert(sizeof(IcmpV4Header) == kIcmpV4HeaderSize, "Linux's icmphdr is the wire header");
 #endif
 
     uint16_t internetChecksum(const void* data, size_t len) {
@@ -245,9 +259,9 @@ namespace {
             std::memcpy(&original, data + quoted, sizeof(original));
             return ntohs(original.icmp6_seq) == sequence;
         }
-        if (size < sizeof(IcmpV4Header)) return false;
+        if (size < kIcmpV4HeaderSize) return false;
         IcmpV4Header hdr{};
-        std::memcpy(&hdr, data, sizeof(hdr));
+        std::memcpy(&hdr, data, kIcmpV4HeaderSize);
 #if defined(SHARP_RUNTIME_PING_LINUX_ICMP)
         const uint8_t type = hdr.type;
         if (type == ICMP_ECHOREPLY) return ntohs(hdr.un.echo.sequence) == sequence;
@@ -257,12 +271,12 @@ namespace {
 #endif
         // An error quotes the original IP header, whose length is in its low nibble, then the
         // original ICMP header.
-        if (size < sizeof(IcmpV4Header) + 1) return false;
-        const size_t quotedIpLength = 4u * static_cast<size_t>(data[sizeof(IcmpV4Header)] & 0x0F);
-        const size_t quoted = sizeof(IcmpV4Header) + quotedIpLength;
-        if (quotedIpLength < 20 || size < quoted + sizeof(IcmpV4Header)) return false;
+        if (size < kIcmpV4HeaderSize + 1) return false;
+        const size_t quotedIpLength = 4u * static_cast<size_t>(data[kIcmpV4HeaderSize] & 0x0F);
+        const size_t quoted = kIcmpV4HeaderSize + quotedIpLength;
+        if (quotedIpLength < 20 || size < quoted + kIcmpV4HeaderSize) return false;
         IcmpV4Header original{};
-        std::memcpy(&original, data + quoted, sizeof(original));
+        std::memcpy(&original, data + quoted, kIcmpV4HeaderSize);
 #if defined(SHARP_RUNTIME_PING_LINUX_ICMP)
         return ntohs(original.un.echo.sequence) == sequence;
 #else
@@ -323,7 +337,7 @@ PingReply Ping::sendPingCore(const System::Net::IPAddress& address, const std::v
             std::memcpy(packet.data() + sizeof(icmp6_hdr), buffer.data(), buffer.size());
         }
     } else {
-        packet.resize(sizeof(IcmpV4Header) + buffer.size());
+        packet.resize(kIcmpV4HeaderSize + buffer.size());
         // Same rationale as the icmp6_hdr branch above.
         IcmpV4Header hdr{};
 #if defined(SHARP_RUNTIME_PING_LINUX_ICMP)
@@ -343,9 +357,9 @@ PingReply Ping::sendPingCore(const System::Net::IPAddress& address, const std::v
         hdr.icmp_id = htons(identifier);
         hdr.icmp_seq = htons(sequence);
 #endif
-        std::memcpy(packet.data(), &hdr, sizeof(hdr));
+        std::memcpy(packet.data(), &hdr, kIcmpV4HeaderSize);
         if (!buffer.empty()) {
-            std::memcpy(packet.data() + sizeof(IcmpV4Header), buffer.data(), buffer.size());
+            std::memcpy(packet.data() + kIcmpV4HeaderSize, buffer.data(), buffer.size());
         }
         // The checksum covers the whole packet (header + payload), so it can only be computed
         // once the payload has been copied in; patch it into both the local header and the
@@ -355,7 +369,7 @@ PingReply Ping::sendPingCore(const System::Net::IPAddress& address, const std::v
 #else
         hdr.icmp_cksum = htons(internetChecksum(packet.data(), packet.size()));
 #endif
-        std::memcpy(packet.data(), &hdr, sizeof(hdr));
+        std::memcpy(packet.data(), &hdr, kIcmpV4HeaderSize);
     }
 
     sockaddr_storage dest{};
@@ -371,6 +385,19 @@ PingReply Ping::sendPingCore(const System::Net::IPAddress& address, const std::v
         dst4->sin_family = AF_INET;
         dst4->sin_addr.s_addr = htonl(address.getAddressProperty());
         destLen = sizeof(sockaddr_in);
+    }
+
+    // AM4-103: the reply mirrors the request and may arrive with an IP header in front (Darwin's ICMP
+    // datagram socket includes it), so the receive buffer must hold the request plus a maximal IP
+    // header. Darwin's default for this socket is 8,192 bytes -- no room for the reply to a request
+    // near its own 8,192-byte send cap, which then silently timed out. Raising it is best effort: a
+    // refusal only leaves the platform default in place.
+    {
+        int wanted = static_cast<int>(std::min<size_t>(packet.size() + 60 + 64, 65536 + 128));
+        int current = 0;
+        socklen_t length = sizeof(current);
+        if (::getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &current, &length) == 0 && current < wanted)
+            (void)::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &wanted, sizeof(wanted));
     }
 
     auto start = std::chrono::steady_clock::now();
@@ -452,15 +479,17 @@ PingReply Ping::sendPingCore(const System::Net::IPAddress& address, const std::v
         }
     } else {
         const size_t icmpSize = static_cast<size_t>(received) - icmpOffset;
-        if (icmpSize >= sizeof(IcmpV4Header)) {
-            const auto* hdr = reinterpret_cast<const IcmpV4Header*>(recvBuf.data() + icmpOffset);
+        if (icmpSize >= kIcmpV4HeaderSize) {
+            IcmpV4Header header{};
+            std::memcpy(&header, recvBuf.data() + icmpOffset, kIcmpV4HeaderSize);
+            const auto* hdr = &header;
 #if defined(SHARP_RUNTIME_PING_LINUX_ICMP)
             status = mapIcmpV4Status(hdr->type, hdr->code);
 #else
             status = mapIcmpV4Status(hdr->icmp_type, hdr->icmp_code);
 #endif
-            if (icmpSize > sizeof(IcmpV4Header)) {
-                replyBuffer.assign(recvBuf.begin() + static_cast<std::ptrdiff_t>(icmpOffset + sizeof(IcmpV4Header)),
+            if (icmpSize > kIcmpV4HeaderSize) {
+                replyBuffer.assign(recvBuf.begin() + static_cast<std::ptrdiff_t>(icmpOffset + kIcmpV4HeaderSize),
                                    recvBuf.begin() + received);
             }
         }

@@ -156,6 +156,20 @@ TEST(PingTests, Send_NegativeTimeout_Throws) {
     EXPECT_THROW(ping.Send(IPAddress::Loopback, -1), System::ArgumentOutOfRangeException);
 }
 
+// AM4-103: an ICMPv4 echo carries an 8-byte header on the wire. Darwin's 28-byte `struct icmp` used
+// to size the packet, adding 20 bytes to every request: macOS caps an ICMP datagram at 8,192 bytes
+// (net.inet.raw.maxdgram), so an 8,170-byte buffer could not be sent (8,198 bytes), and its reply --
+// 8,178 bytes behind a 20-byte IP header -- did not fit the socket's default 8,192-byte receive
+// buffer either. Linux has neither limit and must echo it too.
+TEST(PingTests, Send_LargeBuffer_EchoedBackWithAnEightByteHeader) {
+    Ping ping;
+    std::vector<SharpRuntime::bytecs> buffer(8170);
+    for (std::size_t i = 0; i < buffer.size(); ++i) buffer[i] = static_cast<SharpRuntime::bytecs>(i * 31u);
+    PingReply reply = ping.Send(IPAddress::Loopback, 5000, buffer);
+    EXPECT_EQ(reply.getStatusProperty(), IPStatus::Success);
+    EXPECT_EQ(reply.getBufferProperty(), buffer);
+}
+
 TEST(PingTests, Send_BufferTooLarge_Throws) {
     Ping ping;
     std::vector<SharpRuntime::bytecs> buffer(65501);
