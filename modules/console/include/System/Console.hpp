@@ -25,7 +25,6 @@ namespace System {
     using SharpRuntime::longcs;
     using SharpRuntime::uintcs;
     using SharpRuntime::ulongcs;
-    using SharpRuntime::Single;
 
     /**
      * @brief Represents the standard input, output, and error streams for console applications.
