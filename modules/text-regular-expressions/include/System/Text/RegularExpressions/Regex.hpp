@@ -63,6 +63,17 @@ namespace System::Text::RegularExpressions {
             for (size_t i = 0; i < pattern.size(); ++i) {
                 char c = pattern[i];
                 if (c == '\\' && i + 1 < pattern.size()) {
+                    // AM4-104: \p{Name} / \P{Name} are .NET Unicode category escapes, which
+                    // std::regex has no form of. Both standard libraries used to reject them; the
+                    // literal-brace rule below would now escape the brace, and libstdc++ would
+                    // then silently match the text "p{Name}". They are refused by name instead,
+                    // with the same exception every library gave before.
+                    if ((pattern[i + 1] == 'p' || pattern[i + 1] == 'P') && i + 2 < pattern.size() &&
+                        pattern[i + 2] == '{') {
+                        throw RegexParseException(RegexParseError::Unknown,
+                                                  "Invalid regular expression pattern: " + pattern +
+                                                      " (Unicode category escapes are not supported)");
+                    }
                     out += c;
                     out += pattern[++i];
                     continue;

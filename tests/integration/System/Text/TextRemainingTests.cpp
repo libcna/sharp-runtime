@@ -539,6 +539,15 @@ TEST(RegexTests, BracesAndBracketsOutsideAQuantifierOrClassAreLiterals) {
     EXPECT_TRUE(Regex("^[{}]+$").IsMatch("{}"));
 }
 
+// AM4-104: the literal-brace rule above must not turn a .NET Unicode category escape, which
+// std::regex cannot express, into a literal: libstdc++ then matched the text "p{Lu}". It is
+// refused, as it was before that rule existed, on every standard library.
+TEST(RegexTests, UnicodeCategoryEscapesAreRefusedRatherThanReadAsLiterals) {
+    EXPECT_THROW(Regex("\\p{Lu}"), RegexParseException);
+    EXPECT_THROW(Regex("^\\P{L}+$"), RegexParseException);
+    EXPECT_THROW(Regex("[a-z]\\p{Nd}"), RegexParseException);
+}
+
 // Match owns a continuation for NextMatch(). It must retain the compiled regex state rather than
 // the Regex object's address, because a Match is valid after the regex that created it is gone.
 // This is also an ASan regression for SR-AUD-245.
