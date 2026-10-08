@@ -861,8 +861,10 @@ namespace System::IO {
                 // A removed inode that reappears under another name in the same scan is one
                 // rename, as inotify's MOVED_FROM/MOVED_TO cookie pair is; its event descriptor
                 // follows the vnode, so it moves with the entry. The filter rules are the Linux
-                // backend's: the old name must match to start a pair, and a pair whose new name
-                // does not match is dropped, while an unpaired half is a Deleted or a Created.
+                // backend's: the old name must match to start a pair, an unpaired half is a
+                // Deleted or a Created, and a pair whose new name does not match is the old
+                // name's Deleted (AM4-127) -- on Linux its IN_MOVED_TO is filtered out, so the
+                // IN_MOVED_FROM is left unpaired and reported as one.
                 std::vector<std::string> renamedOnto;
                 for (auto removedIt = removed.begin(); removedIt != removed.end();) {
                     const auto addedIt = std::find_if(added.begin(), added.end(), [&](const auto& a) {
@@ -875,11 +877,15 @@ namespace System::IO {
                     DarwinWatchedEntry moved = removedIt->second;
                     renamedOnto.push_back(addedIt->first);
                     darwinEntries_[addedIt->first] = moved;
-                    if (enabled_.load() && matchesAnyFilter(filters_, addedIt->first) &&
-                        nameClassAdmits(notifyFilter_, moved.isDirectory)) {
-                        RenamedEventArgs args(WatcherChangeTypes::Renamed, directory_, addedIt->first,
-                                              removedIt->first);
-                        raise(Renamed, args);
+                    if (enabled_.load() && nameClassAdmits(notifyFilter_, moved.isDirectory)) {
+                        if (matchesAnyFilter(filters_, addedIt->first)) {
+                            RenamedEventArgs args(WatcherChangeTypes::Renamed, directory_, addedIt->first,
+                                                  removedIt->first);
+                            raise(Renamed, args);
+                        } else {
+                            FileSystemEventArgs args(WatcherChangeTypes::Deleted, directory_, removedIt->first);
+                            raise(Deleted, args);
+                        }
                     }
                     added.erase(addedIt);
                     removedIt = removed.erase(removedIt);

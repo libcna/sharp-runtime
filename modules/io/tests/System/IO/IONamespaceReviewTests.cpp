@@ -2007,6 +2007,35 @@ TEST_F(WatcherReconfigurationFixture, Decision5b_AppliesToDeletedAndToBothHalves
     w.setEnableRaisingEventsProperty(false);
 }
 
+TEST_F(WatcherReconfigurationFixture, ARenameAcrossTheFilterIsADeletedOrACreated) {
+    // plans/plan_apple_m4.md AM4-127: a rename is reported whole only when both names match the
+    // filter. Renamed out of it, the entry has left what the watcher watches -- inotify leaves the
+    // IN_MOVED_FROM unpaired and reports it as a Deleted -- and renamed into it, it has arrived.
+    const std::filesystem::path dir = root / "rename_across_filter";
+    std::filesystem::create_directories(dir);
+    touchNew(dir / "leaving.txt");
+    touchNew(dir / "arriving.log");
+
+    WatchRecorder r;
+    FileSystemWatcher w(dir.string());
+    w.setFilterProperty("*.txt");
+    subscribeAll(w, r);
+    w.setEnableRaisingEventsProperty(true);
+
+    std::filesystem::rename(dir / "leaving.txt", dir / "leaving.log");
+    std::filesystem::rename(dir / "arriving.log", dir / "arriving.txt");
+    touchNew(dir / "sentinel.txt");
+
+    ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "sentinel.txt"));
+    EXPECT_TRUE(r.sawEvent(WatcherChangeTypes::Deleted, "leaving.txt"));
+    EXPECT_TRUE(r.sawEvent(WatcherChangeTypes::Created, "arriving.txt"));
+    EXPECT_FALSE(r.sawEvent(WatcherChangeTypes::Renamed, "leaving.log"));
+    EXPECT_FALSE(r.sawEvent(WatcherChangeTypes::Renamed, "arriving.txt"));
+    EXPECT_FALSE(r.handlerFailed());
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
 TEST_F(WatcherReconfigurationFixture, ANameOnlyWatcherRaisesNoChanged) {
     // The mirror image of the finding's headline, and unambiguous for exactly the same reason:
     // FileName and DirectoryName describe directory entries, not file content or metadata.
