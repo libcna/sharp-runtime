@@ -67,6 +67,9 @@ cycles, and Apple's linker reports the repetition. They are not compiler warning
     `InternalBufferOverflowException`. Raise the limit (`setrlimit`) to watch larger directories.
   - FIFOs, sockets, devices and symbolic links are never opened (opening a FIFO blocks), so they
     raise no `Changed`; a symbolic link is not followed.
+  - A new entry's own vnode is watched from the scan that reports its `Created`, so a write that
+    lands between its creation and that scan raises no `Changed` of its own (inotify watches the
+    directory for every entry's writes, so Linux reports it). Later writes are reported.
   - A watched directory that can no longer be listed (removed, renamed away, unreadable) raises
     `Error` once instead of reporting its entries as deleted.
   - The directory is re-listed until its timestamps did not move during the listing (AM4-126):
