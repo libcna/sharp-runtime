@@ -6,6 +6,10 @@ name: Component boundaries
 env:
   SHARP_RUNTIME_BUILD_JOBS: "2"
 
+# Read-only: no job writes to the repository, its releases or its packages.
+permissions:
+  contents: read
+
 on:
   push:
   pull_request:
@@ -44,6 +48,11 @@ jobs:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+      # PortableFromCharsLocaleTests (AM4-112) proves a decimal point parses under a comma-decimal
+      # LC_NUMERIC and skips on a host without one; the hosted image has none, and the gate refuses
+      # any skip, so Core.Base failed every run. Generating one lets the test run (AM4-245).
+      - name: Provide a comma-decimal locale
+        run: sudo locale-gen de_DE.UTF-8
       - run: scripts/check_selective_components.sh "${{ matrix.component }}" "${{ matrix.fixture }}"
 
   full:
@@ -59,6 +68,11 @@ jobs:
       - run: sudo sysctl --write net.ipv4.ping_group_range='0 2147483647'
       # local_ci_check includes the production-only Clang -Werror build before its full GCC
       # build/tests, so ticket #37's two-compiler warning contract is exercised on every run.
+      # PortableFromCharsLocaleTests (AM4-112) proves a decimal point parses under a comma-decimal
+      # LC_NUMERIC and skips on a host without one; the hosted image has none, and the gate refuses
+      # any skip, so Core.Base failed every run. Generating one lets the test run (AM4-245).
+      - name: Provide a comma-decimal locale
+        run: sudo locale-gen de_DE.UTF-8
       - name: Full GCC tests and Clang production warnings
         run: scripts/local_ci_check.sh build
 
