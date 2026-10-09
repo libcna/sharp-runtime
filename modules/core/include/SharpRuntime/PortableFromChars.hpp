@@ -32,8 +32,8 @@
 #include <memory>
 #include <new>
 #include <type_traits>
-#if defined(__APPLE__)
 #include <locale.h>
+#if defined(__APPLE__)
 #include <xlocale.h>
 #endif
 
@@ -145,18 +145,40 @@ namespace SharpRuntime
 #if defined(__APPLE__)
         // AM4-112: strtof/strtod follow the process's LC_NUMERIC, so under a comma-decimal locale
         // ("de_DE", "cs_CZ") a host application had set, "1.5" read as 1 -- std::from_chars is
-        // locale-independent. Apple is where this fallback is compiled (libc++ below macOS/iOS 26),
-        // and its xlocale *_l functions parse in an explicit C locale, created once.
+        // locale-independent. Apple is where production reaches this fallback (libc++ below
+        // macOS/iOS 26), and its xlocale *_l functions parse in an explicit C locale, created once.
         static const locale_t cLocale = ::newlocale(LC_ALL_MASK, "C", nullptr);
         if constexpr (std::is_same_v<T, float>)
             parsed = ::strtof_l(buffer, &endPtr, cLocale);
         else
             parsed = static_cast<T>(::strtod_l(buffer, &endPtr, cLocale));
+#elif defined(_WIN32)
+        // AM4-253: the same LC_NUMERIC dependence as on Apple, through the CRT's explicit-locale
+        // parsers.
+        static const _locale_t cLocale = ::_create_locale(LC_NUMERIC, "C");
+        if constexpr (std::is_same_v<T, float>)
+            parsed = ::_strtof_l(buffer, &endPtr, cLocale);
+        else
+            parsed = static_cast<T>(::_strtod_l(buffer, &endPtr, cLocale));
 #else
+        // AM4-253: the same LC_NUMERIC dependence as on Apple, measured on Linux once CI had a
+        // comma-decimal locale to run PortableFromCharsLocaleTests under. POSIX.1-2008's per-thread
+        // locale is what glibc, musl, bionic and Emscripten all offer; the thread's own locale,
+        // and the errno the parse left, are restored before anything else reads them.
+        static const locale_t cLocale = ::newlocale(LC_ALL_MASK, "C", static_cast<locale_t>(0));
+        const locale_t previousLocale =
+            cLocale != static_cast<locale_t>(0) ? ::uselocale(cLocale) : static_cast<locale_t>(0);
+        errno = 0;
         if constexpr (std::is_same_v<T, float>)
             parsed = std::strtof(buffer, &endPtr);
         else
             parsed = static_cast<T>(std::strtod(buffer, &endPtr));
+        if (previousLocale != static_cast<locale_t>(0))
+        {
+            const int parseErrno = errno;
+            ::uselocale(previousLocale);
+            errno = parseErrno;
+        }
 #endif
 
         // Rebase into the caller's range. The consumed count cannot exceed `length`, because the
