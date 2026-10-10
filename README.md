@@ -45,7 +45,7 @@ values.
 
 ## Version
 
-Current release: **0.1.0-beta.1** (pre-release — the public API may still change; see
+Current release: **0.1.0** (pre-1.0 — a minor release may still change the public API; see
 [`CHANGELOG.md`](CHANGELOG.md) for what the release contains and
 [`docs/releasing.md`](docs/releasing.md) for how versions are managed). Compiled code reads its
 own version from `SharpRuntime::getVersionString()` in `SharpRuntime/Version.hpp`, a header the

@@ -9,6 +9,107 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-10-10
+
+The final 0.1.0 release. Compared with `0.1.0-beta.1` it adds the XML serialization and SOAP
+service-model components that the ported XNA samples needed, carries the platform work done for
+Windows/MSVC, Android, Emscripten and macOS on Apple silicon, and fixes the defects those ports
+surfaced.
+
+### Added
+
+- **`Xml.Serialization`** — a new component providing the `XmlSerializer` subset the samples use:
+  primitive lists, enums, inheritance, nested serialization and .NET's missing-member rule,
+  checked against golden fixtures produced by Microsoft's own `XmlSerializer`; plus
+  `IXmlSerializable`, Base64 and BinHex element content, and C# reference members modelled as
+  `std::shared_ptr`.
+- **`ServiceModel`** — a new component: SOAP 1.1 over HTTP (`BasicHttpBinding`) and
+  `ServiceHost`, measured against the original Yacht game service.
+- **XML** — a .NET-faithful `XmlWriter` text form; `XmlReader` navigation, namespaces, line
+  information and settings.
+- **`ComponentModel`** design-time conversion substrate, a real value store for
+  `SerializationInfo`, and `ResourceManager.GetObject` with a binary resource route and an AOT
+  fallback.
+- **Formatting** — custom numeric format strings for `Single` and `Double`, general `TimeSpan`
+  formatting and `TimeSpan` compound assignment.
+- `File.Create`, `File.OpenRead`, `EventHandler::Share`, portable culture identity including the
+  XNA-compatible Australian culture name, and a `Double` alias in `SharpRuntime`.
+- **macOS** — a kqueue `FileSystemWatcher` backend, `NetworkInterface` enumeration, `Ping`,
+  `Process` tree kill, `Environment.ProcessPath`, and `arc4random_buf` entropy for `Guid` and
+  `RandomNumberGenerator`; the test suite builds with Apple clang and libc++.
+- **Android** — package-private storage, host-scoped isolated storage and secure entropy on
+  API 24. **Emscripten** — opt-in threads.
+
+### Fixed
+
+- **`TimeZoneInfo.BaseUtcOffset` and `StandardName` follow .NET's rule for a zone that changes
+  its standard offset.** .NET takes them from the zone's latest standard-time period up to now;
+  the port took the first one of the calendar year. The two agree for every zone whose standard
+  offset holds all year, and tzdata 2026c made them disagree for Morocco, which moved to
+  permanent +00 on 2026-09-20: `Africa/Casablanca` and `Africa/El_Aaiun` now report +00 as .NET
+  does, instead of +01. Of the 487 zones installed on the verification host, those two are the
+  only ones whose reported values change.
+- Floating-point parsing uses the C locale on every platform's `strtod` fallback, not only on
+  Apple's, so a comma-decimal process locale no longer changes results.
+- **Windows** — `FileStream`, `File` and `XmlReader` take UTF-8 paths, including non-ASCII ones;
+  `Environment` uses the wide Win32 calls and reads back what it writes, and a value cleared with
+  `""` no longer stays readable; `Core.Base` links `bcrypt`; MSVC build and consumer-portability
+  fixes.
+- **Standard-library portability** — `Regex` behaves the same on libc++'s strict ECMAScript
+  engine and refuses `\p{...}`; time-zone conversions before 1900 work on Darwin;
+  `ReferenceEqualityComparer` hashes null to 0; `AggregateException`'s null-inner check no
+  longer depends on argument order; public headers conform where GCC was lenient; `Console.hpp`
+  no longer makes `System::Single` ambiguous.
+- **Formatting and collections** — `String.Format` and `Int32.ToString` apply custom numeric
+  formats and stop widening a float; invariant `Single` parsing; `List<T>` accepts element types
+  without equality; `Dictionary` accepts keys that carry `GetHashCode` and enumerates in .NET's
+  order; `DirectoryInfo` resolves path casing.
+- **The vendored tinyxml2 now lives in `SharpRuntime::Vendor::tinyxml2`.** It kept upstream's
+  `::tinyxml2` names, so a program carrying its own tinyxml2 linked two disagreeing definitions
+  of the same classes, which crashed MeshCraft's export.
+
+### Dependency pins
+
+As for `0.1.0-alpha.1`: `vendor/googletest` through its submodule gitlink
+(`7e2c425db2c2e024b2807bfe6d386f4ff068d0d6`), and `vendor/nlohmann` (**3.10.4**),
+`vendor/tinyxml2` (**11.0.0**, now in its own namespace as above) and `vendor/miniz` (**11.3.1**)
+checked in as source. **zlib** remains a system dependency and **tzdata** still decides two
+`TimeZoneInfo` test expectations, so the tag selects neither.
+
+New in this release are two **external test prerequisites**, neither part of this repository,
+without which the zero-skip gate cannot pass: the two live `ServiceModel` tests need the
+original Yacht SOAP service, which `scripts/run_component_tests_with_soap_fixture.py` starts as
+a private copy under Mono on a loopback port, and the five `XnaRealFixtureTests` need the
+official XNA Game Studio samples tree, located by `XNA_SAMPLES_ROOT`
+(`README.md`, `docs/releasing.md`).
+
+### Known limitations
+
+- Everything listed under `0.1.0-alpha.1` still holds: the permanent deviations, UTF-8 storage
+  byte indices, non-uniform platform coverage, and native-`Int128` platforms only.
+- The verified gate is Linux: GCC for the build and the tests, Clang for the production warning
+  gate. The macOS, Windows, Android and Emscripten work above came from those ports and is not
+  covered by this release's gate.
+- GitHub's *Full compatibility build* job has neither the SOAP service nor the XNA samples, so the
+  live `ServiceModel` tests and the `XnaRealFixtureTests` skip there and the zero-skip rule fails
+  that job even when everything else passes. The zero-skip gate is met locally, with both.
+
+### Verification
+
+- **18,136/18,136** tests pass across **41** executables, with 0 failed and 0 skipped — including
+  the two live `ServiceModel` tests against a private copy of the original Yacht SOAP service and
+  the five `XnaRealFixtureTests` against the official XNA samples.
+- The module graph is **44 modules / 109 edges**; all **11** selective component configurations
+  pass with their own tests; **55** negative consumer fixtures reject all **284** sites; the 5
+  test-only seams have one definition each.
+- GCC 14.2.0 builds with **0 warnings and 0 errors**, and Clang 19.1.7 builds all 231 production
+  translation units under `-Werror` with **0 warnings**.
+- The Doxygen no-regression gate passes with **2,674 warnings** against the ceiling of 2,675.
+- Verified on Debian GNU/Linux 13 with GCC 14.2.0, Clang 19.1.7, glibc 2.41, CMake 3.31.6,
+  tzdata **2026c**, zlib 1.3.1, Doxygen 1.9.8 and Mono 6.12.0.199. In the verifying checkout
+  `vendor/googletest` was a plain copy (`GOOGLETEST_VERSION` 1.16.0) rather than an initialised
+  submodule, so its revision was not checked against the gitlink.
+
 ## [0.1.0-beta.1] — 2026-08-22
 
 Sharp Runtime is complete for its currently declared practical subset and enters maintenance
@@ -112,6 +213,7 @@ instead. See [`docs/releasing.md`](docs/releasing.md).
   (`SHARP_RUNTIME_HAS_NATIVE_INT128`); they are absent on MSVC and 32-bit MinGW, which is a
   known, accepted and permanent boundary.
 
-[Unreleased]: https://github.com/openeggbert/sharp-runtime/compare/v0.1.0-beta.1...HEAD
-[0.1.0-beta.1]: https://github.com/openeggbert/sharp-runtime/compare/v0.1.0-alpha.1...v0.1.0-beta.1
-[0.1.0-alpha.1]: https://github.com/openeggbert/sharp-runtime/releases/tag/v0.1.0-alpha.1
+[Unreleased]: https://github.com/libcna/sharp-runtime/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/libcna/sharp-runtime/compare/v0.1.0-beta.1...v0.1.0
+[0.1.0-beta.1]: https://github.com/libcna/sharp-runtime/compare/v0.1.0-alpha.1...v0.1.0-beta.1
+[0.1.0-alpha.1]: https://github.com/libcna/sharp-runtime/releases/tag/v0.1.0-alpha.1

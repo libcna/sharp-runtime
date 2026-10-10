@@ -3,7 +3,7 @@
 
 # Releasing Sharp Runtime
 
-*Current as of 0.1.0-beta.1 (2026-08-22).*
+*Current as of 0.1.0 (2026-10-10).*
 
 Sharp Runtime follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html). A release
 is a git tag plus a `CHANGELOG.md` entry — there is no separate release branch, and nothing is
@@ -16,11 +16,11 @@ The version is decided in exactly **one** place:
 ```cmake
 # CMakeLists.txt (repository root)
 project(SHARP_RUNTIME VERSION 0.1.0 LANGUAGES CXX C)
-set(SHARP_RUNTIME_VERSION_PRERELEASE "beta.1")   # empty on a final release
+set(SHARP_RUNTIME_VERSION_PRERELEASE "")   # e.g. "beta.1"; empty on a final release
 ```
 
 `project(VERSION …)` accepts numeric components only, so the pre-release identifier sits beside
-it and the two are joined into `SHARP_RUNTIME_VERSION_STRING` (`0.1.0-beta.1`).
+it and the two are joined into `SHARP_RUNTIME_VERSION_STRING` (`0.1.0`, or `0.2.0-beta.1`).
 `SHARP_RUNTIME_VERSION_PRERELEASE` is deliberately a normal variable and not a cache entry: a
 cached copy would keep an existing build directory reporting the previous release after a bump.
 
@@ -102,20 +102,29 @@ commit hash. Tagging is therefore worth doing before a downstream release, not a
 
    ```bash
    cmake -S . -B build
-   cmake --build build --parallel 2
-   scripts/run_component_tests.sh build
+   XNA_SAMPLES_ROOT=/rv/data/library/XNAGameStudio/Samples \
+   python3 scripts/run_component_tests_with_soap_fixture.py \
+       /rv/tmp/samples/SAMPLE-071-Yacht_4_0/xna4-build/bin build --local-ci
    ```
 
    The configure banner prints `-- Sharp Runtime: version <x.y.z>` — check it matches. The gate
-   must be **zero warnings, zero errors** and show no test-count regression against the baseline
-   recorded in `CLAUDE.md`; `scripts/local_ci_check.sh` runs the same checks plus the module
-   boundary, seam and negative-fixture validators.
+   must be **zero warnings, zero errors, zero skips** and show no test-count regression against
+   the baseline recorded in `CLAUDE.md`. The command runs `scripts/local_ci_check.sh` — the
+   module boundary, seam and negative-fixture validators, the Clang production warning gate, the
+   GCC build, every test, the Doxygen ceiling and the selective-component matrix — with a private
+   copy of the original Yacht SOAP service, without which the two live `ServiceModel` tests skip
+   and the zero-skip rule fails. `XNA_SAMPLES_ROOT` points the five `XnaRealFixtureTests` at the
+   official XNA Game Studio samples; their built-in default, `/rv/tmp/XNAGameStudio/Samples`, no
+   longer exists on this machine, and without the tree they skip too. Both are external test
+   prerequisites (`README.md`);
+   GitHub's *Full compatibility build* job has no such service, so it reports exactly those two
+   skips and cannot stand in for this step.
 5. **Commit** the version-bearing files by explicit name (`CMakeLists.txt`, `Doxyfile`,
    `CHANGELOG.md`), never `git add -A`.
 6. **Tag** with a `v` prefix and an annotated tag:
 
    ```bash
-   git tag -a v0.1.0-beta.1 -m "Sharp Runtime 0.1.0-beta.1"
+   git tag -a v0.1.0 -m "Sharp Runtime 0.1.0"
    ```
 
    The tag string carries the `v`; `SHARP_RUNTIME_VERSION_STRING` never does.
@@ -124,7 +133,7 @@ commit hash. Tagging is therefore worth doing before a downstream release, not a
 
    ```bash
    git push origin <branch>
-   git push origin v0.1.0-beta.1
+   git push origin v0.1.0
    ```
 8. **Open the next cycle** by adding an empty `## [Unreleased]` section back to `CHANGELOG.md` if
    step 2 consumed it.
