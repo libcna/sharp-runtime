@@ -91,14 +91,12 @@ namespace System::detail {
     };
 
     /**
-     * @brief Samples the currently selected zone at the UTC instant @p year-@p month-15 12:00.
+     * @brief Samples the currently selected zone at the UTC instant @p instant.
      *
-     * Midday on the 15th is used rather than midnight on the 1st so that no sample can land on
-     * a transition instant in any installed zone. Callers must already hold
-     * processTimeZoneMutex() and have selected the zone they mean to sample.
+     * Callers must already hold processTimeZoneMutex() and have selected the zone they mean to
+     * sample.
      */
-    inline ZoneSample sampleZoneAtMonth(int year, int month) {
-        time_t instant = static_cast<time_t>(utcSecondsFromCivil(year, month + 1, 15, 12, 0, 0));
+    inline ZoneSample sampleZoneAt(time_t instant) {
         struct tm local {};
         localtime_r(&instant, &local);
         ZoneSample s;
@@ -106,6 +104,17 @@ namespace System::detail {
         s.isDaylight       = local.tm_isdst > 0;
         s.abbreviation     = local.tm_zone ? local.tm_zone : "";
         return s;
+    }
+
+    /**
+     * @brief Samples the currently selected zone at the UTC instant @p year-@p month-15 12:00.
+     *
+     * Midday on the 15th is used rather than midnight on the 1st so that no sample can land on
+     * a transition instant in any installed zone. Callers must already hold
+     * processTimeZoneMutex() and have selected the zone they mean to sample.
+     */
+    inline ZoneSample sampleZoneAtMonth(int year, int month) {
+        return sampleZoneAt(static_cast<time_t>(utcSecondsFromCivil(year, month + 1, 15, 12, 0, 0)));
     }
 
     /**
@@ -121,29 +130,33 @@ namespace System::detail {
     /**
      * @brief Derives a zone's standard offset, both abbreviations, and whether it observes DST.
      *
-     * Reading tm_gmtoff and tm_zone at time(nullptr) -- what this component used to do -- makes
-     * BaseUtcOffset, StandardName and DaylightName depend on the month the process happens to
-     * run in. Measured over the 499 TZif zones installed here, 158 observe DST and 141 reported
-     * the wrong base offset on 2026-08-10 alone; the other 17 are southern-hemisphere zones,
-     * which are wrong in January instead.
+     * Reading tm_gmtoff and tm_zone at time(nullptr) alone -- what this component once did --
+     * makes BaseUtcOffset, StandardName and DaylightName depend on the month the process happens
+     * to run in. Measured over the 499 TZif zones installed here, 158 observe DST and 141
+     * reported the wrong base offset on 2026-08-10 alone; the other 17 are southern-hemisphere
+     * zones, which are wrong in January instead. So the zone is sampled across a whole year.
      *
-     * Scanning twelve months of @p year fixes that. The standard values are taken from the
-     * first sample whose tm_isdst is 0, and the fallback below covers a zone the database
-     * marks as on daylight time for every month scanned.
+     * Which year, and which sample wins, follow .NET. TimeZoneInfo.Unix.cs:81-93 walks the
+     * zone's transitions up to DateTime.UtcNow and keeps the offset and abbreviation of the
+     * LAST one that is not daylight time, and the abbreviation of the last one that is. This
+     * samples the twelve months up to @p now (midday on the 15th, oldest first) and then @p now
+     * itself, and lets the most recent standard and daylight samples win in the same way.
      *
-     * Two measurements bound that fallback honestly. First, it is **defensive and currently
-     * unexercised**: not one of the 499 installed zones lacks a standard-time sample in 2025.
-     * Africa/Casablanca comes closest and is why twelve samples are taken rather than the two
-     * this replaces -- both January and July are daylight time there, so a Jan/Jul probe sees
-     * no standard sample at all, while the twelve-month scan finds the Ramadan reversion and
-     * reports +00 instead of +01. Second, where the fallback would apply, "minimum offset
-     * across the year" agrees with "first tm_isdst == 0 sample" for all 499 installed zones,
-     * so it cannot disagree with the primary rule on any zone that exists here.
+     * Taking the first standard sample of the calendar year instead -- what this did until
+     * 2026-10-10 -- agrees with .NET for every zone whose standard offset holds all year, and is
+     * wrong for a zone that changes it. tzdata 2026c moved Morocco to permanent +00 on
+     * 2026-09-20: .NET reports Africa/Casablanca's base offset as +00 from then on, while the
+     * first standard sample of 2026, in January, still said +01.
+     *
+     * A zone that is on daylight time in every sample falls back to the minimum offset seen.
+     * That fallback is defensive: not one of the 499 installed zones lacked a standard-time
+     * sample in 2025, and where it would apply, "minimum offset" agreed with "a tm_isdst == 0
+     * sample" for all of them.
      *
      * Callers must already hold processTimeZoneMutex() and have selected the zone they mean to
      * describe.
      */
-    inline ZoneMetadata describeSelectedZone(int year) {
+    inline ZoneMetadata describeSelectedZone(time_t now) {
         ZoneMetadata meta;
         bool sawStandard = false;
         bool haveExtremes = false;
@@ -151,12 +164,11 @@ namespace System::detail {
         long maximumOffset = 0;
         std::string minimumAbbreviation;
 
-        for (int month = 0; month < 12; ++month) {
-            ZoneSample s = sampleZoneAtMonth(year, month);
+        auto record = [&](const ZoneSample& s) {
             if (s.isDaylight) {
-                meta.observesDaylight = true;
-                if (meta.daylightAbbreviation.empty()) meta.daylightAbbreviation = s.abbreviation;
-            } else if (!sawStandard) {
+                meta.observesDaylight     = true;
+                meta.daylightAbbreviation = s.abbreviation;
+            } else {
                 sawStandard                = true;
                 meta.standardOffsetSeconds = s.utcOffsetSeconds;
                 meta.standardAbbreviation  = s.abbreviation;
@@ -172,10 +184,29 @@ namespace System::detail {
             } else if (s.utcOffsetSeconds > maximumOffset) {
                 maximumOffset = s.utcOffsetSeconds;
             }
+        };
+
+        // The newest month sampled is the latest one whose 15th-midday sample is not after now.
+        struct tm utc {};
+        gmtime_r(&now, &utc);
+        int year  = utc.tm_year + 1900;
+        int month = utc.tm_mon;
+        if (utcSecondsFromCivil(year, month + 1, 15, 12, 0, 0) > static_cast<long long>(now)) {
+            if (--month < 0) { month = 11; --year; }
         }
+        int firstYear  = year;
+        int firstMonth = month - 11;
+        if (firstMonth < 0) { firstMonth += 12; --firstYear; }
+
+        for (int i = 0; i < 12; ++i) {
+            const int m = (firstMonth + i) % 12;
+            const int y = firstYear + (firstMonth + i) / 12;
+            record(sampleZoneAtMonth(y, m));
+        }
+        record(sampleZoneAt(now));
 
         // A zone whose offset varies across the year observes daylight time even where the
-        // database never sets tm_isdst; the Jan/Jul comparison this replaces used the same
+        // database never sets tm_isdst; the Jan/Jul comparison this replaced used the same
         // signal, and dropping it would silently narrow SupportsDaylightSavingTime.
         if (minimumOffset != maximumOffset) meta.observesDaylight = true;
 
@@ -185,16 +216,6 @@ namespace System::detail {
         }
         if (meta.daylightAbbreviation.empty()) meta.daylightAbbreviation = meta.standardAbbreviation;
         return meta;
-    }
-
-    /**
-     * @brief The UTC year of the current instant, used as the year the metadata scan describes.
-     */
-    inline int currentUtcYear() {
-        time_t now = time(nullptr);
-        struct tm utc {};
-        gmtime_r(&now, &utc);
-        return utc.tm_year + 1900;
     }
 
     /**

@@ -78,7 +78,7 @@ const TimeZoneInfo& TimeZoneInfo::Local() {
         return TimeZoneInfo("Local", TimeSpan(0LL), "Local", "Local", "Local", false);
 #else
         std::lock_guard<std::mutex> lock(detail::processTimeZoneMutex());
-        detail::ZoneMetadata meta = detail::describeSelectedZone(detail::currentUtcYear());
+        detail::ZoneMetadata meta = detail::describeSelectedZone(time(nullptr));
         std::string standard = meta.standardAbbreviation.empty() ? std::string("Local")
                                                                  : meta.standardAbbreviation;
         std::string daylight = meta.daylightAbbreviation.empty() ? standard
@@ -331,7 +331,7 @@ std::shared_ptr<TimeZoneInfo> TimeZoneInfo::FindSystemTimeZoneById(const std::st
         std::lock_guard<std::mutex> lock(detail::processTimeZoneMutex());
         detail::ScopedTz restoreTz;      // restores TZ on every path, including an exception
         restoreTz.select(id);
-        meta = detail::describeSelectedZone(detail::currentUtcYear());
+        meta = detail::describeSelectedZone(time(nullptr));
     }
     std::string standard = meta.standardAbbreviation.empty() ? id : meta.standardAbbreviation;
     std::string daylight = meta.daylightAbbreviation.empty() ? standard

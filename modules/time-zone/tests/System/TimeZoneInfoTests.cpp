@@ -1158,8 +1158,15 @@ TEST(TimeZoneInfoTests, BaseUtcOffset_NonWholeHourZonesWithoutDaylight) {
 // Africa/Casablanca is the other negative-DST zone here: it is on the same offset in both
 // January and July, so the two-sample probe this case originally replaced could not see the
 // Ramadan reversion at all. Which of the two offsets tzdata calls "standard" has since moved
-// -- current data marks +01 standard and the reversion daylight -- so the expectation is
+// -- 2018 data marks +01 standard and the reversion daylight -- so the expectation is
 // derived, not written. Ticket #2351.
+//
+// tzdata 2026c then moved Morocco to permanent +00 on 2026-09-20, so the zone CHANGES its
+// standard offset within a year. .NET reports the latest one (+00 from that day on), and
+// the port reported the first one of the calendar year (+01) until it adopted the same rule.
+// The last daylight sample, the Ramadan reversion of 2026, is +00 too, so "standard differs
+// from daylight" and "observes daylight time" are tzdata facts that now hold only while the
+// oracle's trailing year shows them; they are asserted on that condition.
 TEST(TimeZoneInfoTests, BaseUtcOffset_AllYearDaylightZoneUsesItsStandardReversion) {
 #if defined(_WIN32) || defined(__EMSCRIPTEN__)
     GTEST_SKIP() << "the independent oracle uses POSIX tzdata";
@@ -1171,9 +1178,11 @@ TEST(TimeZoneInfoTests, BaseUtcOffset_AllYearDaylightZoneUsesItsStandardReversio
 
     EXPECT_EQ(offsetMinutes(*tz), oracle.standardOffsetMinutes);
     EXPECT_EQ(tz->getStandardNameProperty(), oracle.standardAbbrev);
-    EXPECT_TRUE(tz->getSupportsDaylightSavingTimeProperty());
     if (oracle.observesDaylight) {
-        EXPECT_NE(offsetMinutes(*tz), oracle.daylightOffsetMinutes);
+        EXPECT_TRUE(tz->getSupportsDaylightSavingTimeProperty());
+        if (oracle.daylightOffsetMinutes != oracle.standardOffsetMinutes) {
+            EXPECT_NE(offsetMinutes(*tz), oracle.daylightOffsetMinutes);
+        }
     }
 #endif
 }
