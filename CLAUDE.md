@@ -6,14 +6,25 @@
 
 ---
 
-## Human ownership of future C++ development
+## Maintainer ownership and AI implementation authority
 
-The maintainer intends to write, review, and commit future C++ implementation changes personally.
-AI is a consultant for code reading, design alternatives, .NET reference checks, test ideas,
-profiling interpretation, and review. It must not author implementation patches or silently
-change tickets in routine future work. A direct, task-specific instruction from the maintainer
-may authorize an exception, as it does for the isolated 2026-09-30 handoff branch.
-See `docs/HumanDevelopmentHandoff-2026-09-30.md` for the takeover workflow.
+The maintainer owns the project and determines the scope of work. AI agents may author and
+modify sharp-runtime implementation code, tests, build configuration, and related documentation
+when carrying out a user-assigned task. This authorization also covers necessary sharp-runtime
+fixes discovered while carrying out an assigned task in a consumer such as CNA or mobile-eggbert,
+provided the agent has access to this repository. No separate permission to edit sharp-runtime
+is required for those fixes.
+
+Agents must establish the problem, keep changes within the assigned task and its necessary
+dependencies, validate the result, and report the changes and any public API or ABI impact.
+Discovering an unrelated issue does not authorize unrelated rewrites, new features, or silent
+ticket changes outside the assigned scope. Authorization to edit sharp-runtime does not by
+itself authorize edits to other repositories or commit, push, merge, or tag operations; the
+applicable user instructions, repository rules, and standing approvals govern those actions.
+All technical quality, compatibility, and build-resource rules below remain binding.
+
+This policy supersedes the AI-consultant-only guidance in
+`docs/HumanDevelopmentHandoff-2026-09-30.md`; that document remains a historical handoff record.
 
 ## Non-negotiable rules
 
