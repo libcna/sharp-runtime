@@ -154,6 +154,20 @@ TEST(TypeConverterTests, BaseSupportsStringsAndInstanceDescriptorsOnly) {
     EXPECT_THROW((void)converter.ConvertFrom(std::any(std::string("42"))), System::NotSupportedException);
 }
 
+// The message names the converter and the value's type as a reader writes them, not as the Itanium ABI mangles them.
+TEST(TypeConverterTests, RefusalNamesTheTypesReadably) {
+    const TypeConverter converter;
+    try {
+        (void)converter.ConvertFrom(std::any(std::string("42")));
+        FAIL() << "ConvertFrom a string should have been refused";
+    } catch (const System::NotSupportedException& e) {
+        const std::string message = e.what();
+        EXPECT_NE(message.find("TypeConverter cannot convert from "), std::string::npos) << message;
+        EXPECT_EQ(message.find("N6System"), std::string::npos) << message;
+        EXPECT_EQ(message.find("NSt7"), std::string::npos) << message;
+    }
+}
+
 TEST(TypeConverterTests, NumericStringHelpersPropagateCulture) {
     const System::ComponentModel::SingleConverter converter;
     EXPECT_TRUE(converter.CanConvertFrom(System::Type::From<std::string>()));

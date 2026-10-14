@@ -3,6 +3,11 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/ComponentModel/detail/ObjectText.hpp"
 
+#include <cstdlib>
+#if defined(__GNUC__) || defined(__clang__)
+#include <cxxabi.h>
+#endif
+
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Byte.hpp"
 #include "System/Double.hpp"
@@ -39,7 +44,21 @@ std::optional<std::string> ObjectText::AsString(const std::any& value) {
 
 std::string ObjectText::TypeName(const std::any& value) {
     if (!value.has_value()) return "(null)";
-    return System::Type::FromTypeInfo(value.type()).getFullNameProperty();
+    return TypeName(value.type());
+}
+
+std::string ObjectText::TypeName(const std::type_info& info) {
+#if defined(__GNUC__) || defined(__clang__)
+    int status = 0;
+    char* demangled = abi::__cxa_demangle(info.name(), nullptr, nullptr, &status);
+    if (status == 0 && demangled != nullptr) {
+        std::string name(demangled);
+        std::free(demangled);
+        return name;
+    }
+    std::free(demangled);
+#endif
+    return info.name();
 }
 
 std::string ObjectText::ToString(const std::any& value,

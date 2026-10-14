@@ -18,7 +18,7 @@ using System::ComponentModel::Design::Serialization::InstanceDescriptor;
 namespace {
 
 std::string converterName(const TypeConverter& converter) {
-    return System::Type::FromTypeInfo(typeid(converter)).getNameProperty();
+    return detail::ObjectText::TypeName(typeid(converter));
 }
 
 } // namespace

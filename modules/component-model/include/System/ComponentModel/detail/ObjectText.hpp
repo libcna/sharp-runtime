@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <any>
+#include <typeinfo>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -47,6 +48,16 @@ struct ObjectText {
      * The spelling .NET's converter exceptions use (`SR.ToStringNull`).
      */
     [[nodiscard]] static std::string TypeName(const std::any& value);
+
+    /**
+     * @brief A C++ type's name as a reader would write it, namespaces included.
+     *
+     * `std::type_info::name()` is mangled on the Itanium ABI (`N9Microsoft3Xna...E`); this is that name
+     * demangled, so a converter's exception reads `Microsoft::Xna::Framework::Design::BoundingBoxConverter
+     * cannot convert from std::__cxx11::basic_string<...>`. Where the compiler's name is already
+     * readable (MSVC) or cannot be demangled, it is returned unchanged.
+     */
+    [[nodiscard]] static std::string TypeName(const std::type_info& info);
 
     /**
      * @brief `object.ToString()` for a boxed value, with a culture for the formattable ones.
