@@ -170,7 +170,14 @@ namespace System::IO
             throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
         if (count == 0) return 0;
         file_.read(reinterpret_cast<char*>(buffer + offset), count);
-        return static_cast<intcs>(file_.gcount());
+        const intcs bytesRead = static_cast<intcs>(file_.gcount());
+        // .NET OSFileStreamStrategy.cs:220-223 advances by the actual read count;
+        // a short EOF read does not poison position, relative seeks or later writes.
+        // fstream adds failbit with eofbit for that benign short read. Clear only
+        // this EOF state, never badbit or a failure unrelated to end-of-file.
+        if (file_.eof() && !file_.bad())
+            file_.clear(file_.rdstate() & ~(std::ios::eofbit | std::ios::failbit));
+        return bytesRead;
     }
 
     void FileStream::Write(const bytecs buffer[], intcs offset, intcs count)

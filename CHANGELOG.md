@@ -9,6 +9,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the
 
 ## [Unreleased]
 
+### Fixed
+
+- FileStream retains its real position after short/empty EOF reads, so relative
+  seeks and subsequent writes work instead of consuming a native failure sentinel.
+  See [migration details](docs/Migration-FileStream-EOF.md) (CNA-DEMOS-ISSUE-056).
+
 ## [0.1.0] — 2026-10-10
 
 The final 0.1.0 release. Compared with `0.1.0-beta.1` it adds the XML serialization and SOAP
