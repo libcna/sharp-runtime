@@ -2027,8 +2027,11 @@ TEST_F(WatcherReconfigurationFixture, ARenameAcrossTheFilterIsADeletedOrACreated
     touchNew(dir / "sentinel.txt");
 
     ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "sentinel.txt"));
-    EXPECT_TRUE(r.sawEvent(WatcherChangeTypes::Deleted, "leaving.txt"));
-    EXPECT_TRUE(r.sawEvent(WatcherChangeTypes::Created, "arriving.txt"));
+    // The sentinel is not a dispatch barrier: an unmatched MOVED_FROM is emitted
+    // after the read batch, which may already have delivered the sentinel callback.
+    // Wait for the required events themselves, without assuming their ordering.
+    ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Deleted, "leaving.txt"));
+    ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "arriving.txt"));
     EXPECT_FALSE(r.sawEvent(WatcherChangeTypes::Renamed, "leaving.log"));
     EXPECT_FALSE(r.sawEvent(WatcherChangeTypes::Renamed, "arriving.txt"));
     EXPECT_FALSE(r.handlerFailed());
