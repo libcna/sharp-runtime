@@ -716,9 +716,9 @@ TEST(XmlWriterValidationTests, Fix2349_NonCharCodePointsAreRejected) {
         EXPECT_THROW(w->WriteProcessingInstruction("pi", "x\x01y"), System::ArgumentException);
     }
 
-    // The exception is .NET's ArgumentException with its text, NOT this door's XmlException --
-    // the NUL guard keeps XmlException because it is this port's own truncation check (#2085),
-    // while this one transcribes XmlConvert.CreateInvalidCharException (XmlConvert.cs:1614-1622).
+    // The exception is .NET's ArgumentException with its text. ISSUE-147 also aligns the
+    // NUL guard with this category; both follow XmlConvert.CreateInvalidCharException
+    // (local .NET 11 XmlConvert.cs:1624-1627).
     try {
         auto w = NewWriter();
         w->WriteStartElement("e");
