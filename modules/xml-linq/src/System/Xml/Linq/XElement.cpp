@@ -338,7 +338,7 @@ namespace System::Xml::Linq {
         detail::ThrowIfContainsNul(qualifiedName, "XElement::SerializeTo", "element name");
         for (const auto& a : attributes) {
             detail::ThrowIfContainsNul(a.first, "XElement::SerializeTo", "attribute name");
-            detail::ThrowIfContainsNul(a.second, "XElement::SerializeTo", "attribute value");
+            detail::ThrowIfCharacterDataContainsNul(a.second, "XElement::SerializeTo", "attribute value");
         }
 
         // Ticket #2350. The names validated here are exactly the strings ResolveStartTag just

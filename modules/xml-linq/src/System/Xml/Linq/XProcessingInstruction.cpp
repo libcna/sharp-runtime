@@ -33,7 +33,7 @@ namespace System::Xml::Linq {
         (void)System::Xml::XmlConvert::VerifyName(target_);
         // Ticket #2201. The TARGET needs no separate guard -- VerifyName above already rejects a
         // NUL, since it is not an NCName character -- but the DATA had none.
-        detail::ThrowIfContainsNul(data_, "XProcessingInstruction::SerializeTo",
+        detail::ThrowIfCharacterDataContainsNul(data_, "XProcessingInstruction::SerializeTo",
                                    "processing-instruction data");
         if (indent) os << std::string(static_cast<size_t>(depth) * 2, ' ');
         os << "<?" << target_;

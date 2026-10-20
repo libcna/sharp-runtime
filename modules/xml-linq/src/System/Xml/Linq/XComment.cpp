@@ -20,7 +20,7 @@ namespace System::Xml::Linq {
         // signalled it. The sibling WriteTo() door has always inserted the protective space.
         // Ticket #2201: an embedded NUL is emitted rather than protected, and no amount of
         // hyphen protection makes the result readable.
-        detail::ThrowIfContainsNul(value_, "XComment::SerializeTo", "comment text");
+        detail::ThrowIfCharacterDataContainsNul(value_, "XComment::SerializeTo", "comment text");
         if (indent) os << std::string(static_cast<size_t>(depth) * 2, ' ');
         os << "<!--" << System::Xml::detail::SanitizeCommentText(value_) << "-->";
     }

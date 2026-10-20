@@ -33,11 +33,11 @@
 // pinned as such: the PI target and the DOCTYPE name/identifiers, through the name and
 // identifier validators, and XStreamingElement, which routes through XmlWriter.
 //
-// SCOPE. This is the NUL clause and nothing else. Characters outside `Char` OTHER than NUL are
-// still emitted, exactly as before -- both branches are implementable there and this module's own
-// reader accepts them, so that is a XmlWriterSettings::CheckCharacters decision tracked
-// separately. NonNulControlCharacters_StillEmittedByTheDirectDoor below pins that boundary, the
-// mirror of the pin #2085 left at the writer door. This clause also does not impose the XML name
+// SCOPE. These tests cover the NUL clause. Ticket #2349 separately aligned other invalid XML
+// characters with the default .NET writer. CNA-DEMOS-ISSUE-147 now aligns the NUL exception
+// category for character data too: ArgumentException, not XmlException. Genuine Framework 4
+// evidence is retained in cna-demos/docs/repair-evidence/content/XLinqNulOracle.cs.
+// This clause does not impose the XML name
 // grammar on an element or attribute name at the direct door: it rejects a NUL there and nothing
 // more. (Ticket #2350 later did impose that grammar, at the same two doors and with the same
 // boundary -- see XLinqNameValidationTests. The NUL guard still runs FIRST, so every diagnostic
@@ -106,7 +106,7 @@ namespace {
     template <class MakeNode>
     void ExpectEveryNulPositionRejected(MakeNode make) {
         for (const std::string& v : {kLead, kMid, kTail, kOnly}) {
-            EXPECT_THROW((void)direct(*make(v)), XmlException) << "position case len=" << v.size();
+            EXPECT_THROW((void)direct(*make(v)), System::ArgumentException) << "position case len=" << v.size();
         }
     }
 
@@ -121,8 +121,8 @@ TEST(XLinqNulRejectionTests, XText_EveryNulPosition_IsRejected) {
 TEST(XLinqNulRejectionTests, XText_DiagnosticNamesTheDoorAndTheCause) {
     try {
         (void)direct(XText(kMid));
-        FAIL() << "expected XmlException";
-    } catch (const XmlException& e) {
+        FAIL() << "expected System::ArgumentException";
+    } catch (const System::ArgumentException& e) {
         EXPECT_NE(e.getMessageProperty().find("XText::SerializeTo"), std::string::npos)
             << e.getMessageProperty();
         EXPECT_NE(e.getMessageProperty().find("NUL character"), std::string::npos)
@@ -136,8 +136,8 @@ TEST(XLinqNulRejectionTests, XCData_EveryNulPosition_IsRejected) {
     ExpectEveryNulPositionRejected([](const std::string& v) { return std::make_shared<XCData>(v); });
     try {
         (void)direct(XCData(kMid));
-        FAIL() << "expected XmlException";
-    } catch (const XmlException& e) {
+        FAIL() << "expected System::ArgumentException";
+    } catch (const System::ArgumentException& e) {
         EXPECT_NE(e.getMessageProperty().find("XCData::SerializeTo"), std::string::npos)
             << e.getMessageProperty();
     }
@@ -160,11 +160,11 @@ TEST(XLinqNulRejectionTests, XProcessingInstruction_DataIsRejected_TargetAlready
 
 TEST(XLinqNulRejectionTests, XDocumentType_InternalSubsetIsRejected_TheOtherThreeFieldsAlreadyWere) {
     for (const std::string& v : {kLead, kMid, kTail, kOnly})
-        EXPECT_THROW((void)direct(XDocumentType("r", "", "", v)), XmlException) << v.size();
+        EXPECT_THROW((void)direct(XDocumentType("r", "", "", v)), System::ArgumentException) << v.size();
     try {
         (void)direct(XDocumentType("r", "", "", kMid));
-        FAIL() << "expected XmlException";
-    } catch (const XmlException& e) {
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
         EXPECT_NE(e.getMessageProperty().find("internal subset"), std::string::npos)
             << e.getMessageProperty();
     }
@@ -178,12 +178,12 @@ TEST(XLinqNulRejectionTests, XDocumentType_InternalSubsetIsRejected_TheOtherThre
 TEST(XLinqNulRejectionTests, XAttribute_OwnToStringDoor_IsRejected) {
     // XAttribute::ToString() is a direct serializer in its own right -- it is not reached through
     // any XNode::SerializeTo -- so it carries its own guard.
-    EXPECT_THROW((void)XAttribute(XName("a"), kMid).ToString(), XmlException);
+    EXPECT_THROW((void)XAttribute(XName("a"), kMid).ToString(), System::ArgumentException);
     EXPECT_THROW((void)XAttribute(XName(kMid), "v").ToString(), XmlException);
     try {
         (void)XAttribute(XName("a"), kMid).ToString();
-        FAIL() << "expected XmlException";
-    } catch (const XmlException& e) {
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
         EXPECT_NE(e.getMessageProperty().find("XAttribute::ToString"), std::string::npos)
             << e.getMessageProperty();
     }
@@ -219,8 +219,8 @@ TEST(XLinqNulRejectionTests, XElement_StartTagParts_AreRejectedAndNamedSeparatel
         e->Add(std::make_shared<XAttribute>(XName("a"), kMid));
         try {
             (void)direct(*e);
-            FAIL() << "expected XmlException";
-        } catch (const XmlException& ex) {
+            FAIL() << "expected ArgumentException";
+        } catch (const System::ArgumentException& ex) {
             EXPECT_NE(ex.getMessageProperty().find("attribute value"), std::string::npos)
                 << ex.getMessageProperty();
         }
@@ -230,7 +230,20 @@ TEST(XLinqNulRejectionTests, XElement_StartTagParts_AreRejectedAndNamedSeparatel
 TEST(XLinqNulRejectionTests, XElement_TextValue_IsRejectedThroughItsXTextChild) {
     auto e = std::make_shared<XElement>(XName("r"));
     e->setValueProperty(kMid);
-    EXPECT_THROW((void)direct(*e), XmlException);
+    EXPECT_THROW((void)direct(*e), System::ArgumentException);
+}
+
+TEST(XLinqNulRejectionTests, XElement_EmittedNamespaceValueIsCharacterData) {
+    for (const std::string& value : {kLead, kMid, kTail, kOnly}) {
+        XElement element(XName::Get("r", "urn:" + value));
+        std::ostringstream output;
+        output << "PREFIX";
+        EXPECT_THROW(static_cast<const XNode&>(element).SerializeTo(output, 0, false),
+                     System::ArgumentException);
+        EXPECT_EQ(output.str(), "PREFIX");
+    }
+    XElement valid(XName::Get("r", "urn:retained"));
+    EXPECT_NE(direct(valid).find("urn:retained"), std::string::npos);
 }
 
 TEST(XLinqNulRejectionTests, XDeclaration_AllThreeFields_AreRejected) {
@@ -246,7 +259,7 @@ TEST(XLinqNulRejectionTests, XDeclaration_AllThreeFields_AreRejected) {
 TEST(XLinqNulRejectionTests, XStreamingElement_AlreadyRejected_BecauseItRoutesThroughTheWriter) {
     XStreamingElement se(XName("r"));
     se.Add(kMid);
-    EXPECT_THROW((void)se.ToString(SaveOptions::DisableFormatting), XmlException);
+    EXPECT_THROW((void)se.ToString(SaveOptions::DisableFormatting), System::ArgumentException);
 }
 
 // --- the two doors now give the same answer -------------------------------------------------------
@@ -255,14 +268,14 @@ TEST(XLinqNulRejectionTests, BothDoorsRejectTheSameValues) {
     // The mirror image is closed: before, the writer door threw (since #2085) while the direct
     // door emitted. Now neither produces a document.
     for (const std::string& v : {kLead, kMid, kTail}) {
-        EXPECT_THROW((void)direct(XText(v)), XmlException);
-        EXPECT_THROW((void)throughWriter(XText(v)), XmlException);
-        EXPECT_THROW((void)direct(XCData(v)), XmlException);
-        EXPECT_THROW((void)throughWriter(XCData(v)), XmlException);
-        EXPECT_THROW((void)direct(XComment(v)), XmlException);
-        EXPECT_THROW((void)throughWriter(XComment(v)), XmlException);
-        EXPECT_THROW((void)direct(XProcessingInstruction("t", v)), XmlException);
-        EXPECT_THROW((void)throughWriter(XProcessingInstruction("t", v)), XmlException);
+        EXPECT_THROW((void)direct(XText(v)), System::ArgumentException);
+        EXPECT_THROW((void)throughWriter(XText(v)), System::ArgumentException);
+        EXPECT_THROW((void)direct(XCData(v)), System::ArgumentException);
+        EXPECT_THROW((void)throughWriter(XCData(v)), System::ArgumentException);
+        EXPECT_THROW((void)direct(XComment(v)), System::ArgumentException);
+        EXPECT_THROW((void)throughWriter(XComment(v)), System::ArgumentException);
+        EXPECT_THROW((void)direct(XProcessingInstruction("t", v)), System::ArgumentException);
+        EXPECT_THROW((void)throughWriter(XProcessingInstruction("t", v)), System::ArgumentException);
     }
 }
 
@@ -273,12 +286,12 @@ TEST(XLinqNulRejectionTests, TheGuardAppliesThroughTheDocumentAndFileDoors) {
     auto root = std::make_shared<XElement>(XName("r"));
     root->Add(std::make_shared<XText>(kMid));
     doc->Add(root);
-    EXPECT_THROW((void)doc->ToString(SaveOptions::DisableFormatting), XmlException);
-    EXPECT_THROW((void)doc->ToString(), XmlException);
+    EXPECT_THROW((void)doc->ToString(SaveOptions::DisableFormatting), System::ArgumentException);
+    EXPECT_THROW((void)doc->ToString(), System::ArgumentException);
 
     SharpRuntime::Tests::TestTemporaryDirectory temporary;
     const std::string path = temporary.path("nul-save.xml");
-    EXPECT_THROW(doc->Save(path, SaveOptions::DisableFormatting), XmlException);
+    EXPECT_THROW(doc->Save(path, SaveOptions::DisableFormatting), System::ArgumentException);
     // The file may exist and hold the partial prefix written before the offending child was
     // reached -- that is unchanged by this ticket and is how every mid-stream rejection in this
     // component behaves. What must NOT happen is a completed file carrying a NUL.
@@ -299,7 +312,7 @@ TEST(XLinqNulRejectionTests, ARejectedStartTagWritesNothingToTheStream) {
     os << "PREFIX";
     auto e = std::make_shared<XElement>(XName("r"));
     e->Add(std::make_shared<XAttribute>(XName("a"), kMid));
-    EXPECT_THROW(static_cast<const XNode&>(*e).SerializeTo(os, 0, false), XmlException);
+    EXPECT_THROW(static_cast<const XNode&>(*e).SerializeTo(os, 0, false), System::ArgumentException);
     EXPECT_EQ(os.str(), "PREFIX");
 }
 

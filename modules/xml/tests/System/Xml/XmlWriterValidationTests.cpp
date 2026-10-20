@@ -579,25 +579,28 @@ TEST(XmlWriterValidationTests, CreateDocumentType_ReDelimitsAndLeavesValidInputU
 // ===========================================================================
 
 TEST(XmlWriterValidationTests, EveryContentDoor_EmbeddedNul_Throws) {
+    // CNA-DEMOS-ISSUE-147: genuine Framework4, 21/21 checks in
+    // cna-demos/docs/repair-evidence/content/XmlWriterNulOracle.cs, confirms
+    // ArgumentException at all seven doors with the default character validation.
     // All six measured doors, including the two the finding did not name (WriteComment and
     // WriteProcessingInstruction) and WriteElementString, which inherits WriteString's guard.
     const std::string embedded("a\0b", 3);
     const std::string leading("\0ab", 3);
     for (const std::string& v : {embedded, leading}) {
         { auto w = NewWriter(); w->WriteStartElement("e");
-          EXPECT_THROW(w->WriteString(v), XmlException); }
+          EXPECT_THROW(w->WriteString(v), ArgumentException); }
         { auto w = NewWriter(); w->WriteStartElement("e");
-          EXPECT_THROW(w->WriteAttributeString("a", v), XmlException); }
+          EXPECT_THROW(w->WriteAttributeString("a", v), ArgumentException); }
         { auto w = NewWriter(); w->WriteStartElement("e");
-          EXPECT_THROW(w->WriteCData(v), XmlException); }
+          EXPECT_THROW(w->WriteCData(v), ArgumentException); }
         { auto w = NewWriter(); w->WriteStartElement("e");
-          EXPECT_THROW(w->WriteComment(v), XmlException); }
+          EXPECT_THROW(w->WriteComment(v), ArgumentException); }
         { auto w = NewWriter(); w->WriteStartElement("e");
-          EXPECT_THROW(w->WriteProcessingInstruction("p", v), XmlException); }
+          EXPECT_THROW(w->WriteProcessingInstruction("p", v), ArgumentException); }
         { auto w = NewWriter();
-          EXPECT_THROW(w->WriteElementString("e", v), XmlException); }
+          EXPECT_THROW(w->WriteElementString("e", v), ArgumentException); }
         { auto w = NewWriter(); w->WriteStartElement("e");
-          EXPECT_THROW(w->WriteDocType("r", "", "", v), XmlException); }
+          EXPECT_THROW(w->WriteDocType("r", "", "", v), ArgumentException); }
     }
 }
 
@@ -607,12 +610,35 @@ TEST(XmlWriterValidationTests, NulDiagnostic_NamesTheDoorAndTheCause) {
     w->WriteStartElement("e");
     try {
         w->WriteCData(std::string("c\0d", 3));
-        FAIL() << "expected XmlException";
-    } catch (const XmlException& e) {
+        FAIL() << "expected ArgumentException";
+    } catch (const ArgumentException& e) {
         EXPECT_NE(e.getMessageProperty().find("WriteCData"), std::string::npos)
             << e.getMessageProperty();
         EXPECT_NE(e.getMessageProperty().find("NUL"), std::string::npos)
             << e.getMessageProperty();
+    }
+}
+
+TEST(XmlWriterValidationTests, EmbeddedNulRejectionPreservesExistingContent) {
+    const std::string value("before\0after", 12);
+    for (int door = 0; door < 6; ++door) {
+        SCOPED_TRACE(door);
+        auto w = NewWriter();
+        w->WriteStartElement("root");
+        w->WriteAttributeString("seed", "retained");
+        const std::string original = w->ToString();
+        auto write = [&] {
+            switch (door) {
+            case 0: w->WriteString(value); break;
+            case 1: w->WriteAttributeString("new", value); break;
+            case 2: w->WriteCData(value); break;
+            case 3: w->WriteComment(value); break;
+            case 4: w->WriteProcessingInstruction("p", value); break;
+            case 5: w->WriteDocType("r", "", "", value); break;
+            }
+        };
+        EXPECT_THROW(write(), ArgumentException);
+        EXPECT_EQ(w->ToString(), original);
     }
 }
 

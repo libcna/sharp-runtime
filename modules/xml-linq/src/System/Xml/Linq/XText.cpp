@@ -22,7 +22,7 @@ namespace System::Xml::Linq {
         // has no const char* boundary and EMITTED the NUL instead, so a 3-byte value serialised
         // to 3 bytes that this runtime's own reader then rejects with XML_ERROR_PARSING_TEXT.
         // Both doors now give the same answer, using the same single detector.
-        detail::ThrowIfContainsNul(text_, "XText::SerializeTo", "text");
+        detail::ThrowIfCharacterDataContainsNul(text_, "XText::SerializeTo", "text");
         os << EscapeText(text_);
     }
 

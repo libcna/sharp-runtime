@@ -71,4 +71,22 @@ namespace System::Xml::Linq::detail {
         }
     }
 
+    /**
+     * @brief Validate character data before a direct serializer mutates its output.
+     * @throws System::ArgumentException for NUL or another invalid XML character.
+     * XML names and declaration metadata retain their separate validation contract.
+     */
+    inline void ThrowIfCharacterDataContainsNul(const std::string& text, const char* member,
+                                               const char* what) {
+        // Genuine Framework 4 and .NET's default LINQ writer use ArgumentException
+        // for invalid character data, including U+0000. XNode.cs:689-718 and
+        // XStreamingElement.cs:226-246 (local .NET 11 reference) use default
+        // XmlWriterSettings, hence CheckCharacters=true.
+        if (System::Xml::detail::ContainsNul(text))
+            throw System::ArgumentException(std::string(member) + ": the " + what +
+                                            " contains a NUL character, which cannot be "
+                                            "represented in XML.");
+        ThrowIfContainsNul(text, member, what);
+    }
+
 } // namespace System::Xml::Linq::detail

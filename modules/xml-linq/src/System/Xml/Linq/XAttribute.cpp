@@ -113,7 +113,7 @@ namespace System::Xml::Linq {
         // emitted as part of its element, is guarded in XElement::SerializeElementTo.
         detail::ThrowIfContainsNul(local, "XAttribute::ToString", "attribute name");
         detail::ThrowIfContainsNul(uri, "XAttribute::ToString", "attribute namespace name");
-        detail::ThrowIfContainsNul(value_, "XAttribute::ToString", "attribute value");
+        detail::ThrowIfCharacterDataContainsNul(value_, "XAttribute::ToString", "attribute value");
 
         // Ticket #2350. The emitted name is built first so it can be validated as the single
         // string this door actually writes -- which is NOT always the local name: a declaration

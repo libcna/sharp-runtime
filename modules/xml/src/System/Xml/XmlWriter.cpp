@@ -59,7 +59,7 @@ struct XmlWriterState {
 /// rejected unconditionally while the other non-Char characters are a separate decision.
 static void ThrowIfContainsNul(const std::string& text, const char* member, const char* what) {
     if (detail::ContainsNul(text))
-        throw XmlException(std::string("XmlWriter::") + member + ": the " + what +
+        throw System::ArgumentException(std::string("XmlWriter::") + member + ": the " + what +
                            " contains a NUL character, which cannot be represented in XML.");
 
     // Ticket #2349. The other characters outside the XML 1.0 Char production were emitted RAW,
@@ -67,9 +67,11 @@ static void ThrowIfContainsNul(const std::string& text, const char* member, cons
     // XmlWriterSettings.CheckCharacters is set, which it is by default
     // (XmlWriterSettings.cs:513; XmlEncodedRawTextWriter.cs:1630-1654). The exception TYPE is
     // .NET's ArgumentException rather than this door's XmlException, because that is what
-    // XmlConvert.CreateInvalidCharException produces (XmlConvert.cs:1614-1622) -- the NUL case
-    // above keeps XmlException because it is this port's own truncation guard (#2085), not a
-    // transcription of a .NET check.
+    // XmlConvert.CreateInvalidCharException produces (XmlConvert.cs:1624-1627). The NUL
+    // guard uses that same category: XmlEncodedRawTextWriter.cs:1631-1655 does not exempt
+    // U+0000. Genuine Framework4 and .NET8 both confirm all seven public content doors.
+    // This port still rejects NUL unconditionally to prevent tinyxml2 truncation; this
+    // category repair does not implement CheckCharacters=false's literal-NUL mode.
     const std::size_t bad = detail::FindNonCharCodePoint(text);
     if (bad != std::string::npos) {
         std::uint32_t cp = 0;

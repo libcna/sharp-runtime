@@ -21,7 +21,7 @@ namespace System::Xml::Linq {
         // has always split the section. Both doors now share one definition of the split.
         // Ticket #2201. XCData derives from XText but overrides SerializeTo, so it needs its
         // own guard: the base class's never runs for a CDATA node.
-        detail::ThrowIfContainsNul(getValueProperty(), "XCData::SerializeTo", "CDATA section text");
+        detail::ThrowIfCharacterDataContainsNul(getValueProperty(), "XCData::SerializeTo", "CDATA section text");
         os << "<![CDATA[" << System::Xml::detail::SanitizeCDataText(getValueProperty()) << "]]>";
     }
 

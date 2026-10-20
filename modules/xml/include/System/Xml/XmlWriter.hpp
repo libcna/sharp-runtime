@@ -20,6 +20,10 @@ namespace System::Xml {
      * serialized XML, or @c Close() to write it to the file supplied to @c Create().
      *
      * Partial C++ counterpart of .NET System.Xml.XmlWriter.
+     * Content writes reject embedded NUL with System::ArgumentException before
+     * passing text to the native DOM. This port still rejects NUL when
+     * XmlWriterSettings::CheckCharacters is false: the substrate cannot retain
+     * literal NUL. No truncated document is silently accepted.
      *
      * @note Status: IMPLEMENTED — backed by vendored tinyxml2.
      */
@@ -93,6 +97,7 @@ namespace System::Xml {
          * @brief Writes a text node as child of the current element.
          *
          * @param text  Text content (will be XML-escaped).
+         * @throws System::ArgumentException if text contains NUL or another invalid XML character.
          */
         void WriteString(const std::string& text);
 
