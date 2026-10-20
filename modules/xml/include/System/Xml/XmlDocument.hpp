@@ -151,7 +151,12 @@ namespace System::Xml {
 
         /** @brief Loads and parses the XML document at @p filename. @throws XmlException on parse error. */
         void Load(const std::string& filename);
-        /** @brief Parses @p xml as the document content. @throws XmlException on parse error. */
+        /**
+         * @brief Parses @p xml as XML character content.
+         * A leading U+FEFF is invalid root content, not a byte encoding preamble.
+         * @param xml The document's character text.
+         * @throws XmlException on invalid content, including a leading U+FEFF.
+         */
         void LoadXml(const std::string& xml);
         /** @brief Saves the document to @p filename. */
         void Save(const std::string& filename) const;

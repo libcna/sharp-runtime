@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Xml/XmlReader.hpp"
+#include "XmlCharacterInput.hpp"
 
 #include <cstdio>
 
@@ -61,6 +62,7 @@ struct XmlReaderState {
     int                                pos       = -1;  // before first Read()
     int                                attrIndex = -1;  // attribute cursor (-1 = on element)
     ReadState                          readState = ReadState::Initial;
+    bool                               characterPreamble = false;
     // ReadContentAsBase64 may be called repeatedly to drain one text node in chunks, so how
     // far it has drained has to survive between calls. Keyed on the event it was draining;
     // moving to another node starts over.
@@ -314,6 +316,13 @@ bool XmlReader::Read() {
     // but one overwrote ReadState::Closed with ReadState::Interactive, so a closed reader
     // both kept traversing and stopped reporting itself as closed.
     if (isClosed(state_.get())) return false;
+    if (state_->readState == ReadState::Error) return false;
+    if (state_->characterPreamble) {
+        // Like a .NET character reader, creation succeeds and the first read
+        // reports invalid root content. Close before reading suppresses the fault.
+        state_->readState = ReadState::Error;
+        detail::ThrowCharacterPreambleError();
+    }
     state_->attrIndex = -1;
     ++state_->pos;
     if (state_->pos >= static_cast<int>(state_->events.size())) {
@@ -620,7 +629,6 @@ namespace {
 }
 
 XmlReader* XmlReader::Create(const std::string& inputUri) {
-    auto st = std::make_unique<XmlReaderState>();
     // Heuristic: treat as file path if it ends with .xml or contains a path separator --
     // UNLESS the (whitespace-trimmed) input starts with '<', which is an unambiguous, much
     // stronger signal that this is XML content rather than a path (a file path essentially
@@ -631,15 +639,18 @@ XmlReader* XmlReader::Create(const std::string& inputUri) {
     // perfectly valid XML text.
     std::size_t firstNonSpace = inputUri.find_first_not_of(" \t\r\n");
     bool looksLikeContent = firstNonSpace != std::string::npos && inputUri[firstNonSpace] == '<';
+    if (detail::HasCharacterPreamble(inputUri)) {
+        const auto afterPreamble = inputUri.find_first_not_of(" \t\r\n", 3);
+        looksLikeContent = afterPreamble != std::string::npos && inputUri[afterPreamble] == '<';
+    }
     bool isFile = !looksLikeContent &&
                   (inputUri.find('/') != std::string::npos ||
                    inputUri.find('\\') != std::string::npos ||
                    (inputUri.size() >= 4 &&
                     inputUri.substr(inputUri.size() - 4) == ".xml"));
-    if (isFile)
-        loadXmlFile(st->doc, inputUri);
-    else
-        st->doc.Parse(inputUri.c_str());
+    if (!isFile) return CreateFromString(inputUri);
+    auto st = std::make_unique<XmlReaderState>();
+    loadXmlFile(st->doc, inputUri);
     return createFromDoc(std::move(st));
 }
 
@@ -651,7 +662,8 @@ XmlReader* XmlReader::Create(const std::string& inputUri, const XmlReaderSetting
 
 XmlReader* XmlReader::CreateFromString(const std::string& xmlContent) {
     auto st = std::make_unique<XmlReaderState>();
-    st->doc.Parse(xmlContent.c_str());
+    st->characterPreamble = detail::HasCharacterPreamble(xmlContent);
+    if (!st->characterPreamble) st->doc.Parse(xmlContent.c_str());
     return createFromDoc(std::move(st));
 }
 

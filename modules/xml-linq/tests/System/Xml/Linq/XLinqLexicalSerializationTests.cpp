@@ -32,6 +32,7 @@
 // apart again: they now share one definition, in System/Xml/detail/XmlLexicalSanitizer.hpp.
 
 #include <gtest/gtest.h>
+#include <fstream>
 #include <memory>
 #include <string>
 
@@ -55,6 +56,30 @@ using System::Xml::Linq::XName;
 using System::Xml::Linq::XNode;
 using System::Xml::Linq::XProcessingInstruction;
 using System::Xml::Linq::XText;
+
+TEST(XLinqCharacterInputTests, ParseRejectsCharacterPreamble) {
+    const std::string input = "\xEF\xBB\xBF<r/>";
+    EXPECT_THROW((void)XDocument::Parse(input), System::Xml::XmlException);
+    EXPECT_THROW((void)XElement::Parse(input), System::Xml::XmlException);
+    auto element = XElement::Parse("<r>\xEF\xBB\xBF</r>");
+    EXPECT_EQ(element->getValueProperty(), "\xEF\xBB\xBF");
+}
+
+TEST(XLinqCharacterInputTests, LoadAcceptsEncodedFilePreamble) {
+    SharpRuntime::Tests::TestTemporaryDirectory temporary;
+    const std::string path = temporary.path("preamble.xml");
+    {
+        std::ofstream file(path, std::ios::binary);
+        file << "\xEF\xBB\xBF<r>value</r>";
+        ASSERT_TRUE(file.good());
+    }
+    auto document = XDocument::Load(path);
+    ASSERT_NE(document->getRootProperty(), nullptr);
+    EXPECT_EQ(document->getRootProperty()->getValueProperty(), "value");
+    auto element = XElement::Load(path);
+    ASSERT_NE(element, nullptr);
+    EXPECT_EQ(element->getValueProperty(), "value");
+}
 
 namespace {
 

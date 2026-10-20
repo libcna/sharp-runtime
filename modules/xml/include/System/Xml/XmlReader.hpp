@@ -22,7 +22,10 @@ namespace System::Xml {
      *
      * Implemented as a DOM-cursor over a tinyxml2 document tree.  The entire
      * document is parsed on creation; @c Read() advances a flat event list
-     * built from the DOM.
+     * built from the DOM. A leading U+FEFF in character input is rejected on
+     * the first @c Read(), with @c ReadState::Error; file byte preambles remain
+     * accepted. Other tinyxml2 parse errors are still reported on creation,
+     * not at .NET's streaming cursor position.
      *
      * Partial C++ counterpart of .NET System.Xml.XmlReader.
      *
@@ -84,6 +87,10 @@ namespace System::Xml {
          *         @c Close() has been called — a closed reader does not advance, and
          *         @c getReadStateProperty() stays @c ReadState::Closed across any number of
          *         further calls, exactly as @c ReadState::EndOfFile already behaves.
+         *         After a deferred character-preamble error, further calls also
+         *         return false and preserve @c ReadState::Error.
+         * @throws XmlException on the first read of character input beginning
+         *         with U+FEFF; the reader enters @c ReadState::Error.
          */
         bool Read();
 
@@ -262,7 +269,9 @@ namespace System::Xml {
          * If @p inputUri (after trimming leading whitespace) starts with '<' it is always
          * treated as raw XML text; otherwise, if it looks like a file path (contains '/' or
          * '\' or ends with ".xml") the file is loaded, and it is treated as raw XML text
-         * otherwise.
+         * otherwise. A leading U+FEFF followed by whitespace and/or '<' is also
+         * recognized as character input, but fails on the first @c Read() rather
+         * than being stripped as a file encoding preamble.
          *
          * @param inputUri  File path or raw XML text.
          * @return Heap-allocated XmlReader; caller owns the pointer.
@@ -287,9 +296,14 @@ namespace System::Xml {
         /**
          * @brief Creates an XmlReader that parses @p xmlContent as raw XML.
          *
-         * @param xmlContent  Well-formed XML text.
+         * A leading U+FEFF is character content, not a byte-stream preamble.
+         * Creation succeeds; the first @c Read() throws @c XmlException and
+         * records @c ReadState::Error. Later reads return false. Closing before
+         * the first read does not raise that deferred error.
+         *
+         * @param xmlContent  XML character text, without an encoding preamble.
          * @return Heap-allocated XmlReader; caller owns the pointer.
-         * @throws XmlException on parse error.
+         * @throws XmlException on other tinyxml2 parse errors during creation.
          */
         static XmlReader* CreateFromString(const std::string& xmlContent);
     };

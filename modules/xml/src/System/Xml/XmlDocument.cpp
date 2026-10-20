@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Xml/XmlDocument.hpp"
+#include "XmlCharacterInput.hpp"
 #include <sstream>
 #include <fstream>
 
@@ -607,6 +608,8 @@ namespace System::Xml {
     }
 
     void XmlDocument::LoadXml(const std::string& xml) {
+        if (detail::HasCharacterPreamble(xml))
+            detail::ThrowCharacterPreambleError();
         // #2082: BEFORE the parse, because tinyxml2 decodes the predefined entities and the
         // distinction is gone afterwards.
         ThrowIfUndeclaredEntityReference(xml);
