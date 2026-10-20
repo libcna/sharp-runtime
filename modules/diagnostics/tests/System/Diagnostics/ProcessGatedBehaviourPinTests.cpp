@@ -30,6 +30,7 @@
 
 #include <gtest/gtest.h>
 #include <atomic>
+#include <latch>
 #include <thread>
 #include <vector>
 
@@ -285,24 +286,33 @@ TEST(ProcessGatedBehaviourPinTests, Fix2030_ConcurrentReadersSeeAConsistentBuffe
 
     std::atomic<bool> stop{false};
     std::atomic<int> reads{0};
+    std::latch firstSnapshots{4};
     std::vector<std::thread> readers;
     for (int i = 0; i < 4; ++i) {
         readers.emplace_back([&] {
+            bool first = true;
             while (!stop.load()) {
                 const std::string text = process.getStandardOutputTextProperty();
                 // A torn copy would show up as a partial trailing record; every complete read
                 // must end at a record boundary or be empty.
                 if (!text.empty()) { EXPECT_EQ(text.back(), ';') << text; }
                 reads.fetch_add(1);
+                if (first) {
+                    firstSnapshots.count_down();
+                    first = false;
+                }
             }
         });
     }
 
+    // The short child can finish before any worker is scheduled. Require each worker's
+    // first actual snapshot before allowing the main thread to stop the readers.
+    firstSnapshots.wait();
     process.WaitForExit();
     stop.store(true);
     for (auto& reader : readers) reader.join();
 
-    EXPECT_GT(reads.load(), 0);
+    EXPECT_GE(reads.load(), 4);
     EXPECT_EQ(process.getStandardOutputTextProperty(),
               "chunk-1;chunk-2;chunk-3;chunk-4;chunk-5;chunk-6;chunk-7;chunk-8;chunk-9;chunk-10;");
 }
