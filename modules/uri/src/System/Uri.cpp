@@ -214,8 +214,16 @@ void Uri::parse(const std::string& rawUriString) {
     while (end > begin && isLinearWhiteSpace(rawUriString[end - 1])) --end;
     const std::string uriString = rawUriString.substr(begin, end - begin);
 
-    if (uriString.empty())
-        throw System::UriFormatException("URI string must not be empty");
+    if (uriString.empty()) {
+        // Uri.cs:1920-1921 returns EmptyUriString; UriExt.cs:61-68 and 156-170
+        // accept that parse result as relative when the requested kind allows it.
+        // Preserve the original text, including whitespace, as genuine .NET does.
+        // The constructor still rejects this result for UriKind::Absolute.
+        isAbsoluteUri_ = false;
+        absoluteUri_ = rawUriString;
+        path_ = rawUriString;
+        return;
+    }
 
     // RFC 3986 §3: the scheme is the token before the FIRST colon, and an authority is
     // present only when "//" immediately follows that colon. findSchemeColon() (above) is

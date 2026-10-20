@@ -11,6 +11,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the
 
 ### Fixed
 
+- Uri accepts empty and whitespace-only relative references when UriKind permits
+  them, preserving OriginalString. See [migration details](docs/Migration-Uri-EmptyRelative.md).
+
 - FileStream distinguishes an existing directory from a missing file and preserves
   mode/access validation and CreateNew exception precedence. See
   [migration details](docs/Migration-FileStream-Directories.md) (CNA-DEMOS-ISSUE-145).

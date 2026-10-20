@@ -107,6 +107,9 @@ namespace System {
         /**
          * @brief Constructs a Uri from a string, enforcing the specified kind.
          *
+         * Empty or whitespace-only strings are valid relative references, retained
+         * verbatim, for Relative and RelativeOrAbsolute; Absolute rejects them.
+         *
          * @throws System::ArgumentException (paramName @c "uriKind") if @p uriKind is not
          *         one of the three declared UriKind members. An out-of-domain cast used to
          *         fall through both guards and silently mean RelativeOrAbsolute
