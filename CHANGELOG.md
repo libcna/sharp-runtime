@@ -11,6 +11,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the
 
 ### Fixed
 
+- FileStream rejects empty and embedded-NUL names before filesystem effects,
+  preventing accidental access/truncation of the prefix-named file. See
+  [migration details](docs/Migration-FileStream-InvalidPaths.md).
+
 - Uri accepts empty and whitespace-only relative references when UriKind permits
   them, preserving OriginalString. See [migration details](docs/Migration-Uri-EmptyRelative.md).
 

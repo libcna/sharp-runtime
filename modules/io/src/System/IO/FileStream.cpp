@@ -68,7 +68,14 @@ namespace System::IO
     FileStream::FileStream(const std::string& path, FileMode mode, FileAccess access)
         : path_(path), length_(0), canRead_(false), canWrite_(false)
     {
+        // FileStreamHelpers.cs:64 rejects an empty name before mode/access validation.
+        if (path.empty())
+            throw System::ArgumentException("The path is empty.", "path");
         ValidateModeAndAccess(mode, access);
+        // Path.Unix.cs:28-33 rejects embedded NUL before any native open. Otherwise
+        // a C-string syscall silently names only the prefix, even for Create/Truncate.
+        if (path.find('\0') != std::string::npos)
+            throw System::ArgumentException("The path contains a null character.", "path");
 
         std::error_code ec;
         // The path is UTF-8 (Utf8Path.hpp). Everything below opens and stats THIS value, never
