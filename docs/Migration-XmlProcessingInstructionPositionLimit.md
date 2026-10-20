@@ -3,6 +3,13 @@
 
 # Declaration — a processing instruction can be read back only before every other node (ticket #2202)
 
+**2026-10-20 update:** the owner authorized a narrow vendored-parser repair through
+CNA-DEMOS-ISSUE-148. Ordinary processing instructions now parse at every legal
+position; the XML declaration remains reserved and must be first. See
+[the maintained vendor provenance](VendoredTinyXml2.md). The original cases below
+are retained as positive regression tests, and the historical decision/evidence
+is preserved verbatim below. Full dependency/downstream validation is in progress.
+
 *2026-08-19.* This runtime writes a processing instruction correctly in any position and can
 parse one back **only at the very start of the document**. That asymmetry is now documented at
 both doors and pinned at both layers.

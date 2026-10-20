@@ -1123,29 +1123,29 @@ char* XMLNode::ParseDeep( char* p, StrPair* parentEndTag, int* curLineNumPtr )
 
         const XMLDeclaration* const decl = node->ToDeclaration();
         if ( decl ) {
-            // Declarations are only allowed at document level
-            //
-            // Multiple declarations are allowed but all declarations
-            // must occur before anything else. 
-            //
-            // Optimized due to a security test case. If the first node is 
-            // a declaration, and the last node is a declaration, then only 
-            // declarations have so far been added.
-            bool wellLocated = false;
-
-            if (ToDocument()) {
-                if (FirstChild()) {
-                    wellLocated =
-                        FirstChild() &&
-                        FirstChild()->ToDeclaration() &&
-                        LastChild() &&
-                        LastChild()->ToDeclaration();
-                }
-                else {
-                    wellLocated = true;
+            // sharp-runtime local repair (CNA-DEMOS-ISSUE-148): this node kind
+            // also represents ordinary processing instructions, which may occur
+            // inside elements and after the root. Only the reserved XML target
+            // is a declaration; it must be lowercase and the first document node.
+            const char* const value = decl->Value();
+            const char* targetEnd = value;
+            if ( value && XMLUtil::IsNameStartChar( static_cast<unsigned char>(*value) ) ) {
+                ++targetEnd;
+                while ( XMLUtil::IsNameChar( static_cast<unsigned char>(*targetEnd) ) ) {
+                    ++targetEnd;
                 }
             }
-            if ( !wellLocated ) {
+            const bool validTarget = value && targetEnd != value &&
+                ( *targetEnd == 0 || *targetEnd == ' ' || *targetEnd == '\t' ||
+                  *targetEnd == '\r' || *targetEnd == '\n' );
+            const bool reserved = validTarget && targetEnd - value == 3 &&
+                (value[0] == 'x' || value[0] == 'X') &&
+                (value[1] == 'm' || value[1] == 'M') &&
+                (value[2] == 'l' || value[2] == 'L');
+            const bool wellLocated = !reserved ||
+                (ToDocument() && !FirstChild() && value[0] == 'x' &&
+                 value[1] == 'm' && value[2] == 'l');
+            if ( !validTarget || !wellLocated ) {
                 _document->SetError( XML_ERROR_PARSING_DECLARATION, initialLineNum, "XMLDeclaration value=%s", decl->Value());
                 _document->DeleteNode( node );
                 break;

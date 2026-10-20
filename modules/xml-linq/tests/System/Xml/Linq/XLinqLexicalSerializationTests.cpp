@@ -174,9 +174,7 @@ TEST(XLinqLexicalSerializationTests, ProcessingInstruction_EmbeddedTerminator_Ro
     // `<?p left?>right?>` re-read as a processing instruction whose data was just `left` --
     // `right` was silently DROPPED. The repaired text (case P10) re-reads as `left? >right`.
     //
-    // The instruction is placed at document level and before everything else because that is
-    // the ONLY position this runtime's tinyxml2-backed parser accepts one at all (#2202) --
-    // measured separately below so this assertion cannot be misread as covering that.
+    // Keep the original leading-instruction regression; other legal positions are covered below.
     auto doc = std::make_shared<XDocument>();
     doc->Add(std::make_shared<XProcessingInstruction>("p", "left?>right"));
     doc->Add(std::make_shared<XElement>(XName("root")));
@@ -194,16 +192,13 @@ TEST(XLinqLexicalSerializationTests, ProcessingInstruction_EmbeddedTerminator_Ro
     EXPECT_NE(pi->getDataProperty(), "left");
 }
 
-TEST(XLinqLexicalSerializationTests, ProcessingInstruction_ParserPositionLimitIsSubstrateNotSerialization) {
-    // Recorded so the assertion above is not read as claiming more than it does. This
-    // runtime's parser accepts a processing instruction only before every other node (an XML
-    // declaration may precede it); inside an element, after the root, or even after a comment
-    // it throws XML_ERROR_PARSING_DECLARATION. That is #2202, a substrate limitation
-    // independent of SR-AUD-335 -- the text emitted here is well-formed XML either way.
+TEST(XLinqLexicalSerializationTests, ProcessingInstruction_AllLegalPositionsParse) {
+    // ISSUE-148 repairs #2202's substrate limitation. The same historical XML inputs now
+    // require successful parsing rather than preserving the documented incorrect refusal.
     EXPECT_NO_THROW((void)XDocument::Parse("<?p d?><root/>"));
-    EXPECT_THROW((void)XDocument::Parse("<root><?p d?></root>"), System::Xml::XmlException);
-    EXPECT_THROW((void)XDocument::Parse("<root/><?p d?>"), System::Xml::XmlException);
-    EXPECT_THROW((void)XDocument::Parse("<!--c--><?p d?><root/>"), System::Xml::XmlException);
+    EXPECT_NO_THROW((void)XDocument::Parse("<root><?p d?></root>"));
+    EXPECT_NO_THROW((void)XDocument::Parse("<root/><?p d?>"));
+    EXPECT_NO_THROW((void)XDocument::Parse("<!--c--><?p d?><root/>"));
 }
 
 TEST(XLinqLexicalSerializationTests, ProcessingInstruction_TrailingQuestionMarkNeedsNoProtection) {

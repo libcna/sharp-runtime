@@ -34,6 +34,8 @@ distribution.
     Two copies of tinyxml2 in one link that both used ::tinyxml2 made the
     linker bind one copy's code to the other's class layout, with no
     diagnostic -- see sharp-runtime's docs/VendoredTinyXml2.md.
+    The implementation also carries the owner-approved CNA-DEMOS-ISSUE-148
+    processing-instruction placement repair, documented in that file.
 */
 
 #ifndef SHARP_RUNTIME_VENDOR_TINYXML2_INCLUDED

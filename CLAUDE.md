@@ -408,7 +408,7 @@ Every `.hpp` and `.cpp` file starts with:
   `BlockingCollection<T>` belongs to `Collections.Blocking`; do not add its
   `Threading` requirements back to `Collections.Core` or weaken the Text.Json
   isolation fixture.
-- **Vendored libs:** GoogleTest, nlohmann/json, tinyxml2, miniz, all under `vendor/`. Never commit binaries. Files under `vendor/` are third-party source unmodified from upstream — except `vendor/tinyxml2`, whose names (not behaviour) are moved into `SharpRuntime::Vendor::tinyxml2` so it cannot collide with a consumer's own tinyxml2 (`docs/VendoredTinyXml2.md`) — and are exempt from this project's SPDX-header, doc-comment, and `getXxxProperty()`/namespace-syntax naming rules — those rules apply only to module `include/`, `src/`, and `tests/` trees.
+- **Vendored libs:** GoogleTest, nlohmann/json, tinyxml2, miniz, all under `vendor/`. Never commit binaries. Files under `vendor/` are third-party source unmodified from upstream — except `vendor/tinyxml2`, whose names are moved into `SharpRuntime::Vendor::tinyxml2` and whose processing-instruction placement has the narrow owner-approved CNA-DEMOS-ISSUE-148 repair (`docs/VendoredTinyXml2.md`) — and are exempt from this project's SPDX-header, doc-comment, and `getXxxProperty()`/namespace-syntax naming rules — those rules apply only to module `include/`, `src/`, and `tests/` trees. This specific approval does not authorize unrelated vendor changes.
 - **Templates:** deferred `inline` definitions after forward declarations to resolve circular includes.
 - **Collection mutation counters:** a collection with a fail-fast enumerator must hold its
   counter as `System::Collections::detail::MutationCounter` and its enumerator must snapshot

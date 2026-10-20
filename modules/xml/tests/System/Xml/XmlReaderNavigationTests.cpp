@@ -193,14 +193,37 @@ TEST(XmlReaderNavigationTests, SettingsIgnoreCommentsAndProcessingInstructions) 
     XmlReaderSettings settings;
     settings.IgnoreComments = true;
     settings.IgnoreProcessingInstructions = true;
-    // tinyxml2 accepts a processing instruction at document level only, so the PI sits before
-    // the root here.
-    std::unique_ptr<XmlReader> r(XmlReader::Create("<?pi d?><r><!--c--><a/></r>", settings));
+    std::unique_ptr<XmlReader> r(XmlReader::Create(
+        "<?pi d?><r><!--c--><?inside x?><a/><?last?></r><?after?>", settings));
     ASSERT_TRUE(r->Read());
     EXPECT_EQ(r->getNameProperty(), "r") << "the processing instruction was dropped";
     ASSERT_TRUE(r->Read());
     EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::Element) << "the comment was dropped";
     EXPECT_EQ(r->getNameProperty(), "a");
+    ASSERT_TRUE(r->Read());
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::EndElement);
+    EXPECT_EQ(r->getNameProperty(), "r");
+    EXPECT_FALSE(r->Read());
+}
+
+TEST(XmlReaderNavigationTests, ProcessingInstructionPositionsPreserveNameDataAndDepth) {
+    auto r = Open("<?before?><r>left<?p d &amp; x?><child/><?last?></r><?after tail?>");
+    const struct {
+        const char* name;
+        const char* data;
+        int depth;
+    } expected[] = {{"before", "", 0}, {"p", "d &amp; x", 1},
+                    {"last", "", 1}, {"after", "tail", 0}};
+    size_t seen = 0U;
+    while (r->Read()) {
+        if (r->getNodeTypeProperty() != XmlNodeType::ProcessingInstruction) continue;
+        ASSERT_LT(seen, sizeof(expected) / sizeof(expected[0]));
+        EXPECT_EQ(r->getNameProperty(), expected[seen].name);
+        EXPECT_EQ(r->getValueProperty(), expected[seen].data);
+        EXPECT_EQ(r->getDepthProperty(), expected[seen].depth);
+        ++seen;
+    }
+    EXPECT_EQ(seen, sizeof(expected) / sizeof(expected[0]));
 }
 
 TEST(XmlReaderNavigationTests, OneArgumentCreateKeepsReportingDoctype) {
