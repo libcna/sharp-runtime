@@ -10,6 +10,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/ObjectDisposedException.hpp"
+#include "System/UnauthorizedAccessException.hpp"
 #include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/IOException.hpp"
@@ -74,10 +75,19 @@ namespace System::IO
         // the narrow string: the narrow overloads convert through the ANSI code page on Windows.
         const std::filesystem::path nativePath = Detail::NativePath(path);
         bool exists = std::filesystem::is_regular_file(nativePath, ec) && !ec;
+        ec.clear();
+        const bool isDirectory = std::filesystem::is_directory(nativePath, ec) && !ec;
 
         // Existence preconditions that std::fstream's open-mode flags can't express directly.
-        if (mode == FileMode::CreateNew && exists) {
+        if (mode == FileMode::CreateNew && (exists || isDirectory)) {
             throw IOException("Cannot create '" + path + "' because a file or directory with the same name already exists.");
+        }
+        // .NET SafeFileHandle.Unix.cs:380-390 refuses directory handles with EACCES
+        // (write opens fail with EISDIR). Both map to UnauthorizedAccessException.
+        // Mode/access validation and CreateNew's existing-path error precede this.
+        // Independently verified for all 18 mode/access pairs on .NET Framework 4.
+        if (isDirectory) {
+            throw System::UnauthorizedAccessException("Access to the path '" + path + "' is denied.");
         }
         if ((mode == FileMode::Open || mode == FileMode::Truncate) && !exists) {
             if (!ParentDirectoryExists(path)) {
