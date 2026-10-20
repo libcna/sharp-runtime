@@ -7,6 +7,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/IO/File.hpp"
 #include "System/IO/FileStream.hpp"
+#include "System/IO/PathTooLongException.hpp"
 
 TEST(FileStreamPathValidationTest, InvalidNamesCannotAliasOrTruncateThePrefixFile)
 {
@@ -35,5 +36,29 @@ TEST(FileStreamPathValidationTest, InvalidNamesCannotAliasOrTruncateThePrefixFil
             }
         }
         EXPECT_EQ(System::IO::File::ReadAllText(seed), "retained");
+    }
+}
+
+TEST(FileStreamPathValidationTest, NativePathLengthFailureIsNotReportedAsAMissingFile)
+{
+    for (const auto mode : {System::IO::FileMode::CreateNew, System::IO::FileMode::Create,
+                           System::IO::FileMode::Open, System::IO::FileMode::OpenOrCreate,
+                           System::IO::FileMode::Truncate, System::IO::FileMode::Append})
+    for (const auto access : {System::IO::FileAccess::Read, System::IO::FileAccess::Write,
+                             System::IO::FileAccess::ReadWrite})
+    {
+        SCOPED_TRACE(static_cast<int>(mode));
+        SCOPED_TRACE(static_cast<int>(access));
+        const bool invalid = (mode == System::IO::FileMode::Append && access != System::IO::FileAccess::Write) ||
+            (access == System::IO::FileAccess::Read && (mode == System::IO::FileMode::CreateNew ||
+             mode == System::IO::FileMode::Create || mode == System::IO::FileMode::Truncate));
+        const std::type_info& expected = invalid ? typeid(System::ArgumentException) :
+                                                  typeid(System::IO::PathTooLongException);
+        try
+        {
+            System::IO::FileStream stream(std::string(65519, 'a'), mode, access);
+            ADD_FAILURE() << "Native path-length failure was accepted";
+        }
+        catch (const std::exception& error) { EXPECT_EQ(typeid(error), expected); }
     }
 }

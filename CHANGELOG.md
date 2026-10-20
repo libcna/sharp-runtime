@@ -11,6 +11,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the
 
 ### Fixed
 
+- FileStream preserves native path-status errors instead of reporting overlong or
+  inaccessible paths as missing files. See [migration details](docs/Migration-FileStream-StatusErrors.md).
+
 - FileStream rejects empty and embedded-NUL names before filesystem effects,
   preventing accidental access/truncation of the prefix-named file. See
   [migration details](docs/Migration-FileStream-InvalidPaths.md).

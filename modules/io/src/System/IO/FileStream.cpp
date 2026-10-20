@@ -14,6 +14,7 @@
 #include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/IOException.hpp"
+#include "System/IO/PathTooLongException.hpp"
 
 #include <filesystem>
 
@@ -81,9 +82,19 @@ namespace System::IO
         // The path is UTF-8 (Utf8Path.hpp). Everything below opens and stats THIS value, never
         // the narrow string: the narrow overloads convert through the ANSI code page on Windows.
         const std::filesystem::path nativePath = Detail::NativePath(path);
-        bool exists = std::filesystem::is_regular_file(nativePath, ec) && !ec;
-        ec.clear();
-        const bool isDirectory = std::filesystem::is_directory(nativePath, ec) && !ec;
+        const auto status = std::filesystem::status(nativePath, ec);
+        // Interop.IOErrors.cs:114-152 distinguishes a genuinely absent path from
+        // denied access and ENAMETOOLONG. Discarding stat errors as "not a file"
+        // incorrectly reports these failures as FileNotFoundException.
+        if (ec && ec != std::errc::no_such_file_or_directory && ec != std::errc::not_a_directory) {
+            if (ec == std::errc::filename_too_long)
+                throw PathTooLongException("The file name or path is too long.");
+            if (ec == std::errc::permission_denied || ec == std::errc::operation_not_permitted)
+                throw System::UnauthorizedAccessException("Access to the path '" + path + "' is denied.");
+            throw IOException("Failed to inspect file '" + path + "': " + ec.message());
+        }
+        const bool exists = std::filesystem::is_regular_file(status);
+        const bool isDirectory = std::filesystem::is_directory(status);
 
         // Existence preconditions that std::fstream's open-mode flags can't express directly.
         if (mode == FileMode::CreateNew && (exists || isDirectory)) {
