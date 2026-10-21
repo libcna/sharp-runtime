@@ -105,6 +105,55 @@ intcs Uri::defaultPortForScheme(const std::string& scheme) {
 }
 
 namespace {
+    bool asciiLetter(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    }
+
+    std::string lowerAscii(std::string value) {
+        for (char& c : value) {
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + ('a' - 'A'));
+        }
+        return value;
+    }
+
+    bool dosPath(const std::string& path) {
+        return path.size() >= 3 && asciiLetter(path[0]) &&
+               (path[1] == ':' || path[1] == '|') && (path[2] == '/' || path[2] == '\\');
+    }
+
+    int hexDigit(char c) {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    }
+
+    // CNA-DEMOS-ISSUE-101. .NET11 UriHelper.cs:317-360 and
+    // PercentEncodingHelper.UnescapePercentEncodedUTF8Sequence preserve invalid UTF-8.
+    // Independently measured on .NET8; old Framework4 differs on malformed sequences.
+    std::string unescapeLocalPath(const std::string& text) {
+        std::string result;
+        result.reserve(text.size());
+        for (std::size_t i = 0; i < text.size();) {
+            std::string bytes;
+            for (std::size_t p = i; p + 2 < text.size() && bytes.size() < 4; p += 3) {
+                if (text[p] != '%') break;
+                const int high = hexDigit(text[p + 1]), low = hexDigit(text[p + 2]);
+                if (high < 0 || low < 0) break;
+                bytes.push_back(static_cast<char>((high << 4) | low));
+            }
+            std::uint32_t scalar = 0;
+            std::size_t length = 0;
+            if (!bytes.empty() && detail::TryDecodeUtf8Scalar(bytes, 0, scalar, length)) {
+                result.append(bytes, 0, length);
+                i += length * 3;
+            } else {
+                result.push_back(text[i++]);
+            }
+        }
+        return result;
+    }
+
     /**
      * Detects a leading RFC 3986 scheme "ALPHA *(ALPHA/DIGIT/"+"/"-"/".") \":\""
      * and returns the index of the ':', or npos if the string has no valid scheme prefix.
@@ -232,7 +281,21 @@ void Uri::parse(const std::string& rawUriString) {
     const bool hasAuthority = schemeColon != std::string::npos &&
                               uriString.compare(schemeColon + 1, 2, "//") == 0;
 
-    if (schemeColon == std::string::npos) {
+    // Uri.cs:3530-3556 recognizes an absolute DOS path before a one-letter scheme.
+    // Keep implicit-file percent characters literal; LocalPath uses this spelling.
+    if (dosPath(uriString)) {
+        scheme_ = "file";
+        path_ = uriString;
+        absoluteUri_ = uriString;
+        isAbsoluteUri_ = true;
+        return;
+    }
+
+    // A file scheme without an authority delimiter is not an absolute file URI.
+    // UriExt.cs InitializeUri permits it only through the relative-URI path.
+    const bool relativeFile = schemeColon != std::string::npos && !hasAuthority &&
+                              lowerAscii(uriString.substr(0, schemeColon)) == "file";
+    if (schemeColon == std::string::npos || relativeFile) {
         // No scheme token at all: an RFC 3986 relative reference.
         //
         // Ticket #2002: the whole reference used to be stored as the path, so
@@ -695,6 +758,61 @@ const std::string& Uri::getQueryProperty()         const { return query_; }
 const std::string& Uri::getFragmentProperty()      const { return fragment_; }
 const std::string& Uri::getUserInfoProperty()       const { return userInfo_; }
 bool               Uri::getIsAbsoluteUriProperty() const { return isAbsoluteUri_; }
+
+bool Uri::getIsFileProperty() const {
+    // .NET11 Uri.cs:853-864; also measured on genuine Framework4 and .NET8.
+    if (!isAbsoluteUri_)
+        throw System::InvalidOperationException("This operation is not supported for a relative URI.");
+    return lowerAscii(scheme_) == "file";
+}
+
+std::string Uri::getLocalPathProperty() const {
+    // .NET11 Uri.cs:771-780,987-1083: absolute guard, unescaped path,
+    // DOS drive protection during compression, and UNC/DOS slash conversion.
+    const bool file = getIsFileProperty();
+    const bool implicitDos = file && dosPath(absoluteUri_);
+    std::string path = implicitDos ? absoluteUri_ : path_;
+    std::string host = host_;
+    if (file && host.empty() && path.starts_with("//")) {
+        const auto start = path.find_first_not_of('/');
+        if (start != std::string::npos) {
+            const auto end = path.find('/', start);
+            host = path.substr(start, end == std::string::npos ? end : end - start);
+            path = end == std::string::npos ? "/" : path.substr(end);
+        }
+    }
+    if (file && path.starts_with('/') && dosPath(path.substr(1))) path.erase(0, 1);
+    const bool dos = file && dosPath(path);
+    const bool unc = file && !host.empty();
+    const bool hierarchical = absoluteUri_.compare(scheme_.size(), 3, "://") == 0;
+
+    // Unix file syntax deliberately preserves backslashes (.NET11 Uri.cs:2077,
+    // 4226); DOS/UNC syntax treats them as directory separators on every OS.
+    bool convertSlashes = dos || unc || (hierarchical && !file);
+#ifdef _WIN32
+    convertSlashes = convertSlashes || file;
+#endif
+    if (convertSlashes) std::replace(path.begin(), path.end(), '\\', '/');
+    if (!implicitDos) path = unescapeLocalPath(path);
+    if (dos || unc) std::replace(path.begin(), path.end(), '\\', '/');
+#ifdef _WIN32
+    // File syntax also unescapes path separators before compression on Windows.
+    if (file) std::replace(path.begin(), path.end(), '\\', '/');
+#endif
+    if (dos) {
+        path[1] = ':';
+        path = path.substr(0, 2) + removeDotSegments(path.substr(2));
+    } else if (file || hierarchical) {
+        path = removeDotSegments(path);
+    } else if (lowerAscii(scheme_) == "mailto") {
+        // The mailto authority is embedded in this partial parser's opaque path.
+        const auto slash = path.find('/');
+        path = slash == std::string::npos ? std::string{} : path.substr(slash);
+    }
+    if (unc) path = "//" + lowerAscii(host) + path;
+    if (dos || unc) std::replace(path.begin(), path.end(), '/', '\\');
+    return path;
+}
 
 std::string Uri::getPathAndQueryProperty() const { return path_ + query_; }
 

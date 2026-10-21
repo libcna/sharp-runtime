@@ -3,6 +3,12 @@
 
 # Decision — `System::Uri` keeps an embedded NUL, and the proposed repair was backwards (ticket #2003)
 
+**2026-10-21 clarification:** the historical safe-unescaping discussion below
+does not apply to the newly added **LocalPath** getter. Genuine Framework4 and
+.NET8 both return an actual NUL for `%00` there. The original component/string
+tests remain unchanged; filesystem rejection belongs in File::Exists, not Uri.
+See [the consumer repair](Migration-UriLocalPathAndFileExists.md).
+
 *2026-08-19.* **No production statement changed.** This is a decision and its evidence, in the
 shape of #2015 and #2324: the ticket asked for approval to make `Uri` reject an embedded NUL, and
 the reference — which the ticket could not read — says .NET does not reject it.

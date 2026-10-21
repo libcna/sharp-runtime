@@ -194,6 +194,16 @@ TEST(FileTests, Exists_NonExistentFile_False) {
     EXPECT_FALSE(File::Exists(tf("nonexistent_xyz_abc.txt")));
 }
 
+TEST(FileTests, Exists_EmbeddedNullDoesNotNameTheExistingPrefix) {
+    const std::string path = tf("exists_null_boundary.txt");
+    File::WriteAllText(path, "unchanged");
+    ASSERT_TRUE(File::Exists(path));
+    EXPECT_FALSE(File::Exists(path + std::string(1, '\0')));
+    EXPECT_FALSE(File::Exists(path + std::string(1, '\0') + "suffix"));
+    EXPECT_EQ(File::ReadAllText(path), "unchanged");
+    File::Delete(path);
+}
+
 TEST(FileTests, WriteAllText_ReadAllText_Roundtrip) {
     std::string p = tf("rw_text.txt");
     File::WriteAllText(p, "hello world");

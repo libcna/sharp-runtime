@@ -662,6 +662,11 @@ override. Kept separate from #1997 for that reason.
 
 ## 15. Explicit exclusions
 
+**2026-10-21 consumer follow-up:** CNA-DEMOS-ISSUE-101 adds IsFile and LocalPath,
+including percent decoding only for LocalPath, with measured .NET version
+boundaries. See [migration and validation](Migration-UriLocalPathAndFileExists.md).
+The original audit scope below is historical; its other exclusions are unchanged.
+
 Stated so a later reader does not mistake silence for oversight:
 
 1. **Percent-encoding and -decoding** — disclosed in `Uri.hpp` and unchanged. `%2F`,

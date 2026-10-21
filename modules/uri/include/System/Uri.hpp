@@ -37,7 +37,8 @@ namespace System {
      * Partial C++ counterpart of .NET System.Uri.
      *
      * @note Status: Partial — supports construction, component access, TryCreate,
-     *   and relative-to-absolute combination. No percent-encoding/decoding.
+     *   and relative-to-absolute combination. LocalPath decodes percent escapes;
+     *   the existing textual/component getters still do not canonicalize or unescape.
      * @note A hierarchical URI may have an **empty host** only when no port applies to it —
      *   neither an explicit port in the authority nor a default port for the scheme. That is
      *   what keeps `"file:///path"` legal while rejecting `"http:///path"` (ticket #2000).
@@ -199,6 +200,26 @@ namespace System {
 
         /** @brief Returns @c true if this URI is absolute. */
         [[nodiscard]] bool               getIsAbsoluteUriProperty() const;
+
+        /**
+         * @brief Gets whether this absolute URI identifies a file.
+         * @return True for the file scheme; otherwise false.
+         * @throws System::InvalidOperationException If this URI is relative.
+         */
+        [[nodiscard]] bool getIsFileProperty() const;
+
+        /**
+         * @brief Gets the unescaped local representation of this URI's path.
+         *
+         * DOS and UNC file paths use backslashes; Unix file paths retain Unix
+         * separators. Query and fragment are excluded. Invalid percent escapes
+         * and invalid UTF-8 escape sequences remain escaped, as in modern .NET.
+         * This does not canonicalize the existing component/string getters or
+         * make the partial URI parser a complete implementation of System.Uri.
+         * @return The local path in this runtime's UTF-8 string representation.
+         * @throws System::InvalidOperationException If this URI is relative.
+         */
+        [[nodiscard]] std::string getLocalPathProperty() const;
 
         /** @brief Returns the path and query concatenated. */
         [[nodiscard]] std::string getPathAndQueryProperty() const;

@@ -24,7 +24,9 @@ namespace System::IO {
     }
 
     bool File::Exists(const std::string& path) {
-        if (path.empty()) return false;
+        // .NET File.cs:91-119 calls Path.GetFullPath and catches its ArgumentException.
+        // A native C-string filesystem call must not truncate an embedded NUL to a real file.
+        if (path.empty() || path.find('\0') != std::string::npos) return false;
         std::error_code ec;
         const std::optional<std::filesystem::path> native = Detail::TryNativePath(path);
         if (!native) return false;
