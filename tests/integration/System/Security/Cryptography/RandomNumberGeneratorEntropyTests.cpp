@@ -37,7 +37,8 @@ using System::Security::Cryptography::RandomNumberGenerator;
 namespace {
 
 // A sentinel byte the generator would have to reproduce for a whole run to fool the tests below.
-// Over the ranges used here that is 256^-n, which is not a flake this suite has to reason about.
+// Large ranges make accidental equality negligible. A one-byte tail does NOT:
+// the boundary test below samples every position over a fixed 32-draw matrix.
 constexpr bytecs kSentinel = 0xA5;
 
 bool anyByteChanged(const std::vector<bytecs>& data, size_t from, size_t to) {
@@ -50,6 +51,22 @@ bool allBytesUnchanged(const std::vector<bytecs>& data, size_t from, size_t to) 
     for (size_t i = from; i < to; ++i)
         if (data[i] != kSentinel) return false;
     return true;
+}
+
+template<typename Fill>
+std::vector<bool> sampleWrittenPositions(size_t count, Fill&& fill) {
+    std::vector<bool> changed(count, false);
+    // This is a fixed sample, not retry-until-pass. A random byte may legitimately
+    // equal kSentinel; equality in all 32 draws has probability 2^-256 per position.
+    // An unwritten byte remains false deterministically. Check EVERY position,
+    // including the last byte of every chunk, not merely any byte in each range.
+    for (size_t draw = 0; draw < 32; ++draw) {
+        std::vector<bytecs> data(count, kSentinel);
+        fill(data);
+        for (size_t i = 0; i < count; ++i)
+            changed[i] = changed[i] || data[i] != kSentinel;
+    }
+    return changed;
 }
 
 } // namespace
@@ -77,14 +94,40 @@ TEST(Rng2398ChunkingTests, ARequestLargerThanOneChunkIsFilledEndToEnd) {
 // exactly here and nowhere else.
 TEST(Rng2398ChunkingTests, TheChunkBoundaryIsHandledOnBothSides) {
     for (size_t n : {size_t{255}, size_t{256}, size_t{257}, size_t{512}, size_t{513}}) {
-        std::vector<bytecs> data(n, kSentinel);
-        ASSERT_NO_THROW(RandomNumberGenerator::Fill(data)) << "n=" << n;
-        EXPECT_TRUE(anyByteChanged(data, 0, n)) << "n=" << n << " was not filled at all";
-        if (n > 256) {
-            EXPECT_TRUE(anyByteChanged(data, 256, n))
-                << "n=" << n << " was filled only up to the first chunk";
+        std::vector<bool> changed;
+        ASSERT_NO_THROW(changed = sampleWrittenPositions(n, [](auto& data) {
+            RandomNumberGenerator::Fill(data);
+        })) << "n=" << n;
+        for (size_t i = 0; i < n; ++i)
+            EXPECT_TRUE(changed[i]) << "n=" << n << ", byte " << i << " was never filled";
+    }
+}
+
+TEST(Rng2398ChunkingTests, BoundaryOracleRejectsAnUnwrittenByte) {
+    for (size_t n : {size_t{255}, size_t{256}, size_t{257}, size_t{512}, size_t{513}}) {
+        for (size_t missing : {size_t{0}, n / 2, n - 1}) {
+            size_t calls = 0;
+            const auto changed = sampleWrittenPositions(n, [&](auto& data) {
+                ++calls;
+                std::fill(data.begin(), data.end(), bytecs{0});
+                data[missing] = kSentinel; // Simulate one byte the writer never touched.
+            });
+            EXPECT_EQ(calls, 32u);
+            EXPECT_FALSE(changed[missing]) << "n=" << n << ", missing=" << missing;
+            EXPECT_EQ(std::count(changed.begin(), changed.end(), false), 1);
         }
     }
+}
+
+TEST(Rng2398ChunkingTests, BoundaryOracleAcceptsALegitimateSentinelCoincidence) {
+    size_t calls = 0;
+    const auto changed = sampleWrittenPositions(257, [&](auto& data) {
+        // The first draw really writes kSentinel to every byte. It is not proof
+        // that those bytes were untouched. Later independent draws differ.
+        std::fill(data.begin(), data.end(), calls++ == 0 ? kSentinel : bytecs{0});
+    });
+    EXPECT_EQ(calls, 32u); // No early success exit either.
+    EXPECT_TRUE(std::all_of(changed.begin(), changed.end(), [](bool value) { return value; }));
 }
 
 // An empty request is a no-op rather than a call, which matters because `getentropy(ptr, 0)` on a
