@@ -231,3 +231,5 @@ endif()
 sharp_runtime_get_enabled_components(sharp_runtime_enabled_components)
 list(JOIN sharp_runtime_enabled_components ", " sharp_runtime_enabled_summary)
 message(STATUS "Sharp Runtime components: ${sharp_runtime_enabled_summary}")
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Install.cmake")

@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) Robert Vokac and contributors
+cmake_minimum_required(VERSION 3.20)
+project(SharpRuntimeInstalledConsumer LANGUAGES CXX)
+
+set(SR_FIND_VERSION "0.1" CACHE STRING "Requested installed package version")
+set(SR_REQUIRED_COMPONENT "Core.Base" CACHE STRING "Component required by this consumer")
+option(SR_TEST_FULL_PACKAGE "Exercise JSON, XML, zlib and ZIP dependencies" ON)
+find_package(SharpRuntime ${SR_FIND_VERSION} CONFIG REQUIRED COMPONENTS ${SR_REQUIRED_COMPONENT})
+# A second lookup must be harmless, including the Xml.XPath alias.
+find_package(SharpRuntime ${SR_FIND_VERSION} CONFIG REQUIRED)
+
+enable_testing()
+add_executable(installed_core core.cpp)
+target_link_libraries(installed_core PRIVATE SharpRuntime::Core.Base)
+add_test(NAME installed.core COMMAND installed_core)
+
+if(SR_TEST_FULL_PACKAGE)
+    foreach(component All Xml.XPath IO.Compression.Zip Text.Json)
+        if(NOT TARGET "SharpRuntime::${component}")
+            message(FATAL_ERROR "Full installation lacks SharpRuntime::${component}")
+        endif()
+    endforeach()
+    get_target_property(xpath_target SharpRuntime::Xml.XPath ALIASED_TARGET)
+    if(NOT xpath_target STREQUAL "SharpRuntime::Xml")
+        message(FATAL_ERROR "Xml.XPath must alias the same Xml archive")
+    endif()
+    add_executable(installed_full full.cpp)
+    target_link_libraries(installed_full PRIVATE SharpRuntime::Text.Json SharpRuntime::Xml.XPath
+        SharpRuntime::IO.Compression SharpRuntime::IO.Compression.Zip)
+    add_test(NAME installed.full COMMAND installed_full)
+else()
+    foreach(component All IO Text.Json Xml Threading)
+        if(TARGET "SharpRuntime::${component}")
+            message(FATAL_ERROR "Core.Base installation unexpectedly exports ${component}")
+        endif()
+    endforeach()
+endif()
+
+get_property(consumers DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(consumer IN LISTS consumers)
+    if(MSVC)
+        target_compile_options(${consumer} PRIVATE /W4 /WX)
+    else()
+        target_compile_options(${consumer} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+endforeach()

@@ -162,6 +162,11 @@ See [CMake components](docs/CMakeComponents.md) and the
 [generated component catalogue](docs/ComponentCatalog.md) for the complete
 dependency and external-library map.
 
+Binary SDK consumers can use `find_package(SharpRuntime 0.1 CONFIG REQUIRED)`
+after `cmake --install build --component SharpRuntime --prefix <sdk>`.
+See [the installed, relocatable package](docs/InstalledPackage.md) for component
+selection, external dependencies and source-independent regression checks.
+
 ### Selective component tests
 
 A selective test configuration builds only the requested component's tests,

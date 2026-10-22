@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) Robert Vokac and contributors
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+@SHARP_RUNTIME_PACKAGE_DEPENDENCIES@
+include("${CMAKE_CURRENT_LIST_DIR}/SharpRuntimeTargets.cmake")
+@SHARP_RUNTIME_PACKAGE_ALIASES@
+
+# The compatibility umbrella exists only in a package built with All, just as it
+# does in the source build. Do not silently turn a selective package into All.
+if(TARGET SharpRuntime::All AND NOT TARGET SHARP_RUNTIME)
+    add_library(SHARP_RUNTIME INTERFACE IMPORTED)
+    set_property(TARGET SHARP_RUNTIME PROPERTY INTERFACE_LINK_LIBRARIES SharpRuntime::All)
+endif()
+foreach(_sr_component IN LISTS SharpRuntime_FIND_COMPONENTS)
+    if(TARGET "SharpRuntime::${_sr_component}")
+        set("SharpRuntime_${_sr_component}_FOUND" TRUE)
+    else()
+        set("SharpRuntime_${_sr_component}_FOUND" FALSE)
+        string(APPEND SharpRuntime_NOT_FOUND_MESSAGE
+            "Component '${_sr_component}' is not present in this Sharp Runtime installation. ")
+    endif()
+endforeach()
+check_required_components(SharpRuntime)
