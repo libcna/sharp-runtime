@@ -63,6 +63,10 @@ def main():
                  f"-DSR_TEST_FULL_PACKAGE={'ON' if args.mode == 'full' else 'OFF'}"]
     if shutil.which("ccache"):
         configure.append("-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
+    # A source-tree embedding is a separate configure-only compatibility check,
+    # never a fallback for the installed consumer tests below.
+    run(configure + ["-DSR_TEST_SUBDIRECTORY=ON", "-DSR_TEST_FULL_PACKAGE=OFF"])
+    configure.append("-DSR_TEST_SUBDIRECTORY=OFF")
     run(configure + ["-DSR_FIND_VERSION=0.1", "-DSR_REQUIRED_COMPONENT=Does.Not.Exist"],
         failure="Component 'Does.Not.Exist' is not present")
     run(configure + ["-DSR_FIND_VERSION=99.0", "-DSR_REQUIRED_COMPONENT=Core.Base"],

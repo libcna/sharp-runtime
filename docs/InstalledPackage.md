@@ -22,6 +22,17 @@ from the existing project release version, with SameMinorVersion compatibility;
 it is not a promise of binary compatibility across compiler/toolchain/ABI changes.
 Use compatible compiler, standard library, architecture and build settings.
 
+`SHARP_RUNTIME_INSTALL` defaults to ON for a standalone Sharp Runtime build and
+OFF when embedded with `add_subdirectory`. The parent can explicitly enable it,
+but must make any build-policy targets it attaches to the dependency exportable
+or keep them build-local while preserving necessary installed ABI/link flags.
+This matters for CNA's private instrumentation, debug-info, Emscripten ABI and
+size-policy targets. The first export commit 42847935 enabled exports in every
+source consumer and exposed these unexported parent links during CNA generation;
+the follow-up preserves the source-consumer default while allowing explicit SDK
+composition. `test/installed` has a separate configure-only parent-policy check,
+followed by the source-independent installed tests (no fallback to source).
+
 The package exports the actual configured component graph. A Core.Base-only
 build does not provide IO, JSON, XML or All. `Xml.XPath` remains an alias of Xml,
 not a second archive. `SharpRuntime::All` and the compatibility `SHARP_RUNTIME`
@@ -88,3 +99,15 @@ cna-demos `build/linux-full/reports/repair-runtime-install-final-v2-*` and
 `repair-runtime-package-after-v2-*`. Producer-gate memory peak 349,163,520 bytes,
 package-gate peak 615,297,024 bytes, zero OOM/high/max events. Package validation
 ran serially after the producer gate.
+
+Embedded-policy follow-up: CNA's existing `cmake-build-multi` configuration and
+generation now pass, including its SDL/platform audits (its pre-existing Draco
+CMP0148 developer warning is unchanged). Sharp's full gate again passed
+18,195/18,195 with zero failures/skips/warnings, memory peak 100,278,272 bytes,
+events zero (`repair-runtime-package-after-v3-*`). Both installed consumer modes
+and both configure-only parent-policy checks passed (`repair-runtime-install-final-v4-*`),
+peak 617,811,968 bytes/events zero. The final-v3 fixture failure, caused by applying
+PRIVATE compiler options to the fixture's new INTERFACE helper, is retained in
+the preceding log; strict flags now apply only to its executable targets. No
+producer or consumer runtime source changed in this follow-up. A full CNA runtime
+suite has not been rerun for this configure-only integration change.

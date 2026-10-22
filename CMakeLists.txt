@@ -232,4 +232,15 @@ sharp_runtime_get_enabled_components(sharp_runtime_enabled_components)
 list(JOIN sharp_runtime_enabled_components ", " sharp_runtime_enabled_summary)
 message(STATUS "Sharp Runtime components: ${sharp_runtime_enabled_summary}")
 
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Install.cmake")
+# A parent owns the install/export policy for its dependency graph. For example,
+# CNA attaches its own instrumentation/ABI interface targets to these archives;
+# those cannot be exported until the parent supplies their installed contract.
+set(_sharp_runtime_install_default OFF)
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    set(_sharp_runtime_install_default ON)
+endif()
+option(SHARP_RUNTIME_INSTALL "Install the configured Sharp Runtime component graph"
+    ${_sharp_runtime_install_default})
+if(SHARP_RUNTIME_INSTALL)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Install.cmake")
+endif()
