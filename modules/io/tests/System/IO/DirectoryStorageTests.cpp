@@ -10,7 +10,13 @@
 #include "System/IO/Directory.hpp"
 #include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/IOException.hpp"
+#include "System/IO/PathTooLongException.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/UnauthorizedAccessException.hpp"
+
+#if !defined(_WIN32)
+#  include <unistd.h>
+#endif
 
 namespace {
 namespace fs = std::filesystem;
@@ -49,6 +55,24 @@ TEST_F(DirectoryStorageTest, CreateRefusesFilesAndAllowsExistingDirectories) {
     EXPECT_NO_THROW(Directory::CreateDirectory(Path("parent/child")));
     EXPECT_TRUE(fs::is_directory(root_ / "parent/child"));
 }
+
+#if !defined(_WIN32)
+// Actual .NET 8 (DirectoryCreationErrorsOracle.cs) and genuine XNA construction both report a
+// denied parent as UnauthorizedAccessException, which is not an IOException.
+TEST_F(DirectoryStorageTest, CreateReportsADeniedParentAsUnauthorizedAccess) {
+    if (::geteuid() == 0) GTEST_SKIP() << "permissions do not bind the superuser";
+    ASSERT_TRUE(fs::create_directory(root_ / "denied"));
+    fs::permissions(root_ / "denied", fs::perms::owner_read | fs::perms::owner_exec);
+    EXPECT_THROW(Directory::CreateDirectory(Path("denied/child")), System::UnauthorizedAccessException);
+    fs::permissions(root_ / "denied", fs::perms::owner_all);
+    EXPECT_FALSE(fs::exists(root_ / "denied/child"));
+}
+
+TEST_F(DirectoryStorageTest, CreateReportsAnOverlongComponentAsPathTooLong) {
+    EXPECT_THROW(Directory::CreateDirectory(Path(std::string(300, 'a'))),
+                 System::IO::PathTooLongException);
+}
+#endif
 
 TEST_F(DirectoryStorageTest, MissingEnumerationRootUsesTypedException) {
     EXPECT_THROW((void)Directory::GetFiles(Path("absent")), System::IO::DirectoryNotFoundException);

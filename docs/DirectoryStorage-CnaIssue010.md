@@ -38,3 +38,24 @@ build/, one compiler, shared ccache; all builds have MemoryHigh4GiB/MemoryMax6Gi
 cross-compiler TMPDIR is the existing build-tmp. No source/test substitution under Wine.
 
 This is a partial ISSUE-010 repair, not closure of all storage/content findings.
+
+## Creation failure categories (2026-10-23)
+
+CreateDirectory reported every native failure as IOException. Actual .NET 8.0.31/Unix
+`DirectoryCreationErrorsOracle.cs` (cna-demos storage evidence) gives
+UnauthorizedAccessException for an unwritable parent and PathTooLongException for a component
+longer than NAME_MAX; genuine XNA container construction under Wine reports the same denial
+type. Two new POSIX tests failed (2 of 7 DirectoryStorageTests) before the change, which maps
+EACCES/EPERM and ENAMETOOLONG accordingly and leaves every other failure an IOException.
+
+A file anywhere in the chain stays an exact IOException. That matches genuine XNA/.NET
+Framework 4 and .NET on Windows; .NET 8 on Unix instead reports a file *ancestor* as
+DirectoryNotFoundException (measured, 1 of 6 oracle checks). Sharp keeps the existing
+IOException there because CNA's XNA layer relies on it; this is a recorded difference, not a
+claim of Unix .NET parity.
+
+Validation: warning-free full build; IO 756/756; full gate 18,230/18,230 across 42 executables,
+zero failures/skips, with the XNA sample fixtures and the original Yacht SOAP fixture on a
+private port; boundaries 44/109. MinGW-w64 strict C++23 syntax check of Directory.cpp passes;
+no Windows runtime is claimed for the change. Reports:
+../cna-demos/build/linux-full/reports/repair-storage-ctor-*.

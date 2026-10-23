@@ -4,6 +4,7 @@
 #include "System/IO/Directory.hpp"
 #include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/IOException.hpp"
+#include "System/IO/PathTooLongException.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/UnauthorizedAccessException.hpp"
 #include "Utf8Path.hpp"
@@ -81,7 +82,15 @@ namespace System::IO {
     void Directory::CreateDirectory(const std::string& path) {
         std::error_code ec;
         std::filesystem::create_directories(CreationOrEnumerationPath(path), ec);
-        if (ec) throw IOException("Failed to create directory: " + ec.message());
+        if (!ec) return;
+        // Interop.IOErrors.cs: denial is not an IOException. A file anywhere in the chain stays a
+        // plain IOException, as on Windows and in .NET Framework (.NET on Unix reports a file
+        // ancestor as DirectoryNotFoundException instead).
+        if (ec == std::errc::permission_denied || ec == std::errc::operation_not_permitted)
+            throw System::UnauthorizedAccessException("Access to the path '" + path + "' is denied.");
+        if (ec == std::errc::filename_too_long)
+            throw PathTooLongException("The file name or path is too long.");
+        throw IOException("Failed to create directory: " + ec.message());
     }
 
     void Directory::Delete(const std::string& path, bool recursive) {
