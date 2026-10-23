@@ -108,3 +108,9 @@ This follow-up changes only tests/documentation, not production behavior or layo
 Evidence is under `../cna-demos/build/linux-full/reports/repair-fileshare-*`.
 Build directories: existing `build/`, focused probes in existing `build-probe/`;
 one compiler at a time, shared ccache, build MemoryHigh4GiB/MemoryMax6GiB/no swap.
+
+Subsequent Windows-targeted product execution passes16/16 existing stream/deletion tests
+under Win64 Wine, including the144-pair Windows sharing matrix. This goes beyond the earlier
+syntax-only check but does not claim native Windows or Windows CNA facade validation.
+See [WindowsFileIoValidation.md](WindowsFileIoValidation.md) for exact source inputs, flags,
+the retained first link failure and the successful unchanged-source build/run.

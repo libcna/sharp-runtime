@@ -46,3 +46,8 @@ CNA delegates DeleteFile; other storage creation/enumeration and content excepti
   under4GiB soft/6GiB hard/no-swap scope. No clean rebuild or temporary build tree.
 
 Reports: cna-demos build/linux-full/reports/repair-storage-filedelete-*.
+
+Follow-up: actual Windows-compiled File/FileStream code passes all16 existing regression tests
+under Win64 Wine, including all4 Windows-applicable deletion tests. This is emulated product
+execution, not native Windows or browser validation. Reproduction and the initial MinGW link
+diagnostic are retained in [WindowsFileIoValidation.md](WindowsFileIoValidation.md).
