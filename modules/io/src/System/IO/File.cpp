@@ -9,11 +9,20 @@
 #include "System/IO/FileAccess.hpp"
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/IOException.hpp"
+#include "System/IO/DirectoryNotFoundException.hpp"
+#include "System/IO/PathTooLongException.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/UnauthorizedAccessException.hpp"
 
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#include <cerrno>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace System::IO {
 
@@ -36,18 +45,48 @@ namespace System::IO {
 
     void File::Delete(const std::string& path) {
         ThrowIfNullOrEmpty(path, "path");
-        // Verified against FileSystem.Unix.cs's DeleteFile: real .NET calls unlink() directly,
-        // which can never remove a directory (fails with EISDIR, translated to a plain
-        // IOException) -- File.Delete never falls back to rmdir. std::filesystem::remove() is
-        // documented to call the equivalent of rmdir when the target is a directory, so it
-        // previously let File::Delete silently delete an empty directory instead of failing.
-        std::error_code ec;
-        if (std::filesystem::is_directory(path, ec) && !ec) {
-            throw IOException("Could not delete '" + path + "': Is a directory.");
+        if (path.find('\0') != std::string::npos)
+            throw System::ArgumentException("Null character in path.", "path");
+        const auto native = Detail::NativePath(path);
+        // Use a file-only operation: a preceding directory check plus remove() can
+        // still remove a directory after a rename, and follows directory symlinks.
+#if defined(_WIN32)
+        if (::DeleteFileW(native.c_str())) return;
+        const auto error = ::GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND) return;
+        if (error == ERROR_PATH_NOT_FOUND)
+            throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
+        if (error == ERROR_ACCESS_DENIED)
+            throw System::UnauthorizedAccessException("Access to the path '" + path + "' is denied.");
+        if (error == ERROR_FILENAME_EXCED_RANGE)
+            throw PathTooLongException("The file name or path is too long.");
+        throw IOException("Failed to delete file '" + path + "': " +
+                          std::system_category().message(static_cast<int>(error)));
+#else
+        if (::unlink(native.c_str()) == 0) return;
+        const int error = errno;
+        if (error == ENOENT) {
+            auto parent = native.parent_path();
+            if (parent.empty()) parent = ".";
+            std::error_code statusError;
+            if (std::filesystem::is_directory(parent, statusError) && !statusError) return;
+            throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
         }
-        // .NET: deleting a file that doesn't exist is not an error.
-        std::filesystem::remove(path, ec);
-        if (ec) throw IOException("Failed to delete file '" + path + "': " + ec.message());
+        if (error == ENOTDIR)
+            throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
+        if (error == EACCES || error == EPERM || error == EISDIR)
+            throw System::UnauthorizedAccessException("Access to the path '" + path + "' is denied.");
+        if (error == ENAMETOOLONG)
+            throw PathTooLongException("The file name or path is too long.");
+        // A read-only filesystem can reject even a nonexistent leaf before lookup.
+        if (error == EROFS) {
+            std::error_code statusError;
+            (void)std::filesystem::status(native, statusError);
+            if (statusError == std::errc::no_such_file_or_directory) return;
+        }
+        throw IOException("Failed to delete file '" + path + "': " +
+                          std::generic_category().message(error));
+#endif
     }
 
     void File::Copy(const std::string& src, const std::string& dst, bool overwrite) {

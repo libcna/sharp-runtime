@@ -21,6 +21,7 @@
 #include "System/FormatException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/NotSupportedException.hpp"
+#include "System/UnauthorizedAccessException.hpp"
 #include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/EndOfStreamException.hpp"
 #include "System/IO/IOException.hpp"
@@ -261,10 +262,12 @@ TEST(FileTests, Delete_RemovesFile) {
 // Real .NET's File.Delete calls unlink() directly, which can never remove a directory --
 // verified against FileSystem.Unix.cs's DeleteFile. Previously this port would silently
 // delete an empty directory passed to File::Delete instead of throwing.
-TEST(FileTests, Delete_OnDirectory_ThrowsIOException) {
+// CNA-DEMOS-ISSUE-010: genuine XNA/.NET 4 and .NET 8 both use
+// UnauthorizedAccessException; the earlier plain-IOException expectation was wrong.
+TEST(FileTests, Delete_OnDirectory_ThrowsUnauthorizedAccessException) {
     std::string dir = tf("delete_me_dir");
     Directory::CreateDirectory(dir);
-    EXPECT_THROW(File::Delete(dir), System::IO::IOException);
+    EXPECT_THROW(File::Delete(dir), System::UnauthorizedAccessException);
     EXPECT_TRUE(Directory::Exists(dir));
     Directory::Delete(dir);
 }
