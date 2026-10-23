@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <mutex>
 #include <optional>
+#include <utility>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten.h>
@@ -21,25 +22,31 @@ namespace SharpRuntime::Storage
     {
         std::mutex rootOverrideMutex;
         std::optional<std::filesystem::path> rootOverride;
+        std::function<std::filesystem::path()> rootResolver;
     }
 
     std::filesystem::path StoragePaths::GetIsolatedStorageRoot()
     {
         std::filesystem::path configuredRoot;
+        std::function<std::filesystem::path()> resolver;
         {
             const std::scoped_lock lock(rootOverrideMutex);
             if (rootOverride.has_value())
             {
                 configuredRoot = *rootOverride;
             }
+            resolver = rootResolver;
         }
 
-        if (!configuredRoot.empty())
-        {
-            std::filesystem::create_directories(configuredRoot);
-            return configuredRoot;
-        }
+        if (resolver) configuredRoot = resolver();
+        else if (configuredRoot.empty()) configuredRoot = GetDefaultIsolatedStorageRootPath();
 
+        std::filesystem::create_directories(configuredRoot);
+        return configuredRoot;
+    }
+
+    std::filesystem::path StoragePaths::GetDefaultIsolatedStorageRootPath()
+    {
 #if defined(__EMSCRIPTEN__)
         // On Emscripten, persist save data under /save which is mounted as
         // IDBFS by the application startup code so data survives page reloads.
@@ -56,13 +63,13 @@ namespace SharpRuntime::Storage
 #else
         const std::filesystem::path root = std::filesystem::current_path() / ".cna_isolated_storage";
 #endif
-        std::filesystem::create_directories(root);
         return root;
     }
 
     void StoragePaths::SetIsolatedStorageRootOverride(const std::filesystem::path& root)
     {
         const std::scoped_lock lock(rootOverrideMutex);
+        rootResolver = {};
         if (root.empty())
         {
             rootOverride.reset();
@@ -71,5 +78,12 @@ namespace SharpRuntime::Storage
         {
             rootOverride = root;
         }
+    }
+
+    void StoragePaths::SetIsolatedStorageRootResolver(std::function<std::filesystem::path()> resolver)
+    {
+        const std::scoped_lock lock(rootOverrideMutex);
+        rootOverride.reset();
+        rootResolver = std::move(resolver);
     }
 }
