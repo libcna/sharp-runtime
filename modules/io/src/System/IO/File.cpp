@@ -134,7 +134,7 @@ namespace System::IO {
     }
 
     FileStream File::Create(const std::string& path) {
-        return FileStream(path, FileMode::Create, FileAccess::ReadWrite);
+        return FileStream(path, FileMode::Create, FileAccess::ReadWrite, FileShare::None);
     }
 
     FileStream File::OpenRead(const std::string& path) {

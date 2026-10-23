@@ -3,11 +3,12 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
-#include <fstream>
+#include <memory>
 #include <string>
 
 #include "System/IO/FileAccess.hpp"
 #include "System/IO/FileMode.hpp"
+#include "System/IO/FileShare.hpp"
 #include "System/IO/Stream.hpp"
 
 namespace System::IO
@@ -20,20 +21,16 @@ namespace System::IO
     class FileStream : public Stream
     {
     private:
-        std::fstream file_;
-        std::string  path_;
-        intcs        length_;
+        struct NativeFile;
+        std::unique_ptr<NativeFile> file_;
         bool         canRead_;
         bool         canWrite_;
 
         /**
          * @brief Throws if the file has been closed.
          *
-         * Ticket #2099 (SR-AUD-342, cause I-A). `FileStream` needs no `closed_` flag of its
-         * own: `file_.is_open()` already *is* the closed state, `Close()` already clears it,
-         * and the three capability properties already consult it. That is why this repair is
-         * layout-neutral and did not have to wait for #2098's storage decision (Approval
-         * IO-1) -- the same reason #2108 split `UnmanagedMemoryStream` out of #2098.
+         * Ticket #2099 (SR-AUD-342, cause I-A). The owned handle is the closed state;
+         * Close clears it and all three capability properties consult it.
          *
          * Every member that depends on the closed file routes through here, including the
          * four that were already correct, so they cannot drift apart again. It is checked
@@ -44,17 +41,18 @@ namespace System::IO
 
     public:
         /**
-         * @brief Opens a file for reading (FileMode::Open).
+         * @brief Opens an existing file for reading and writing, sharing read access.
          */
         explicit FileStream(const std::string& path);
 
         /**
-         * @brief Opens or creates a file with the specified FileMode.
+         * @brief Opens or creates a file with the specified FileMode, sharing read access.
+         * Access is Write for Append and ReadWrite otherwise.
          */
         FileStream(const std::string& path, FileMode mode);
 
         /**
-         * @brief Opens or creates a file with the specified FileMode and FileAccess.
+         * @brief Opens or creates a file with the specified FileMode and FileAccess, sharing read access.
          * @throws System::ArgumentException if @p access includes Read with FileMode::Append, or
          *         if @p access excludes Write with a mode that requires write access
          *         (Truncate, CreateNew, Create, Append).
@@ -65,7 +63,21 @@ namespace System::IO
          */
         FileStream(const std::string& path, FileMode mode, FileAccess access);
 
-        /** Destroys the FileStream and closes the file. */
+        /**
+         * @brief Opens a file with native platform sharing on the same handle as the stream.
+         * Windows enforces the access/share mask. POSIX follows .NET's advisory policy:
+         * None takes an exclusive nonblocking lock, other values a shared lock; unsupported
+         * locking is best-effort. This does not make POSIX sharing mandatory for other tools.
+         * @throws System::IO::IOException for a sharing conflict, before Create/Truncate
+         *         can change the existing file's contents.
+         */
+        FileStream(const std::string& path, FileMode mode, FileAccess access, FileShare share);
+
+        // Keep the ownership traits previously supplied by std::fstream and the destructor.
+        FileStream(const FileStream&) = delete;
+        FileStream& operator=(const FileStream&) = delete;
+
+        /** Destroys the FileStream and closes the file without throwing. Use Flush/Close to detect write errors. */
         ~FileStream() override;
 
         /**
@@ -118,7 +130,7 @@ namespace System::IO
         /**
          * @brief Returns true if the stream is open with write access -- false once closed.
          *
-         * Folds in file_.is_open() as well as the requested access, matching real .NET's
+         * Folds in IsOpen() as well as the requested access, matching real .NET's
          * `OSFileStreamStrategy.CanWrite => !_fileHandle.IsClosed && (_access & FileAccess.Write)
          * != 0` (Strategies/OSFileStreamStrategy.cs:75), reached through FileStream.CanWrite
          * (FileStream.cs:389). Ticket #1842: before this, the override returned the bare
@@ -129,21 +141,21 @@ namespace System::IO
          * MemoryStream (whose .NET CanWrite is `=> _writable` and stays true after close, #1826),
          * .NET FileStream folds the closed state into BOTH directions, so both do here.
          */
-        [[nodiscard]] bool  getCanWriteProperty() const override { return canWrite_ && file_.is_open(); }
+        [[nodiscard]] bool  getCanWriteProperty() const override { return canWrite_ && IsOpen(); }
         /**
          * @brief Returns true if the stream is open with read access -- false once closed.
          *
-         * Folds in file_.is_open(), matching `OSFileStreamStrategy.CanRead => !_fileHandle.IsClosed
+         * Folds in IsOpen(), matching `OSFileStreamStrategy.CanRead => !_fileHandle.IsClosed
          * && (_access & FileAccess.Read) != 0` (Strategies/OSFileStreamStrategy.cs:73). See
          * getCanWriteProperty() above for the ticket #1842 rationale; the two are symmetric for
          * FileStream, matching .NET.
          */
-        [[nodiscard]] bool  getCanReadProperty()  const override { return canRead_ && file_.is_open(); }
+        [[nodiscard]] bool  getCanReadProperty()  const override { return canRead_ && IsOpen(); }
         /** Returns true if the underlying file is open. */
         [[nodiscard]] bool  IsOpen() const;
 
         /** Returns true if the underlying file is open (FileStream always supports seeking while open). */
-        [[nodiscard]] bool  getCanSeekProperty() const override { return file_.is_open(); }
+        [[nodiscard]] bool  getCanSeekProperty() const override { return IsOpen(); }
         /**
          * @brief Returns the current read/write position within the file.
          *

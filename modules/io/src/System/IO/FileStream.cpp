@@ -5,6 +5,11 @@
 #include "Utf8Path.hpp"
 
 #include <optional>
+#include <cerrno>
+#include <cstdio>
+#include <cstdint>
+#include <limits>
+#include <utility>
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -17,6 +22,17 @@
 #include "System/IO/PathTooLongException.hpp"
 
 #include <filesystem>
+
+#if defined(_WIN32)
+#include <windows.h>
+#include <fcntl.h>
+#include <io.h>
+#else
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace System::IO
 {
@@ -45,7 +61,17 @@ namespace System::IO
             return mode == FileMode::Append ? FileAccess::Write : FileAccess::ReadWrite;
         }
 
-        void ValidateModeAndAccess(FileMode mode, FileAccess access) {
+        void ValidateModeAndAccess(FileMode mode, FileAccess access, FileShare share) {
+            if (mode < FileMode::CreateNew || mode > FileMode::Append)
+                throw System::ArgumentOutOfRangeException("mode", "Invalid file mode.");
+            if (access < FileAccess::Read || access > FileAccess::ReadWrite)
+                throw System::ArgumentOutOfRangeException("access", "Invalid file access.");
+            // Strategies/FileStreamHelpers.cs:63-113 validates all enum domains before
+            // checking mode/access combinations; Inheritable is outside the sharing mask.
+            constexpr int validShare = static_cast<int>(FileShare::ReadWrite) | static_cast<int>(FileShare::Delete) |
+                                       static_cast<int>(FileShare::Inheritable);
+            if ((static_cast<int>(share) & ~validShare) != 0)
+                throw System::ArgumentOutOfRangeException("share", "Invalid file sharing flags.");
             if (HasFlag(access, FileAccess::Read) && mode == FileMode::Append) {
                 throw System::ArgumentException("FileMode.Append is invalid with FileAccess.Read.", "access");
             }
@@ -58,7 +84,89 @@ namespace System::IO
                 }
             }
         }
+
+        [[noreturn]] void ThrowIo(const char* operation, int error) {
+            throw IOException(std::string(operation) + ": " + std::generic_category().message(error));
+        }
+
+        [[noreturn]] void ThrowOpenError(const std::string& path, int error) {
+            if (error == ENOENT || error == ENOTDIR) {
+                if (!ParentDirectoryExists(path))
+                    throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
+                throw FileNotFoundException("Unable to find the specified file.", path);
+            }
+            if (error == EACCES || error == EPERM || error == EISDIR)
+                throw System::UnauthorizedAccessException("Access to the path '" + path + "' is denied.");
+            if (error == ENAMETOOLONG)
+                throw PathTooLongException("The file name or path is too long.");
+            ThrowIo("Failed to open file", error);
+        }
+
+        struct Descriptor {
+            int value;
+            ~Descriptor() {
+                if (value < 0) return;
+#if defined(_WIN32)
+                _close(value);
+#else
+                close(value);
+#endif
+            }
+        };
+
+        int SeekFile(std::FILE* file, std::int64_t position, int origin) {
+#if defined(_WIN32)
+            return _fseeki64(file, position, origin);
+#else
+            return fseeko(file, static_cast<off_t>(position), origin);
+#endif
+        }
+
+        std::int64_t TellFile(std::FILE* file) {
+#if defined(_WIN32)
+            const auto position = _ftelli64(file);
+#else
+            const auto position = ftello(file);
+#endif
+            if (position < 0) ThrowIo("Unable to query file position", errno);
+            return position;
+        }
+
+        intcs StreamInteger(std::int64_t value) {
+            // This port's Stream still exposes intcs, not .NET's Int64. Never wrap a native
+            // length/position into a negative result; widening Stream is a separate API change.
+            if (value > (std::numeric_limits<intcs>::max)())
+                throw IOException("File length or position exceeds this Stream's integer range.");
+            return static_cast<intcs>(value);
+        }
     }
+
+    struct FileStream::NativeFile {
+        std::FILE* stream = nullptr;
+        enum class Operation { None, Read, Write };
+        Operation last = Operation::None;
+        std::int64_t appendStart = -1;
+
+        ~NativeFile() { if (stream) std::fclose(stream); }
+
+        void FlushWrites() {
+            if (last == Operation::Write) {
+                if (std::fflush(stream) != 0) ThrowIo("Unable to flush file", errno);
+                last = Operation::None;
+            }
+        }
+        void PrepareRead() {
+            FlushWrites();
+            last = Operation::Read;
+        }
+        void PrepareWrite() {
+            // C update streams require positioning between input and output. This also
+            // discards buffered read-ahead without losing the logical position at EOF.
+            if (last == Operation::Read && SeekFile(stream, 0, SEEK_CUR) != 0)
+                ThrowIo("Unable to switch file to writing", errno);
+            last = Operation::Write;
+        }
+    };
 
     FileStream::FileStream(const std::string& path)
         : FileStream(path, FileMode::Open) {}
@@ -67,12 +175,15 @@ namespace System::IO
         : FileStream(path, mode, DefaultAccessFor(mode)) {}
 
     FileStream::FileStream(const std::string& path, FileMode mode, FileAccess access)
-        : path_(path), length_(0), canRead_(false), canWrite_(false)
+        : FileStream(path, mode, access, FileShare::Read) {}
+
+    FileStream::FileStream(const std::string& path, FileMode mode, FileAccess access, FileShare share)
+        : canRead_(false), canWrite_(false)
     {
         // FileStreamHelpers.cs:64 rejects an empty name before mode/access validation.
         if (path.empty())
             throw System::ArgumentException("The path is empty.", "path");
-        ValidateModeAndAccess(mode, access);
+        ValidateModeAndAccess(mode, access, share);
         // Path.Unix.cs:28-33 rejects embedded NUL before any native open. Otherwise
         // a C-string syscall silently names only the prefix, even for Create/Truncate.
         if (path.find('\0') != std::string::npos)
@@ -117,48 +228,75 @@ namespace System::IO
         bool wantRead  = HasFlag(access, FileAccess::Read);
         bool wantWrite = HasFlag(access, FileAccess::Write);
 
-        std::ios::openmode iosMode = std::ios::binary;
-        if (wantRead)  iosMode |= std::ios::in;
-        if (wantWrite) iosMode |= std::ios::out;
-
-        switch (mode) {
-            case FileMode::CreateNew:
-            case FileMode::Create:
-                iosMode |= std::ios::out | std::ios::trunc;
-                break;
-            case FileMode::Truncate:
-                iosMode |= std::ios::out | std::ios::trunc;
-                break;
-            case FileMode::Append:
-                iosMode |= std::ios::out | std::ios::app;
-                break;
-            case FileMode::OpenOrCreate:
-                if (!exists) iosMode |= std::ios::out | std::ios::trunc; // create empty; nothing to preserve
-                break;
-            case FileMode::Open:
-            default:
-                break; // existence already verified above
-        }
-
-        file_.open(nativePath, iosMode);
-        if (!file_.is_open()) {
-            if (!ParentDirectoryExists(path)) {
+        auto owned = std::make_unique<NativeFile>();
+        const bool inheritable = (share & FileShare::Inheritable) != FileShare::None;
+#if defined(_WIN32)
+        const DWORD desiredAccess = (wantRead ? GENERIC_READ : 0) | (wantWrite ? GENERIC_WRITE : 0);
+        const DWORD creation = mode == FileMode::Append ? OPEN_ALWAYS : static_cast<DWORD>(mode);
+        SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, inheritable ? TRUE : FALSE};
+        HANDLE handle = CreateFileW(nativePath.c_str(), desiredAccess,
+            static_cast<DWORD>(share) & (FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE),
+            &security, creation, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            const auto error = GetLastError();
+            if (error == ERROR_FILE_NOT_FOUND) ThrowOpenError(path, ENOENT);
+            if (error == ERROR_PATH_NOT_FOUND)
                 throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
-            }
-            throw IOException("Failed to open file '" + path + "'.");
+            if (error == ERROR_ACCESS_DENIED) ThrowOpenError(path, EACCES);
+            if (error == ERROR_FILENAME_EXCED_RANGE) ThrowOpenError(path, ENAMETOOLONG);
+            throw IOException("Failed to open file '" + path + "': " +
+                              std::system_category().message(static_cast<int>(error)));
         }
+        const int flags = (wantRead ? (wantWrite ? _O_RDWR : _O_RDONLY) : _O_WRONLY) |
+                          _O_BINARY | (inheritable ? 0 : _O_NOINHERIT);
+        Descriptor descriptor{_open_osfhandle(reinterpret_cast<std::intptr_t>(handle), flags)};
+        if (descriptor.value < 0) {
+            const int error = errno;
+            CloseHandle(handle);
+            ThrowIo("Unable to own file handle", error);
+        }
+        owned->stream = _fdopen(descriptor.value, wantRead ? (wantWrite ? "r+b" : "rb") : "wb");
+#else
+        int flags = wantRead ? (wantWrite ? O_RDWR : O_RDONLY) : O_WRONLY;
+        if (!inheritable) flags |= O_CLOEXEC;
+        if (mode == FileMode::CreateNew) flags |= O_CREAT | O_EXCL;
+        if (mode == FileMode::Create || mode == FileMode::OpenOrCreate || mode == FileMode::Append)
+            flags |= O_CREAT;
+        int opened;
+        do { opened = open(nativePath.c_str(), flags, 0666); } while (opened < 0 && errno == EINTR);
+        Descriptor descriptor{opened};
+        if (opened < 0) ThrowOpenError(path, errno);
 
+        // SafeFileHandle.Unix.cs:413-430 (local .NET11 source), independently measured
+        // on .NET8 Linux: None is exclusive, other modes shared, only contention is fatal.
+        // The owner selected native platform behavior, not emulated Windows sharing.
+        int locked;
+        do { locked = flock(opened, (share == FileShare::None ? LOCK_EX : LOCK_SH) | LOCK_NB); }
+        while (locked < 0 && errno == EINTR);
+        if (locked < 0 && (errno == EWOULDBLOCK || errno == EAGAIN))
+            ThrowIo("The file is being used by another stream", errno);
+
+        // Never pass O_TRUNC to open: a denied share must leave the existing data intact.
+        // SafeFileHandle.Unix.cs:481-499 applies truncation only after acquiring the lock.
+        if ((mode == FileMode::Create || mode == FileMode::Truncate) && ftruncate(opened, 0) != 0)
+            ThrowIo("Unable to truncate file", errno);
+        owned->stream = fdopen(opened, wantRead ? (wantWrite ? "r+b" : "rb") : "wb");
+#endif
+        // fdopen owns the SAME descriptor and does not open/truncate the path again:
+        // POSIX fdopen specification; Microsoft _fdopen descriptor-ownership contract.
+        if (!owned->stream) ThrowIo("Unable to buffer file", errno);
+        descriptor.value = -1;
+        if (mode == FileMode::Append) {
+            if (SeekFile(owned->stream, 0, SEEK_END) != 0) ThrowIo("Unable to append to file", errno);
+            owned->appendStart = TellFile(owned->stream);
+        }
         canRead_  = wantRead;
         canWrite_ = wantWrite;
-
-        // Query length independently of the stream's own read position/access, matching
-        // .NET's FileStream.Length (available regardless of CanRead).
-        std::error_code sizeEc;
-        auto size = std::filesystem::file_size(nativePath, sizeEc);
-        length_ = sizeEc ? 0 : static_cast<intcs>(size);
+        file_ = std::move(owned);
     }
 
-    FileStream::~FileStream() { Close(); }
+    // Destruction releases the resource without throwing; explicit Flush/Close report errors.
+    FileStream::~FileStream() = default;
 
     // Ticket #2099 (SR-AUD-342's surviving half, cause I-A). One funnel, routed through by
     // every member that depends on the open file -- including Read/Write/WriteByte/SetLength,
@@ -166,7 +304,7 @@ namespace System::IO
     // cannot drift apart again. The message is the one those four already raised, unchanged.
     void FileStream::EnsureNotClosed() const
     {
-        if (!file_.is_open())
+        if (!file_)
             throw System::ObjectDisposedException("Cannot access a closed file.");
     }
 
@@ -197,15 +335,14 @@ namespace System::IO
         if (count < 0)
             throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
         if (count == 0) return 0;
-        file_.read(reinterpret_cast<char*>(buffer + offset), count);
-        const intcs bytesRead = static_cast<intcs>(file_.gcount());
+        file_->PrepareRead();
+        const auto bytesRead = std::fread(buffer + offset, 1, static_cast<std::size_t>(count), file_->stream);
+        if (std::ferror(file_->stream)) ThrowIo("Unable to read file", errno);
         // .NET OSFileStreamStrategy.cs:220-223 advances by the actual read count;
         // a short EOF read does not poison position, relative seeks or later writes.
-        // fstream adds failbit with eofbit for that benign short read. Clear only
-        // this EOF state, never badbit or a failure unrelated to end-of-file.
-        if (file_.eof() && !file_.bad())
-            file_.clear(file_.rdstate() & ~(std::ios::eofbit | std::ios::failbit));
-        return bytesRead;
+        // Clear only benign EOF, after checking errors, so a later read can see appended data.
+        if (std::feof(file_->stream)) std::clearerr(file_->stream);
+        return static_cast<intcs>(bytesRead);
     }
 
     void FileStream::Write(const bytecs buffer[], intcs offset, intcs count)
@@ -220,8 +357,10 @@ namespace System::IO
         if (count < 0)
             throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
         if (count == 0) return;
-        file_.write(reinterpret_cast<const char*>(buffer + offset),
-                    static_cast<std::streamsize>(count));
+        file_->PrepareWrite();
+        if (std::fwrite(buffer + offset, 1, static_cast<std::size_t>(count), file_->stream) !=
+            static_cast<std::size_t>(count))
+            ThrowIo("Unable to write file", errno);
     }
 
     // WriteByte had NO validation at all -- not even the is_open() test its Write() sibling
@@ -233,10 +372,7 @@ namespace System::IO
     // inherits both checks; this now matches by performing both in the same order.
     void FileStream::WriteByte(bytecs value)
     {
-        EnsureNotClosed();
-        if (!canWrite_)
-            throw System::NotSupportedException("Stream does not support writing.");
-        file_.put(static_cast<char>(value));
+        Write(&value, 0, 1);
     }
 
     // Flushing a closed file silently did nothing, so a caller could not tell a successful
@@ -245,32 +381,36 @@ namespace System::IO
     void FileStream::Flush()
     {
         EnsureNotClosed();
-        file_.flush();
+        file_->FlushWrites();
     }
 
     void FileStream::Close()
     {
-        if (file_.is_open()) file_.close();
+        if (!file_) return;
+        std::FILE* stream = std::exchange(file_->stream, nullptr);
+        file_.reset();
+        if (std::fclose(stream) != 0) ThrowIo("Unable to close file", errno);
     }
 
     intcs FileStream::getLengthProperty() const {
-        // Verified against FileStream.cs's Length getter: real .NET queries the underlying
-        // file's current length live (accounting for any writes made so far through this
-        // stream), not a value cached once and only ever updated by SetLength(). This port
-        // previously only updated length_ from SetLength(), so a Write() that extended the
-        // file left getLengthProperty() returning the stale construction-time length (often 0
-        // for a freshly created file) until the stream was closed and reopened.
+        // Query the owned handle, not its original path, which might have been renamed or
+        // replaced. Buffered writes must reach that handle before querying its current size.
         EnsureNotClosed();
-        if (canWrite_) {
-            auto& f = const_cast<std::fstream&>(file_);
-            f.flush();
-        }
-        std::error_code ec;
-        auto size = std::filesystem::file_size(Detail::NativePath(path_), ec);
-        return ec ? length_ : static_cast<intcs>(size);
+        file_->FlushWrites();
+#if defined(_WIN32)
+        LARGE_INTEGER size{};
+        if (!GetFileSizeEx(reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(file_->stream))), &size))
+            throw IOException("Unable to query file length: " +
+                std::system_category().message(static_cast<int>(GetLastError())));
+        return StreamInteger(size.QuadPart);
+#else
+        struct stat status{};
+        if (fstat(fileno(file_->stream), &status) != 0) ThrowIo("Unable to query file length", errno);
+        return StreamInteger(status.st_size);
+#endif
     }
 
-    bool FileStream::IsOpen() const { return file_.is_open(); }
+    bool FileStream::IsOpen() const { return file_ != nullptr; }
 
     // Before #2099 this returned tellg()/tellp() on a closed fstream, which is -1: a sentinel
     // where every sibling stream raises. Worse, the sentinel did not stay local -- Stream::Seek
@@ -280,9 +420,7 @@ namespace System::IO
     intcs FileStream::getPositionProperty() const
     {
         EnsureNotClosed();
-        auto& f = const_cast<std::fstream&>(file_);
-        std::streampos pos = canRead_ ? f.tellg() : f.tellp();
-        return static_cast<intcs>(pos);
+        return StreamInteger(TellFile(file_->stream));
     }
 
     // The closed test precedes the argument test: a closed stream reports ObjectDisposedException
@@ -293,9 +431,11 @@ namespace System::IO
         EnsureNotClosed();
         if (value < 0)
             throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
-        file_.clear();
-        if (canRead_)  file_.seekg(static_cast<std::streamoff>(value));
-        if (canWrite_) file_.seekp(static_cast<std::streamoff>(value));
+        // OSFileStreamStrategy.cs:166-170 rejects seeks before the original append boundary.
+        if (value < file_->appendStart)
+            throw IOException("Cannot seek before the start of a file opened for append.");
+        if (SeekFile(file_->stream, value, SEEK_SET) != 0) ThrowIo("Unable to seek file", errno);
+        file_->last = NativeFile::Operation::None;
     }
 
     // Check open state before canWrite_: canWrite_ reflects the access mode requested at
@@ -311,14 +451,25 @@ namespace System::IO
         if (!canWrite_)
             throw System::NotSupportedException("Stream does not support writing.");
 
-        file_.flush();
-        std::error_code ec;
-        std::filesystem::resize_file(path_, static_cast<std::uintmax_t>(value), ec);
-        if (ec) {
-            throw IOException("Unable to set the length of file '" + path_ + "'.");
-        }
-
-        length_ = value;
-        if (getPositionProperty() > value) setPositionProperty(value);
+        if (value < file_->appendStart)
+            throw IOException("Cannot truncate before the start of a file opened for append.");
+        const auto position = TellFile(file_->stream);
+        // Synchronize stdio with the descriptor before changing its size. POSIX fseek may
+        // optimize a seek inside its read-ahead buffer; fflush(input) explicitly discards it.
+        // The Windows CRT uses fseek to discard input (fflush(input) is a no-op there).
+#if !defined(_WIN32)
+        if (std::fflush(file_->stream) != 0) ThrowIo("Unable to synchronize file", errno);
+#endif
+        // Use this handle so a renamed file cannot resize an unrelated replacement.
+        if (SeekFile(file_->stream, position, SEEK_SET) != 0) ThrowIo("Unable to seek file", errno);
+#if defined(_WIN32)
+        const auto error = _chsize_s(_fileno(file_->stream), value);
+        if (error != 0) ThrowIo("Unable to set file length", error);
+#else
+        if (ftruncate(fileno(file_->stream), value) != 0) ThrowIo("Unable to set file length", errno);
+#endif
+        if (SeekFile(file_->stream, position > value ? value : position, SEEK_SET) != 0)
+            ThrowIo("Unable to restore file position", errno);
+        file_->last = NativeFile::Operation::None;
     }
 }
