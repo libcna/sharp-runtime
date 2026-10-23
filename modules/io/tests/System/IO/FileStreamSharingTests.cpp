@@ -10,6 +10,12 @@
 #include <string>
 #include <type_traits>
 #include <cstdlib>
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+#endif
 
 #include "System/IO/FileStream.hpp"
 #include "System/IO/FileShare.hpp"
@@ -306,7 +312,16 @@ TEST_F(FileStreamSharingTest, ExclusiveSharingReachesAnotherProcess)
     FileStream owner(path, FileMode::Open, FileAccess::Read, FileShare::None);
     EXPECT_EXIT({
         try { FileStream child(path, FileMode::Open, FileAccess::Read, FileShare::ReadWrite); }
-        catch (const IOException&) { std::_Exit(17); }
+        catch (const IOException&) {
+            // A fork also copies any hypothetical process-local reservation map. Probe the
+            // kernel directly, without FileStream, so such a map cannot fake this regression.
+            const int descriptor = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+            if (descriptor < 0) std::_Exit(3);
+            const int result = flock(descriptor, LOCK_SH | LOCK_NB);
+            const int error = errno;
+            close(descriptor);
+            std::_Exit(result < 0 && (error == EWOULDBLOCK || error == EAGAIN) ? 17 : 4);
+        }
         std::_Exit(0);
     }, ::testing::ExitedWithCode(17), "");
     owner.Close();

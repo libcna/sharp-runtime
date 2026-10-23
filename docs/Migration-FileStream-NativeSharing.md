@@ -24,6 +24,11 @@ Reference measurements in `../cna-demos/docs/repair-evidence/storage/` use actua
 .NET Framework4 on Wine/Windows and .NET8 on Linux: of144 access/share pairs,
 Windows refuses119 and allows25; Linux refuses63 and allows81. The native tests
 assert these distinct matrices, not a weakened common denominator.
+The later FileShareFlagsOracle.cs reference run also covers all16 valid share masks:
+Framework4 allows400/refuses1904 of2304 pairs; .NET8 Linux allows2025/refuses279.
+Both have zero policy mismatches and pass the append-boundary/overwrite controls.
+Only the exact None value is exclusive in the measured Unix policy, including when
+Delete and Inheritable flags are considered.
 
 Rejected Create/Truncate opens must leave existing bytes intact. POSIX therefore
 opens without O_TRUNC, acquires the lock, and only then truncates. Write-only
@@ -94,6 +99,12 @@ are not sanitizer-instrumented, so this is not a whole-library sanitizer claim.
 CNA storage consumers were rebuilt:46/50 passed before CNA forwarding/default repairs,
 then50/50 passed with those repairs. Full demo rebuild/revalidation is still required;
 do not treat this dependency checkpoint as final ISSUE-152 closure.
+Follow-up regression audit: the child now also attempts a direct native flock, bypassing
+FileStream. A fork copies a hypothetical process-local reservation map, so checking only
+another FileStream in that child was not sufficient evidence of kernel interoperability.
+The strengthened test still passes; the full warning-free build and18,218/18,218 gate
+were repeated with zero skips/failures, and the final focused sanitizer suite passes23/23.
+This follow-up changes only tests/documentation, not production behavior or layout.
 Evidence is under `../cna-demos/build/linux-full/reports/repair-fileshare-*`.
 Build directories: existing `build/`, focused probes in existing `build-probe/`;
 one compiler at a time, shared ccache, build MemoryHigh4GiB/MemoryMax6GiB/no swap.
