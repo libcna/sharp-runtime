@@ -11,6 +11,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the
 
 ### Fixed
 
+- Net.Sockets builds under Emscripten again: `Socket.cpp` no longer fails `-Werror` on a
+  shutdown flag that only the native path reads (`-Wunused-but-set-variable`).
+
 - FileStream preserves native path-status errors instead of reporting overlong or
   inaccessible paths as missing files. See [migration details](docs/Migration-FileStream-StatusErrors.md).
 

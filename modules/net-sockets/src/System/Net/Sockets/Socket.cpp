@@ -325,7 +325,8 @@ int Socket::asyncOperationCountForTesting() const {
 
 void Socket::waitForAsyncOperations(bool discardDescriptor) noexcept {
     if (!asyncOps_) return;
-    bool needsShutdown = false;
+    // Read only by the native shutdown() below; Emscripten has no shutdown() to wake workers.
+    [[maybe_unused]] bool needsShutdown = false;
     {
         std::unique_lock<std::mutex> lock(asyncOps_->mutex);
         asyncOps_->stopping = true;
