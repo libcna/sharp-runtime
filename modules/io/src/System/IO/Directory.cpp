@@ -6,6 +6,7 @@
 #include "System/IO/IOException.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/UnauthorizedAccessException.hpp"
+#include "Utf8Path.hpp"
 
 #include <filesystem>
 #include <regex>
@@ -15,6 +16,13 @@ namespace System::IO {
     namespace {
         void ThrowIfNullOrEmpty(const std::string& path, const std::string& paramName) {
             if (path.empty()) throw System::ArgumentException("Path cannot be the empty string.", paramName);
+        }
+
+        std::filesystem::path CreationOrEnumerationPath(const std::string& path) {
+            ThrowIfNullOrEmpty(path, "path");
+            if (path.find('\0') != std::string::npos)
+                throw System::ArgumentException("Null character in path.", "path");
+            return Detail::NativePath(path);
         }
 
         [[noreturn]] void ThrowEnumerationError(const std::string& path,
@@ -35,7 +43,7 @@ namespace System::IO {
         template <typename Visitor>
         void ForEachDirectoryEntry(const std::string& path, Visitor&& visitor) {
             std::error_code error;
-            std::filesystem::directory_iterator iterator(path, error);
+            std::filesystem::directory_iterator iterator(CreationOrEnumerationPath(path), error);
             if (error) ThrowEnumerationError(path, error);
 
             const std::filesystem::directory_iterator end;
@@ -71,9 +79,8 @@ namespace System::IO {
     }
 
     void Directory::CreateDirectory(const std::string& path) {
-        ThrowIfNullOrEmpty(path, "path");
         std::error_code ec;
-        std::filesystem::create_directories(path, ec);
+        std::filesystem::create_directories(CreationOrEnumerationPath(path), ec);
         if (ec) throw IOException("Failed to create directory: " + ec.message());
     }
 
@@ -104,7 +111,7 @@ namespace System::IO {
         std::vector<std::string> result;
         ForEachDirectoryEntry(path, [&](const std::filesystem::directory_entry& entry) {
             if (IsRegularFile(entry, path))
-                result.push_back(entry.path().string());
+                result.push_back(Detail::Utf8Of(entry.path()));
         });
         return result;
     }
@@ -131,9 +138,9 @@ namespace System::IO {
         std::vector<std::string> result;
         ForEachDirectoryEntry(path, [&](const std::filesystem::directory_entry& entry) {
             if (IsRegularFile(entry, path)) {
-                std::string fname = entry.path().filename().string();
+                std::string fname = Detail::Utf8Of(entry.path().filename());
                 if (std::regex_match(fname, rx))
-                    result.push_back(entry.path().string());
+                    result.push_back(Detail::Utf8Of(entry.path()));
             }
         });
         return result;
@@ -143,7 +150,7 @@ namespace System::IO {
         std::vector<std::string> result;
         ForEachDirectoryEntry(path, [&](const std::filesystem::directory_entry& entry) {
             if (IsDirectory(entry, path))
-                result.push_back(entry.path().string());
+                result.push_back(Detail::Utf8Of(entry.path()));
         });
         return result;
     }
