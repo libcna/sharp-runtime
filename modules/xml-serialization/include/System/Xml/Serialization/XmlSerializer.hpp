@@ -3,9 +3,12 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <vector>
 
 #include "System/Collections/Generic/List.hpp"
@@ -352,12 +355,24 @@ namespace System::Xml::Serialization {
             return element != nullptr && element->GetAttribute("xsi:nil") == "true";
         }
 
+        /** @brief A registered field's value, or a registered property's getter result. */
+        template <typename Composite, typename Member>
+        [[nodiscard]] static decltype(auto) MemberValue(const Composite& value, const Member& member) {
+            if constexpr (detail::IsXmlProperty<Member>::value) {
+                return (value.*(member.get))();
+            } else {
+                return (value.*(member.ptr));
+            }
+        }
+
         template <typename Composite>
         static void WriteMembers(System::Xml::XmlDocument& doc, System::Xml::XmlElement* element,
                                   const Composite& value) {
             auto members = SharpXmlMembers(static_cast<const Composite*>(nullptr));
             std::apply(
-                [&](const auto&... member) { (WriteValue(doc, element, member.name, value.*(member.ptr)), ...); },
+                [&](const auto&... member) {
+                    (WriteValue(doc, element, member.name, MemberValue(value, member)), ...);
+                },
                 members);
         }
 
@@ -413,8 +428,20 @@ namespace System::Xml::Serialization {
             }
         }
 
+        /** @brief Reads one element into a registered field, or into a property's setter. */
+        template <typename Composite, typename Member>
+        static void ReadMember(System::Xml::XmlElement* found, Composite& out, const Member& member) {
+            if constexpr (detail::IsXmlProperty<Member>::value) {
+                typename Member::ValueType value{};
+                ReadInto(found, value);
+                (out.*(member.set))(value);
+            } else {
+                ReadInto(found, out.*(member.ptr));
+            }
+        }
+
         /**
-         * @brief Reads every registered member that is present.
+         * @brief Reads every registered member that is present, in document order.
          *
          * **A missing element leaves the member at its default and is not an error**, which is
          * .NET's own behaviour: `XmlSerializer` only reports a missing member when it is
@@ -422,21 +449,34 @@ namespace System::Xml::Serialization {
          * the kind. Throwing here instead would reject a real save file written by an older
          * build of the same game -- exactly the compatibility this module exists to provide.
          * `XmlSerializerTests.Deserialize_MissingElement_LeavesTheMemberAtItsDefault` pins it.
+         *
+         * Elements are applied in the order the document lists them, and only a member's first
+         * element counts, as .NET's generated reader does. That order is observable when one
+         * property's setter overwrites another's state: genuine XNA reads
+         * `<R>1</R>...<PackedValue>4278190335</PackedValue>` as the packed value.
          */
         template <typename Composite>
         static void ReadMembers(System::Xml::XmlElement* element, Composite& out) {
-            auto members = SharpXmlMembers(static_cast<const Composite*>(nullptr));
-            std::apply(
-                [&](const auto&... member) {
-                    (
-                        [&] {
-                            System::Xml::XmlElement* found = FindChildElement(element, member.name);
-                            if (found == nullptr) return;
-                            ReadInto(found, out.*(member.ptr));
-                        }(),
-                        ...);
-                },
-                members);
+            using Members = decltype(SharpXmlMembers(static_cast<const Composite*>(nullptr)));
+            const Members members = SharpXmlMembers(static_cast<const Composite*>(nullptr));
+            std::array<bool, std::tuple_size_v<Members>> read{};
+            for (System::Xml::XmlNode* child = element->getFirstChildProperty(); child != nullptr;
+                 child = child->getNextSiblingProperty()) {
+                const std::string name = child->getNameProperty();
+                std::size_t index = 0;
+                std::apply(
+                    [&](const auto&... member) {
+                        (
+                            [&] {
+                                const std::size_t at = index++;
+                                if (read[at] || name != member.name) return;
+                                read[at] = true;
+                                ReadMember(static_cast<System::Xml::XmlElement*>(child), out, member);
+                            }(),
+                            ...);
+                    },
+                    members);
+            }
         }
     };
 

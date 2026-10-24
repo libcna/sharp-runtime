@@ -45,6 +45,46 @@ namespace System::Xml::Serialization::detail {
         return XmlMember<Class, Member>{name, ptr};
     }
 
+    /**
+     * @brief One public read/write *property*: an XML element name with the getter and setter a
+     * C++ port spells it as.
+     *
+     * `XmlSerializer` writes every public read/write property as well as every public field, and
+     * a type such as XNA's `Color` has properties only. Writing reads the getter; reading builds a
+     * fresh value from the element and passes it to the setter, as .NET's generated reader does,
+     * so a property whose setter changes other state (`Color.PackedValue`, `Rectangle.Location`)
+     * overwrites what an earlier element set.
+     */
+    template <typename Class, typename Value, typename Getter, typename Setter>
+    struct XmlProperty {
+        using ValueType = Value;
+        const char* name;
+        Getter get;
+        Setter set;
+    };
+
+    /**
+     * @brief Builds an `XmlProperty` from a `get...Property() const` / `set...Property(value)` pair.
+     *
+     * @param name Element name, the C# property's name.
+     * @param getter The const getter.
+     * @param setter The setter.
+     * @return The property binding.
+     */
+    template <typename Class, typename Got, typename Taken>
+    [[nodiscard]] constexpr auto MakeProperty(const char* name, Got (Class::*getter)() const,
+                                              void (Class::*setter)(Taken)) {
+        using Value = std::remove_cvref_t<Got>;
+        return XmlProperty<Class, Value, Got (Class::*)() const, void (Class::*)(Taken)>{
+            name, getter, setter};
+    }
+
+    template <typename T>
+    struct IsXmlProperty : std::false_type {};
+
+    template <typename Class, typename Value, typename Getter, typename Setter>
+    struct IsXmlProperty<XmlProperty<Class, Value, Getter, Setter>> : std::true_type {};
+
     /** @brief One `name <-> enumerator` pair, as registered by `SHARP_XML_E`. */
     template <typename Enum>
     struct XmlEnumEntry {

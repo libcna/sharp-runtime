@@ -14,6 +14,9 @@
 // exercised separately below with a minimal item type.
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <tuple>
+
 #include "System/Xml/Serialization/XmlSerializer.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/IO/MemoryStream.hpp"
@@ -666,4 +669,61 @@ TEST(XmlSerializerTests, ReferenceRoundTripRestoresPointeesAndNulls) {
     ASSERT_NE(back.Animations[0], nullptr);
     EXPECT_EQ(*back.Animations[0], *holder.Animations[0]);
     EXPECT_EQ(back.Animations[1], nullptr);
+}
+
+namespace {
+
+// A stand-in shaped like XNA's Color: no public field, byte properties stored in one packed
+// uint, and a PackedValue property whose setter replaces them all. Measured against genuine XNA
+// 4.0 under Framework4/Wine (museum Pipeline Workshop item 9): XmlSerializer writes every
+// read/write property in declaration order, and reads elements in document order, so a later
+// PackedValue overwrites the bytes an earlier R set.
+class Swatch {
+public:
+    [[nodiscard]] std::uint8_t getRProperty() const { return static_cast<std::uint8_t>(packed_ & 0xFFu); }
+    void setRProperty(std::uint8_t value) { packed_ = (packed_ & ~0xFFu) | value; }
+    [[nodiscard]] std::uint8_t getGProperty() const { return static_cast<std::uint8_t>((packed_ >> 8) & 0xFFu); }
+    void setGProperty(std::uint8_t value) { packed_ = (packed_ & ~0xFF00u) | (static_cast<std::uint32_t>(value) << 8); }
+    [[nodiscard]] std::uint32_t getPackedValueProperty() const { return packed_; }
+    void setPackedValueProperty(std::uint32_t value) { packed_ = value; }
+
+    [[maybe_unused]] friend constexpr const char* SharpXmlRootName(const Swatch*) { return "Swatch"; }
+    [[maybe_unused]] friend constexpr auto SharpXmlMembers(const Swatch*) {
+        using ::System::Xml::Serialization::detail::MakeProperty;
+        return std::make_tuple(MakeProperty("R", &Swatch::getRProperty, &Swatch::setRProperty),
+                               MakeProperty("G", &Swatch::getGProperty, &Swatch::setGProperty),
+                               MakeProperty("PackedValue", &Swatch::getPackedValueProperty,
+                                            &Swatch::setPackedValueProperty));
+    }
+
+private:
+    std::uint32_t packed_ = 0;
+};
+
+}  // namespace
+
+TEST(XmlSerializerTests, PropertyMembersSerializeThroughTheirGettersInDeclarationOrder) {
+    Swatch value;
+    value.setRProperty(10);
+    value.setGProperty(20);
+    const std::string xml = XmlSerializer<Swatch>{}.Serialize(value);
+    EXPECT_NE(xml.find("<R>10</R><G>20</G><PackedValue>5130</PackedValue>"), std::string::npos) << xml;
+}
+
+TEST(XmlSerializerTests, PropertyMembersAreReadInDocumentOrderThroughTheirSetters) {
+    XmlSerializer<Swatch> serializer;
+    // PackedValue last replaces what R and G set, as genuine XNA reads its Color.
+    const Swatch packedLast =
+        serializer.Deserialize("<Swatch><R>1</R><G>2</G><PackedValue>65280</PackedValue></Swatch>");
+    EXPECT_EQ(packedLast.getPackedValueProperty(), 65280u);
+    EXPECT_EQ(packedLast.getRProperty(), 0);
+    EXPECT_EQ(packedLast.getGProperty(), 255);
+    // PackedValue first is then edited by R: document order, not registration order, decides.
+    const Swatch packedFirst =
+        serializer.Deserialize("<Swatch><PackedValue>65280</PackedValue><R>7</R></Swatch>");
+    EXPECT_EQ(packedFirst.getPackedValueProperty(), 65287u);
+    // A missing element leaves the property alone; a repeated one counts once, the first.
+    const Swatch partial = serializer.Deserialize("<Swatch><G>8</G><G>9</G></Swatch>");
+    EXPECT_EQ(partial.getRProperty(), 0);
+    EXPECT_EQ(partial.getGProperty(), 8);
 }

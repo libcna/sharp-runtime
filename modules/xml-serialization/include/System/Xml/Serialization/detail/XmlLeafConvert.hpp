@@ -101,6 +101,10 @@ namespace System::Xml::Serialization::detail {
             return System::Xml::XmlConvert::ToString(value);
         } else if constexpr (std::is_same_v<T, std::int64_t>) {
             return System::Xml::XmlConvert::ToString(value);
+        } else if constexpr (std::is_same_v<T, std::uint8_t>) {
+            return System::Xml::XmlConvert::ToString(value);
+        } else if constexpr (std::is_same_v<T, std::uint32_t>) {
+            return System::Xml::XmlConvert::ToString(value);
         } else {
             static_assert(!sizeof(T), "ToXmlText: unsupported leaf type. Add a branch here, or "
                                        "the type needs SHARP_XML_SERIALIZABLE / SHARP_XML_ENUM.");
@@ -127,6 +131,10 @@ namespace System::Xml::Serialization::detail {
             return System::Xml::XmlConvert::ToInt32(WithoutLeadingPlus(text));
         } else if constexpr (std::is_same_v<T, std::int64_t>) {
             return System::Xml::XmlConvert::ToInt64(WithoutLeadingPlus(text));
+        } else if constexpr (std::is_same_v<T, std::uint8_t>) {
+            return System::Xml::XmlConvert::ToByte(WithoutLeadingPlus(text));
+        } else if constexpr (std::is_same_v<T, std::uint32_t>) {
+            return System::Xml::XmlConvert::ToUInt32(WithoutLeadingPlus(text));
         } else {
             static_assert(!sizeof(T), "FromXmlText: unsupported leaf type.");
         }
