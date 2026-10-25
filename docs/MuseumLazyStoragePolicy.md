@@ -45,6 +45,7 @@ python3 scripts/run_component_tests_with_soap_fixture.py \
   /rv/tmp/samples/SAMPLE-071-Yacht_4_0/xna4-build/bin build
 ```
 
-Durable campaign record: CNA `CNA_MUSEUM_REPAIR_HANDOFF.md`. Detailed local evidence:
+Durable campaign record: CNA's `CNA_MUSEUM_REPAIR_HANDOFF.md`, removed on 2026-10-25 and kept in CNA's Git history
+(`git show 9d49828f4:CNA_MUSEUM_REPAIR_HANDOFF.md`). Detailed local evidence:
 cna-demos `build/linux-full/reports/repair-museum-storage-sharp-*`. Publish this dependency
 before the CNA caller; do not repeat the previously reported unpublished-dependency gap.
