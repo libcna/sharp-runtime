@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(SharpRuntimeInstalledConsumer LANGUAGES CXX)
 
-set(SR_FIND_VERSION "0.1" CACHE STRING "Requested installed package version")
+set(SR_FIND_VERSION "" CACHE STRING "Requested installed package version; empty accepts any")
 set(SR_REQUIRED_COMPONENT "Core.Base" CACHE STRING "Component required by this consumer")
 option(SR_TEST_FULL_PACKAGE "Exercise JSON, XML, zlib and ZIP dependencies" ON)
 option(SR_TEST_SUBDIRECTORY "Check the parent's independent installation policy" OFF)

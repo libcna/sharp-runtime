@@ -3,7 +3,7 @@
 
 # Releasing Sharp Runtime
 
-*Current as of 0.1.0 (2026-10-10).*
+*Current as of 0.2.0 (2026-10-28).*
 
 Sharp Runtime follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html). A release
 is a git tag plus a `CHANGELOG.md` entry — there is no separate release branch, and nothing is
@@ -31,6 +31,7 @@ Everything else derives from that:
 | C++ code | `#include "SharpRuntime/Version.hpp"` → `SharpRuntime::getVersionString()`, `SHARP_RUNTIME_VERSION_MAJOR`, … |
 | CMake consumers | `SHARP_RUNTIME_VERSION` / `PROJECT_VERSION`, set by `project()` |
 | The configure banner | `-- Sharp Runtime: version <x.y.z>` |
+| Installed-package consumers | `SharpRuntimeConfigVersion.cmake`, written by `cmake/Install.cmake` with `SameMinorVersion` compatibility |
 
 `SharpRuntime/Version.hpp` is **generated** by `cmake/Version.cmake` from
 `cmake/templates/Version.hpp.in` into `<build>/generated/include/SharpRuntime/Version.hpp`, and
@@ -44,10 +45,15 @@ Because the header exists only in a configured build tree, `scripts/validate_mod
 of exact paths, not a prefix: an unknown `SharpRuntime/…` include is still reported as unresolved,
 and `test/validate_module_boundaries_test.py` pins both halves.
 
-Two copies are maintained by hand and must be updated as part of a bump:
+These copies are maintained by hand and must be updated as part of a bump:
 
 - `CHANGELOG.md` — the release entry and its link definitions at the bottom.
 - `Doxyfile` — `PROJECT_NUMBER`.
+- `README.md` — the *Current release* line, and on a major or minor bump the
+  `find_package(SharpRuntime <major.minor> …)` example; `docs/InstalledPackage.md` carries the
+  same example. Under `SameMinorVersion` a package refuses a request for an older minor, so the
+  example must name the new one. `scripts/check_installed_package.py` reads the version from the
+  installed package and needs no edit.
 
 ## Numbers that are *not* the product version
 
@@ -120,7 +126,8 @@ commit hash. Tagging is therefore worth doing before a downstream release, not a
    GitHub's *Full compatibility build* job has no such service, so it reports exactly those two
    skips and cannot stand in for this step.
 5. **Commit** the version-bearing files by explicit name (`CMakeLists.txt`, `Doxyfile`,
-   `CHANGELOG.md`), never `git add -A`.
+   `CHANGELOG.md`, `README.md`, and `docs/InstalledPackage.md` when its example changed), never
+   `git add -A`.
 6. **Tag** with a `v` prefix and an annotated tag:
 
    ```bash
@@ -128,8 +135,8 @@ commit hash. Tagging is therefore worth doing before a downstream release, not a
    ```
 
    The tag string carries the `v`; `SHARP_RUNTIME_VERSION_STRING` never does.
-7. **Push only with the project owner's explicit per-action approval** — `CLAUDE.md` rules 3 and 9
-   cover both the branch and the tag — and push the tag explicitly:
+7. **Push only with the project owner's explicit per-action approval** — `CLAUDE.md` § *Working
+   discipline* covers `develop`, `main` and the tag — and push the tag explicitly:
 
    ```bash
    git push origin <branch>

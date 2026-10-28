@@ -6,7 +6,7 @@
 Sharp Runtime can be consumed without its source checkout:
 
 ```cmake
-find_package(SharpRuntime 0.1 CONFIG REQUIRED COMPONENTS Core.Base IO)
+find_package(SharpRuntime 0.2 CONFIG REQUIRED COMPONENTS Core.Base IO)
 target_link_libraries(game PRIVATE SharpRuntime::Core.Base SharpRuntime::IO)
 ```
 
@@ -20,6 +20,8 @@ cmake --install build --component SharpRuntime --prefix /path/to/sdk
 Set the consumer's `CMAKE_PREFIX_PATH` to that prefix. The package version comes
 from the existing project release version, with SameMinorVersion compatibility;
 it is not a promise of binary compatibility across compiler/toolchain/ABI changes.
+Before 1.0 a minor release may change the ABI, so a consumer requesting `0.1`
+does not find a 0.2.x package: raise the requested version and rebuild.
 Use compatible compiler, standard library, architecture and build settings.
 
 `SHARP_RUNTIME_INSTALL` defaults to ON for a standalone Sharp Runtime build and
@@ -64,8 +66,10 @@ package; it does not, by itself, resolve CNA UP-001.
 `scripts/check_installed_package.py` installs an already-built graph to a fresh
 explicit path under `build-probe`, renames the prefix, checks exported files for
 source/build paths, and configures the source-independent `test/installed` fixture
-in the reusable `build-consumer` directory. It verifies missing components and
-incompatible versions are refused, then builds with strict warnings and executes
+in the reusable `build-consumer` directory. It requests the installed package's
+own major.minor, read from `SharpRuntimeConfigVersion.cmake`, so a release bump
+needs no edit there. It verifies missing components, version 99.0 and the
+previous minor version are refused, then builds with strict warnings and executes
 the positive tests. It uses one worker and never deletes existing artifacts.
 
 ```sh

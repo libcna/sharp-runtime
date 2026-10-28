@@ -9,28 +9,133 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-28
+
+A compatibility release driven by the ported XNA demos and the CNA engine. Where a ported game
+observed file I/O, XML or `Uri` behaving differently from .NET, this release follows .NET —
+measured against genuine .NET Framework 4/XNA 4.0 under Wine and .NET 8 on Linux, with the
+oracles retained in the `docs/` notes linked below. It also adds an installed CMake package.
+
+**`FileStream`'s object layout changes in this release** (`sizeof` 576 → 24 on Linux x86-64
+GCC 14), which also affects `IsolatedStorageFileStream`: rebuild every consumer from source and do
+not mix headers or objects from `0.1.0` with this library. No public source spelling is removed.
+
+### Added
+
+- **An installed, relocatable CMake package.** `cmake --install <build> --component SharpRuntime`
+  installs the configured component graph, and a consumer without the source checkout uses
+  `find_package(SharpRuntime 0.2 CONFIG REQUIRED COMPONENTS …)` and `SharpRuntime::<Component>`.
+  `SHARP_RUNTIME_INSTALL` is on for a standalone build and off under `add_subdirectory`
+  ([`docs/InstalledPackage.md`](docs/InstalledPackage.md)). The package version is
+  `SameMinorVersion`-compatible, so a request for `0.1` does not find this release.
+- **`FileStream(path, mode, access, share)`**, the `FileShare` overload (CNA-DEMOS-ISSUE-152).
+- **`Uri::getIsFileProperty()` and `Uri::getLocalPathProperty()`** — the unescaped UTF-8 local
+  path of a file URI, without query or fragment (CNA-DEMOS-ISSUE-101,
+  [details](docs/Migration-UriLocalPathAndFileExists.md)).
+- **`XmlSerializer` serializes read/write properties**, registered with
+  `detail::MakeProperty(name, getter, setter)`, for types such as XNA's `Color` that have
+  properties only. Leaf conversion also takes `uint8_t` and `uint32_t`.
+- **`StoragePaths::SetIsolatedStorageRootResolver` and `GetDefaultIsolatedStorageRootPath`** —
+  hosting extensions, not .NET APIs, that defer the isolated-storage root to its first use, so a
+  missing writable directory no longer stops an application at start-up
+  ([details](docs/MuseumLazyStoragePolicy.md)).
+
+### Changed
+
+- **`FileStream` honours `FileShare` natively** — one `CreateFileW` handle on Windows, one
+  descriptor with a non-blocking `flock` on POSIX, as .NET does on each. The short constructors
+  now use .NET's default `FileShare::Read`; `File::Create` uses `FileShare::None`. A refused
+  `Create`/`Truncate` open leaves the existing bytes intact; write-only `Open`/`OpenOrCreate` no
+  longer truncate; `Append` cannot seek or truncate before its starting end; explicit
+  `Flush`/`Close` report write errors; invalid enum values throw `ArgumentOutOfRangeException`
+  before any file is opened ([details](docs/Migration-FileStream-NativeSharing.md)).
+- **Embedded NUL in XML character data throws `ArgumentException`**, not `XmlException`, from the
+  `XmlWriter` content-writing members and from LINQ to XML serialization, as .NET does
+  (CNA-DEMOS-ISSUE-147, [details](docs/Migration-XmlWriter-NulException.md)).
+- **`File::Delete` deletes files only**: a directory throws `UnauthorizedAccessException` instead
+  of `IOException` and is preserved, a missing parent throws `DirectoryNotFoundException`, and a
+  symlink to a directory is unlinked without touching its target
+  ([details](docs/FileDeletion-XnaStorage.md)).
+- **`Directory::CreateDirectory`** reports an unwritable parent as
+  `UnauthorizedAccessException` and an overlong component as `PathTooLongException`, instead of
+  `IOException` for every failure (CNA-DEMOS-ISSUE-010,
+  [details](docs/DirectoryStorage-CnaIssue010.md)).
+- **`XmlReader::CreateFromString` and `XmlDocument::LoadXml` reject a leading U+FEFF** in an
+  already-decoded string, as .NET does; loading from a file still accepts a byte-order mark
+  (CNA-DEMOS-ISSUE-148, [details](docs/XmlCharacterInputBoundary.md)).
+- **`XmlSerializer` reads members in document order**, each member's first element only, as .NET
+  does. The order was invisible while every member was a separate field; it matters once one
+  property's setter overwrites another's state.
+
 ### Fixed
 
-- Net.Sockets builds under Emscripten again: `Socket.cpp` no longer fails `-Werror` on a
-  shutdown flag that only the native path reads (`-Wunused-but-set-variable`).
+- **XML processing instructions parse at every legal position**, not only before every other
+  node, so whatever the writers emit reads back. This is a narrow repair of the vendored tinyxml2
+  parser ([details](docs/VendoredTinyXml2.md)); the XML declaration must still come first.
+- `FileStream` keeps its real position after a short or empty read at end of file, so relative
+  seeks and later writes work (CNA-DEMOS-ISSUE-056, [details](docs/Migration-FileStream-EOF.md)).
+- `FileStream` distinguishes an existing directory from a missing file and keeps .NET's
+  mode/access validation and `CreateNew` exception precedence (CNA-DEMOS-ISSUE-145,
+  [details](docs/Migration-FileStream-Directories.md)).
+- `FileStream` rejects empty and embedded-NUL names before touching the filesystem, so a
+  prefix-named file can no longer be opened or truncated by accident
+  ([details](docs/Migration-FileStream-InvalidPaths.md)), and reports overlong or inaccessible
+  paths with their native error instead of as missing files
+  ([details](docs/Migration-FileStream-StatusErrors.md)).
+- `File::Exists` returns `false` for a path containing NUL instead of answering for the existing
+  prefix; `Directory::CreateDirectory`, `GetFiles` and `GetDirectories` reject embedded NUL with
+  `ArgumentException` and forward UTF-8 paths on Windows.
+- `Uri` accepts empty and whitespace-only relative references when `UriKind` permits them,
+  preserving `OriginalString` ([details](docs/Migration-Uri-EmptyRelative.md)).
+- `TypeConverter` refusals name the converter and value types readably instead of as
+  Itanium-mangled symbols.
+- `Net.Sockets` builds under Emscripten with `-Werror` again (`-Wunused-but-set-variable` in
+  `Socket.cpp`).
+- Three tests no longer fail intermittently on a correct implementation: the random-byte
+  chunk-boundary oracle, which rejected a legitimate `0xA5` byte once in 256 runs
+  ([details](docs/RandomEntropyTestOracle.md)); the `FileSystemWatcher` filter-crossing rename
+  test, which did not wait for the deferred `Deleted` callback; and the concurrent `Process`
+  reader test, whose child could exit before any reader ran. None of the three checks was
+  weakened, and no production code changed for them.
 
-- FileStream preserves native path-status errors instead of reporting overlong or
-  inaccessible paths as missing files. See [migration details](docs/Migration-FileStream-StatusErrors.md).
+### Dependency pins
 
-- FileStream rejects empty and embedded-NUL names before filesystem effects,
-  preventing accidental access/truncation of the prefix-named file. See
-  [migration details](docs/Migration-FileStream-InvalidPaths.md).
+Unchanged from `0.1.0`: `vendor/googletest` through its submodule gitlink
+(`7e2c425db2c2e024b2807bfe6d386f4ff068d0d6`), and `vendor/nlohmann` (**3.10.4**),
+`vendor/tinyxml2` (**11.0.0**, with the processing-instruction repair above recorded in
+[`docs/VendoredTinyXml2.md`](docs/VendoredTinyXml2.md)) and `vendor/miniz` (**11.3.1**) checked in
+as source. **zlib** remains a system dependency and **tzdata** still decides two `TimeZoneInfo`
+test expectations, so the tag selects neither. The external test prerequisites are those of
+`0.1.0`: the original Yacht SOAP service and the XNA Game Studio samples tree.
 
-- Uri accepts empty and whitespace-only relative references when UriKind permits
-  them, preserving OriginalString. See [migration details](docs/Migration-Uri-EmptyRelative.md).
+### Known limitations
 
-- FileStream distinguishes an existing directory from a missing file and preserves
-  mode/access validation and CreateNew exception precedence. See
-  [migration details](docs/Migration-FileStream-Directories.md) (CNA-DEMOS-ISSUE-145).
+- Everything listed under `0.1.0` still holds.
+- The verified gate is Linux. The Windows file I/O changes ran as a Windows-targeted MinGW build
+  under Wine ([`docs/WindowsFileIoValidation.md`](docs/WindowsFileIoValidation.md)), not on
+  native Windows. The changed sources were compile-checked for Emscripten only, and no macOS
+  check is recorded for this release.
+- On Unix, `FileShare` is advisory, as in .NET: only `FileShare::None` is exclusive, and a tool
+  that does not take the lock is not stopped.
 
-- FileStream retains its real position after short/empty EOF reads, so relative
-  seeks and subsequent writes work instead of consuming a native failure sentinel.
-  See [migration details](docs/Migration-FileStream-EOF.md) (CNA-DEMOS-ISSUE-056).
+### Verification
+
+- **18,232/18,232** tests pass across **42** executables (one more than `0.1.0`: `Storage`), with
+  0 failed and 0 skipped — including the two live `ServiceModel` tests against a private copy of
+  the original Yacht SOAP service and the five `XnaRealFixtureTests` against the official XNA
+  samples.
+- The module graph is **44 modules / 109 edges**; all **11** selective component configurations
+  pass with their own tests; **55** negative consumer fixtures reject all **284** sites; the 5
+  test-only seams have one definition each.
+- GCC 14.2.0 builds with **0 warnings and 0 errors**, and Clang 19.1.7 builds all 231 production
+  translation units under `-Werror` with **0 warnings**.
+- The Doxygen no-regression gate passes with **2,675 warnings** against the ceiling of 2,675.
+- The installed package, built from the full graph, relocates, refuses requests for `99.0` and
+  `0.1`, and passes both consumer tests (`scripts/check_installed_package.py --mode full`).
+- Verified on Debian GNU/Linux 13 with GCC 14.2.0, Clang 19.1.7, glibc 2.41, CMake 3.31.6,
+  tzdata **2026c**, zlib 1.3.1, Doxygen 1.9.8 and Mono 6.12.0.199. As for `0.1.0`,
+  `vendor/googletest` was a plain copy (`GOOGLETEST_VERSION` 1.16.0) rather than an initialised
+  submodule in the verifying checkout, so its revision was not checked against the gitlink.
 
 ## [0.1.0] — 2026-10-10
 
@@ -236,7 +341,8 @@ instead. See [`docs/releasing.md`](docs/releasing.md).
   (`SHARP_RUNTIME_HAS_NATIVE_INT128`); they are absent on MSVC and 32-bit MinGW, which is a
   known, accepted and permanent boundary.
 
-[Unreleased]: https://github.com/libcna/sharp-runtime/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/libcna/sharp-runtime/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/libcna/sharp-runtime/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/libcna/sharp-runtime/compare/v0.1.0-beta.1...v0.1.0
 [0.1.0-beta.1]: https://github.com/libcna/sharp-runtime/compare/v0.1.0-alpha.1...v0.1.0-beta.1
 [0.1.0-alpha.1]: https://github.com/libcna/sharp-runtime/releases/tag/v0.1.0-alpha.1

@@ -57,9 +57,13 @@ namespace System::Xml::Serialization::detail {
      */
     template <typename Class, typename Value, typename Getter, typename Setter>
     struct XmlProperty {
+        /** @brief The property's value type, the getter's result without cv-ref qualifiers. */
         using ValueType = Value;
+        /** @brief Element name, the C# property's name. */
         const char* name;
+        /** @brief The const getter, called when writing. */
         Getter get;
+        /** @brief The setter, called with a freshly read value when reading. */
         Setter set;
     };
 

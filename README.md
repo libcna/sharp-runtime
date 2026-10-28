@@ -45,7 +45,7 @@ values.
 
 ## Version
 
-Current release: **0.1.0** (pre-1.0 — a minor release may still change the public API; see
+Current release: **0.2.0** (pre-1.0 — a minor release may still change the public API; see
 [`CHANGELOG.md`](CHANGELOG.md) for what the release contains and
 [`docs/releasing.md`](docs/releasing.md) for how versions are managed). Compiled code reads its
 own version from `SharpRuntime::getVersionString()` in `SharpRuntime/Version.hpp`, a header the
@@ -162,7 +162,7 @@ See [CMake components](docs/CMakeComponents.md) and the
 [generated component catalogue](docs/ComponentCatalog.md) for the complete
 dependency and external-library map.
 
-Binary SDK consumers can use `find_package(SharpRuntime 0.1 CONFIG REQUIRED)`
+Binary SDK consumers can use `find_package(SharpRuntime 0.2 CONFIG REQUIRED)`
 after `cmake --install build --component SharpRuntime --prefix <sdk>`.
 See [the installed, relocatable package](docs/InstalledPackage.md) for component
 selection, external dependencies and source-independent regression checks.

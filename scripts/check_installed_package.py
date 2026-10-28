@@ -9,6 +9,7 @@ explicit staging path under build-probe is required; never removes another run.
 import argparse
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
@@ -58,6 +59,14 @@ def main():
     if len(package_configs) != 1:
         raise RuntimeError("Expected exactly one installed SharpRuntimeConfig.cmake")
     package_dir = package_configs[0].parent
+    # Request the installed release's own major.minor rather than a literal, so a
+    # version bump in the root CMakeLists.txt needs no edit here (SameMinorVersion).
+    version_file = package_dir / "SharpRuntimeConfigVersion.cmake"
+    version = re.search(r'set\(PACKAGE_VERSION "(\d+)\.(\d+)\.\d+"\)', version_file.read_text())
+    if not version:
+        raise RuntimeError(f"No PACKAGE_VERSION in {version_file}")
+    major, minor = int(version.group(1)), int(version.group(2))
+    find_version = f"{major}.{minor}"
     configure = ["cmake", "-S", str(root / "test/installed"), "-B", str(root / "build-consumer"),
                  f"-DSharpRuntime_DIR={package_dir}", f"-DCMAKE_PREFIX_PATH={relocated}",
                  f"-DSR_TEST_FULL_PACKAGE={'ON' if args.mode == 'full' else 'OFF'}"]
@@ -67,14 +76,19 @@ def main():
     # never a fallback for the installed consumer tests below.
     run(configure + ["-DSR_TEST_SUBDIRECTORY=ON", "-DSR_TEST_FULL_PACKAGE=OFF"])
     configure.append("-DSR_TEST_SUBDIRECTORY=OFF")
-    run(configure + ["-DSR_FIND_VERSION=0.1", "-DSR_REQUIRED_COMPONENT=Does.Not.Exist"],
+    run(configure + [f"-DSR_FIND_VERSION={find_version}", "-DSR_REQUIRED_COMPONENT=Does.Not.Exist"],
         failure="Component 'Does.Not.Exist' is not present")
     run(configure + ["-DSR_FIND_VERSION=99.0", "-DSR_REQUIRED_COMPONENT=Core.Base"],
         failure='compatible with requested version "99.0"')
+    if minor > 0:
+        # A minor release may break the ABI before 1.0, so the previous minor is refused.
+        previous = f"{major}.{minor - 1}"
+        run(configure + [f"-DSR_FIND_VERSION={previous}", "-DSR_REQUIRED_COMPONENT=Core.Base"],
+            failure=f'compatible with requested version "{previous}"')
     if args.mode == "core":
-        run(configure + ["-DSR_FIND_VERSION=0.1", "-DSR_REQUIRED_COMPONENT=Xml"],
+        run(configure + [f"-DSR_FIND_VERSION={find_version}", "-DSR_REQUIRED_COMPONENT=Xml"],
             failure="Component 'Xml' is not present")
-    run(configure + ["-DSR_FIND_VERSION=0.1", "-DSR_REQUIRED_COMPONENT=Core.Base"])
+    run(configure + [f"-DSR_FIND_VERSION={find_version}", "-DSR_REQUIRED_COMPONENT=Core.Base"])
     run(["cmake", "--build", str(root / "build-consumer"), "--parallel", "1"])
     run(["ctest", "--test-dir", str(root / "build-consumer"), "--output-on-failure", "-j1"])
     if stage.exists():
