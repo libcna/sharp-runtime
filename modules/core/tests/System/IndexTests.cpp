@@ -25,6 +25,16 @@ TEST(IndexTests2, FromEnd_CorrectOffset) {
     EXPECT_EQ(idx.GetOffset(5), 4);
 }
 
+TEST(IndexTests2, Constexpr_GetOffsetIsEvaluatedAtCompileTime) {
+    static_assert(Index::FromEnd(1).GetOffset(10) == 9, "FromEnd(1) over 10 elements is offset 9");
+    static_assert(Index::FromStart(3).GetOffset(10) == 3, "FromStart ignores the length");
+    static_assert(Index::End().GetOffset(10) == 10, "End() points one past the last element");
+    static_assert(Index().getValueProperty() == 0 && !Index().getIsFromEndProperty(),
+                  "the default Index is FromStart(0)");
+    static_assert(Index::FromEnd(1) == Index::FromEnd(1),
+                  "FromEnd(1) is equal to itself");
+}
+
 TEST(IndexTests2, Start_IsZeroFromStart) {
     Index idx = Index::Start();
     EXPECT_EQ(idx.GetOffset(10), 0);

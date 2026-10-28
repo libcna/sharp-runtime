@@ -24,7 +24,7 @@ namespace System {
 
     public:
         /** @brief Initializes an Index that refers to the first element of a collection. */
-        Index() = default;
+        constexpr Index() = default;
 
         /**
          * @brief Initializes an Index with the specified value, optionally from the end.
@@ -37,15 +37,15 @@ namespace System {
          *                last element and index value 0 means pointing at beyond the last element.
          * @throws System::ArgumentOutOfRangeException if @p value is negative.
          */
-        Index(intcs value, bool fromEnd = false) : value_(value), fromEnd_(fromEnd) {
+        constexpr Index(intcs value, bool fromEnd = false) : value_(value), fromEnd_(fromEnd) {
             if (value < 0) throw System::ArgumentOutOfRangeException("value", "value must be non-negative");
         }
 
         /** @brief Returns true if the index is from the end of the collection. */
-        [[nodiscard]] bool getIsFromEndProperty() const noexcept { return fromEnd_; }
+        [[nodiscard]] constexpr bool getIsFromEndProperty() const noexcept { return fromEnd_; }
 
         /** @brief Returns the index value. */
-        [[nodiscard]] intcs getValueProperty() const noexcept { return value_; }
+        [[nodiscard]] constexpr intcs getValueProperty() const noexcept { return value_; }
 
         /**
          * @brief Calculates the offset from the start using the given collection length.
@@ -68,7 +68,7 @@ namespace System {
          * @param length The length of the collection that the Index will be used with.
          * @return The zero-based offset into the collection (unvalidated).
          */
-        [[nodiscard]] intcs GetOffset(intcs length) const noexcept {
+        [[nodiscard]] constexpr intcs GetOffset(intcs length) const noexcept {
             return fromEnd_ ? static_cast<intcs>(static_cast<SharpRuntime::uintcs>(length)
                                                  - static_cast<SharpRuntime::uintcs>(value_))
                             : value_;
@@ -79,8 +79,8 @@ namespace System {
          *
          * C++ counterpart of .NET Index.Equals(Index).
          */
-        [[nodiscard]] bool Equals(const Index& other) const noexcept {
-            return value_ == other.value_ && fromEnd_ == other.fromEnd_;
+        [[nodiscard]] constexpr bool Equals(const Index& other) const noexcept {
+            return *this == other;
         }
 
         /**
@@ -102,22 +102,19 @@ namespace System {
         }
 
         /** @brief Returns true if the two Index values are equal. */
-        friend bool operator==(const Index& lhs, const Index& rhs) noexcept { return lhs.Equals(rhs); }
-
-        /** @brief Returns true if the two Index values are not equal. */
-        friend bool operator!=(const Index& lhs, const Index& rhs) noexcept { return !lhs.Equals(rhs); }
+        friend constexpr bool operator==(const Index&, const Index&) noexcept = default;
 
         /** @brief Creates an Index from the start of a collection at the specified value. */
-        static Index FromStart(intcs value) { return Index(value, false); }
+        static constexpr Index FromStart(intcs value) { return Index(value, false); }
 
         /** @brief Creates an Index from the end of a collection at the specified value. */
-        static Index FromEnd(intcs value)   { return Index(value, true); }
+        static constexpr Index FromEnd(intcs value)   { return Index(value, true); }
 
         /** @brief Returns an Index that points to the first element (index 0). */
-        static Index Start() { return Index(0, false); }
+        static constexpr Index Start() { return Index(0, false); }
 
         /** @brief Returns an Index that points past the last element (from end, offset 0). */
-        static Index End()   { return Index(0, true); }
+        static constexpr Index End()   { return Index(0, true); }
     };
 
 } // namespace System

@@ -6,6 +6,9 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Index.hpp"
+#include <cstdint>
+
+#include "HashCode.hpp"
 
 namespace System {
 
@@ -21,54 +24,43 @@ namespace System {
         Index start_;
         Index end_;
 
-        static std::string indexToString(const Index& idx) {
-            std::string s = idx.getIsFromEndProperty() ? "^" : "";
-            s += std::to_string(idx.getValueProperty());
-            return s;
-        }
-
-        static bool indexEquals(const Index& a, const Index& b) noexcept {
-            return a.getValueProperty() == b.getValueProperty() &&
-                   a.getIsFromEndProperty() == b.getIsFromEndProperty();
-        }
-
     public:
         /**
          * @brief Constructs a Range that covers the entire collection (equivalent to Range.All).
          */
-        Range() : start_(Index::Start()), end_(Index::End()) {}
+        constexpr Range() : start_(Index::Start()), end_(Index::End()) {}
 
         /**
          * @brief Constructs a Range with explicit start and end indexes.
          * @param start Inclusive start index.
          * @param end   Exclusive end index.
          */
-        Range(Index start, Index end) : start_(start), end_(end) {}
+        constexpr Range(Index start, Index end) : start_(start), end_(end) {}
 
         /** @brief Returns the inclusive start index of the range. */
-        [[nodiscard]] const Index& getStartProperty() const noexcept { return start_; }
+        [[nodiscard]] constexpr const Index& getStartProperty() const noexcept { return start_; }
 
         /** @brief Returns the exclusive end index of the range. */
-        [[nodiscard]] const Index& getEndProperty() const noexcept { return end_; }
+        [[nodiscard]] constexpr const Index& getEndProperty() const noexcept { return end_; }
 
         /**
          * @brief Returns a Range that covers all elements of a collection (0..^0).
          *
          * C++ counterpart of .NET Range.All.
          */
-        [[nodiscard]] static Range getAllProperty() { return Range(Index::Start(), Index::End()); }
+        [[nodiscard]] static constexpr Range getAllProperty() { return Range(Index::Start(), Index::End()); }
 
         /**
          * @brief Returns a Range that starts at the specified index and ends at the end of the collection.
          * @param start Inclusive start index.
          */
-        [[nodiscard]] static Range StartAt(Index start) { return Range(start, Index::End()); }
+        [[nodiscard]] static constexpr Range StartAt(Index start) { return Range(start, Index::End()); }
 
         /**
          * @brief Returns a Range from the beginning of the collection to the specified end index.
          * @param end Exclusive end index.
          */
-        [[nodiscard]] static Range EndAt(Index end) { return Range(Index::Start(), end); }
+        [[nodiscard]] static constexpr Range EndAt(Index end) { return Range(Index::Start(), end); }
 
         /** @brief Holds the resolved offset and length for a given collection size. */
         struct OffsetAndLength {
@@ -99,16 +91,18 @@ namespace System {
          * @return Resolved OffsetAndLength value.
          * @throws System::ArgumentOutOfRangeException if the resolved range falls outside [0, length].
          */
-        [[nodiscard]] OffsetAndLength GetOffsetAndLength(SharpRuntime::intcs length) const {
-            SharpRuntime::intcs start = start_.GetOffset(length);
-            SharpRuntime::intcs end   = end_.GetOffset(length);
-            if (static_cast<unsigned>(end) > static_cast<unsigned>(length) ||
-                static_cast<unsigned>(start) > static_cast<unsigned>(end)) {
-                throw System::ArgumentOutOfRangeException("length");
+        [[nodiscard]] constexpr OffsetAndLength GetOffsetAndLength(SharpRuntime::intcs length) const {
+            using SharpRuntime::uintcs;
+            using SharpRuntime::intcs;
+            intcs start = start_.GetOffset(length);
+            intcs end   = end_.GetOffset(length);
+            if (static_cast<uintcs>(end) > static_cast<uintcs>(length) ||
+                static_cast<uintcs>(start) > static_cast<uintcs>(end)) {
+                throw ArgumentOutOfRangeException("length");
             }
-            return { start, static_cast<SharpRuntime::intcs>(
-                                static_cast<SharpRuntime::uintcs>(end)
-                                - static_cast<SharpRuntime::uintcs>(start)) };
+            return { start, static_cast<intcs>(
+                                static_cast<uintcs>(end)
+                                - static_cast<uintcs>(start)) };
         }
 
         /**
@@ -117,8 +111,8 @@ namespace System {
          * C++ counterpart of .NET Range.Equals(Range).
          * @param other The range to compare.
          */
-        [[nodiscard]] bool Equals(const Range& other) const noexcept {
-            return indexEquals(start_, other.start_) && indexEquals(end_, other.end_);
+        [[nodiscard]] constexpr bool Equals(const Range& other) const noexcept {
+            return *this == other;
         }
 
         /**
@@ -126,10 +120,8 @@ namespace System {
          *
          * C++ counterpart of .NET Range.GetHashCode().
          */
-        [[nodiscard]] SharpRuntime::intcs GetHashCode() const noexcept {
-            SharpRuntime::intcs h1 = start_.getValueProperty() ^ (start_.getIsFromEndProperty() ? 0x10000 : 0);
-            SharpRuntime::intcs h2 = end_.getValueProperty()   ^ (end_.getIsFromEndProperty()   ? 0x20000 : 0);
-            return h1 ^ (h2 * 397);
+        [[nodiscard]] SharpRuntime::intcs GetHashCode() const {
+            return HashCode::Combine(start_.GetHashCode(), end_.GetHashCode());
         }
 
         /**
@@ -138,14 +130,11 @@ namespace System {
          * C++ counterpart of .NET Range.ToString(). Examples: "0..^0", "1..5", "^2..^0".
          */
         [[nodiscard]] std::string ToString() const {
-            return indexToString(start_) + ".." + indexToString(end_);
+            return start_.ToString() + ".." + end_.ToString();
         }
 
         /** @brief Returns true if the two ranges are equal. */
-        friend bool operator==(const Range& lhs, const Range& rhs) noexcept { return lhs.Equals(rhs); }
-
-        /** @brief Returns true if the two ranges are not equal. */
-        friend bool operator!=(const Range& lhs, const Range& rhs) noexcept { return !lhs.Equals(rhs); }
+        friend constexpr bool operator==(const Range&, const Range&) noexcept = default;
     };
 
 } // namespace System

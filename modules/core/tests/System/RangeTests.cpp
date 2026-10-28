@@ -89,6 +89,12 @@ TEST(RangeTest, ToString_FromEnd) {
     EXPECT_EQ(r.ToString(), "0..^1");
 }
 
+TEST(RangeTest, ToString_FromEnd_FromEnd) {
+    Range r(Index::FromEnd(2), Index::FromEnd(0));
+    EXPECT_EQ(r.ToString(), "^2..^0");
+}
+
+
 TEST(RangeTest, GetOffsetAndLength_OutOfOrder_Throws) {
     Range r(Index::FromStart(5), Index::FromStart(2));
     EXPECT_THROW(r.GetOffsetAndLength(10), System::ArgumentOutOfRangeException);
@@ -130,6 +136,10 @@ TEST(RangeTest, GetOffsetAndLength_ExtremeFromEndOverNegativeLength_DefinedWrap)
     const auto ol = r.GetOffsetAndLength(-2147483648);
     EXPECT_EQ(ol.Offset, 1);
     EXPECT_EQ(ol.Length, 2147483647);
+
+    static_assert(Range(Index::FromEnd(INT32_MAX), Index::FromEnd(0))
+                  .GetOffsetAndLength(INT32_MIN).Length == INT32_MAX,
+                  "The extreme from-end range over INT32_MIN wraps to INT32_MAX without UB");
 }
 
 // Every ordinary resolution must be untouched.
@@ -150,4 +160,23 @@ TEST(RangeTest, GetOffsetAndLength_StillRejectsWhatItRejectedBefore) {
                  System::ArgumentOutOfRangeException);
     EXPECT_THROW(Range(Index::FromEnd(20), Index::FromStart(5)).GetOffsetAndLength(10),
                  System::ArgumentOutOfRangeException);
+}
+
+TEST(RangeTest, Constexpr_IsEvaluatedAtCompileTime) {
+    static_assert(Range::StartAt(Index::FromStart(3)).GetOffsetAndLength(10).Length == 7,
+        "StartAt(3) over 10 elements covers 7 elements");
+    static_assert(Range::getAllProperty().GetOffsetAndLength(8).Offset == 0,
+        "getAllProperty() over 8 elements starts at 0");
+    static_assert(Range().Equals(Range::getAllProperty()),
+        "Range() is the same as Range::getAllProperty()");
+    static_assert(Range(Index(1), Index(5)) == Range(Index(1), Index(5)),
+                      "operator== is usable in a constant expression");
+    static_assert(Range(Index(1), Index(5)) != Range(Index(1), Index(6)),
+        "operator!= is usable in a constant expression");
+}
+
+TEST(RangeTest, GetHashCode_MaxEndIndex_SameRangesSameHash) {
+    Range a(Index(0), Index(INT32_MAX));
+    Range b(Index(0), Index(INT32_MAX));
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
