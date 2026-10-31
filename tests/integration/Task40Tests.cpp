@@ -1043,8 +1043,8 @@ TEST(OperatingSystemTests, Platform_StoredCorrectly) {
 
 TEST(OperatingSystemTests, Version_StoredCorrectly) {
     OperatingSystem os(PlatformID::Unix, Version(5, 4));
-    EXPECT_EQ(os.getVersionProperty().Major, 5);
-    EXPECT_EQ(os.getVersionProperty().Minor, 4);
+    EXPECT_EQ(os.getVersionProperty().getMajorProperty(), 5);
+    EXPECT_EQ(os.getVersionProperty().getMinorProperty(), 4);
 }
 
 TEST(OperatingSystemTests, IsLinux_TrueOnLinux) {
@@ -1074,7 +1074,7 @@ TEST(OperatingSystemTests, Clone_ReturnsCopy) {
     auto copy = os.Clone();
     ASSERT_NE(copy, nullptr);
     EXPECT_EQ(copy->getPlatformProperty(), PlatformID::Unix);
-    EXPECT_EQ(copy->getVersionProperty().Major, 3);
+    EXPECT_EQ(copy->getVersionProperty().getMajorProperty(), 3);
 }
 TEST(OperatingSystemTests, ToString_ContainsPlatformName) {
     OperatingSystem os(PlatformID::Win32NT, Version(10, 0));

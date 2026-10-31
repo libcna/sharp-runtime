@@ -83,7 +83,7 @@ namespace System {
             switch (platform_) {
                 case PlatformID::Win32S:       name = "Microsoft Win32S "; break;
                 case PlatformID::Win32Windows:
-                    name = (version_.Major > 4 || (version_.Major == 4 && version_.Minor > 0))
+                    name = (version_.getMajorProperty() > 4 || (version_.getMajorProperty() == 4 && version_.getMinorProperty() > 0))
                         ? "Microsoft Windows 98 " : "Microsoft Windows 95 ";
                     break;
                 case PlatformID::Win32NT:      name = "Microsoft Windows NT "; break;

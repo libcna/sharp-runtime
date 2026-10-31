@@ -2,10 +2,14 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <stdexcept>
+
+#include <charconv>
+#include <compare>
+#include <cstddef>
 #include <string>
-#include <sstream>
-#include <vector>
+#include <string_view>
+#include <system_error>
+
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -23,20 +27,21 @@ namespace System {
      * C++ counterpart of .NET System.Version.
      */
     class Version {
-    public:
+    private:
         intcs Major    = 0;  ///< Major version component.
         intcs Minor    = 0;  ///< Minor version component.
         intcs Build    = -1; ///< Build number; -1 means not specified.
         intcs Revision = -1; ///< Revision number; -1 means not specified.
 
+    public:
         /** @brief Constructs a Version with all components set to their defaults (0.0). */
-        Version() = default;
+        constexpr Version() = default;
 
         /**
          * @brief Constructs a Version with the given major and minor components.
          * @throws System::ArgumentOutOfRangeException if @p major or @p minor is negative.
          */
-        Version(intcs major, intcs minor) : Major(major), Minor(minor) {
+        constexpr Version(intcs major, intcs minor) : Major(major), Minor(minor) {
             requireNonNegative(major, "major");
             requireNonNegative(minor, "minor");
         }
@@ -45,7 +50,8 @@ namespace System {
          * @brief Constructs a Version with major, minor, and build components.
          * @throws System::ArgumentOutOfRangeException if @p major, @p minor, or @p build is negative.
          */
-        Version(intcs major, intcs minor, intcs build) : Major(major), Minor(minor), Build(build) {
+        constexpr Version(intcs major, intcs minor, intcs build)
+            : Major(major), Minor(minor), Build(build) {
             requireNonNegative(major, "major");
             requireNonNegative(minor, "minor");
             requireNonNegative(build, "build");
@@ -57,7 +63,7 @@ namespace System {
          *         2-/3-arg overloads, this one validates @p revision too, since it
          *         is explicitly user-supplied here rather than defaulted to -1).
          */
-        Version(intcs major, intcs minor, intcs build, intcs revision)
+        constexpr Version(intcs major, intcs minor, intcs build, intcs revision)
             : Major(major), Minor(minor), Build(build), Revision(revision) {
             requireNonNegative(major, "major");
             requireNonNegative(minor, "minor");
@@ -71,10 +77,11 @@ namespace System {
         /**
          * @brief Parses a version from a dot-separated string.
          *
-         * Real .NET's Version(string)/Version.Parse(string) share the exact same
-         * validation logic and throw the exact same exception types on failure (see
-         * the private parse() helper below) — matched here by simply delegating to
-         * the constructor with no separate exception-translation layer.
+         * Version(string) and Version.Parse(string) share this parser. Each component
+         * follows the NumberStyles.Integer lexical rules used by .NET's
+         * Version.TryParseComponent (`Version.cs:430-434`): leading and trailing
+         * whitespace bytes 0x09–0x0D and 0x20 are accepted, as is an optional sign.
+         * Version then rejects a successfully parsed negative component.
          * @throws System::ArgumentException if the string has fewer than two or more
          *         than four dot-separated components.
          * @throws System::ArgumentOutOfRangeException if a component is negative.
@@ -85,7 +92,46 @@ namespace System {
 
         /** @brief Tries to parse a version string without throwing. Returns true on success. */
         static bool TryParse(const std::string& s, Version& result) {
-            try { result = Version(s); return true; } catch (...) { return false; }
+            intcs parts[4] = {0, 0, -1, -1};
+            std::size_t bad = 0;
+            if (parseCore(s, parts, bad) != ParseError::None) return false;
+            result.Major = parts[0];
+            result.Minor = parts[1];
+            result.Build = parts[2];
+            result.Revision = parts[3];
+            return true;
+        }
+
+        /**
+         * @brief Gets the major component.
+         * Matches .NET Version.Major (`Version.cs:99-100`).
+         */
+        [[nodiscard]] intcs getMajorProperty() const {
+            return Major;
+        }
+
+        /**
+         * @brief Gets the minor component.
+         * Matches .NET Version.Minor (`Version.cs:102`).
+         */
+        [[nodiscard]] intcs getMinorProperty() const {
+            return Minor;
+        }
+
+        /**
+         * @brief Gets the build component, or -1 if it is unspecified.
+         * Matches .NET Version.Build (`Version.cs:104`).
+         */
+        [[nodiscard]] intcs getBuildProperty() const {
+            return Build;
+        }
+
+        /**
+         * @brief Gets the revision component, or -1 if it is unspecified.
+         * Matches .NET Version.Revision (`Version.cs:106`).
+         */
+        [[nodiscard]] intcs getRevisionProperty() const {
+            return Revision;
         }
 
         /**
@@ -105,7 +151,9 @@ namespace System {
         }
 
         /** @brief Compares this version to another. Returns negative, zero, or positive. */
-        [[nodiscard]] intcs CompareTo(const Version& other) const { return cmp(other); }
+        [[nodiscard]] constexpr intcs CompareTo(const Version& other) const noexcept {
+            return cmp(other);
+        }
 
         /** @brief Returns true if this version has equal components to other. */
         [[nodiscard]] bool Equals(const Version& other) const { return cmp(other) == 0; }
@@ -125,13 +173,9 @@ namespace System {
          * @brief Returns the version as a dot-separated string,
          * truncated at the first unspecified (negative) component.
          *
-         * Matching .NET's Version.ToString(), which delegates to ToString(int) with a
-         * short-circuiting field count, this stops at the first component the instance
-         * does not define rather than testing each component independently. The two
-         * differ only for an undefined Build beside a defined Revision — a state no
-         * constructor and no parse() reaches, but which this port's public mutable
-         * fields admit — where testing independently would print Revision in Build's
-         * position, as "1.2.4" (ticket #2259).
+         * Matching .NET's Version.ToString(), this delegates to ToString(intcs) with
+         * a short-circuiting field count: two fields when Build is unspecified, three
+         * when Revision is unspecified, and four when all components are defined.
          */
         [[nodiscard]] std::string ToString() const {
             return ToString(defaultFieldCount());
@@ -146,13 +190,11 @@ namespace System {
          * rejected rather than serialized; emitting the -1 sentinel would produce text
          * like "1.2.-1", which is not a valid version representation (SR-AUD-011).
          *
-         * The two guards test Build and then Revision independently, in .NET's own
-         * order, rather than deriving a component count: Build and Revision are public
-         * mutable fields here, so an instance can hold an undefined Build alongside a
-         * defined Revision — a state no .NET constructor can produce — and the
-         * independent tests give that state .NET's answer. They use the same
-         * "specified means non-negative" predicate the no-argument ToString() applies
-         * to each component, so the two overloads agree about which components exist.
+         * The guards test Build and then Revision in .NET's order. This preserves
+         * the component-specific upper bounds 2 and 3 reported by
+         * Version.TryFormatCore (`Version.cs:204-224`). All public construction and
+         * parsing paths preserve the invariant that Revision can be defined only when
+         * Build is defined.
          *
          * The rejection message is .NET's own, resolved from the reference tree by ticket
          * #2260: `SR.Format(SR.ArgumentOutOfRange_Bounds_Lower_Upper, "0", bound)`, where
@@ -179,27 +221,15 @@ namespace System {
                 throw System::ArgumentException("Argument must be between 0 and 2.", "fieldCount");
             if (fieldCount >= 4 && Revision < 0)
                 throw System::ArgumentException("Argument must be between 0 and 3.", "fieldCount");
-            std::ostringstream oss;
-            oss.imbue(std::locale::classic());
-            oss << Major;
-            if (fieldCount >= 2) oss << '.' << Minor;
-            if (fieldCount >= 3) oss << '.' << Build;
-            if (fieldCount >= 4) oss << '.' << Revision;
-            return oss.str();
+            std::string result = std::to_string(Major);
+            if (fieldCount >= 2) { result += '.'; result += std::to_string(Minor); }
+            if (fieldCount >= 3) { result += '.'; result += std::to_string(Build); }
+            if (fieldCount >= 4) { result += '.'; result += std::to_string(Revision); }
+            return result;
         }
 
-        /** @brief Returns true if this version is equal to o. */
-        bool operator==(const Version& o) const { return cmp(o) == 0; }
-        /** @brief Returns true if this version is not equal to o. */
-        bool operator!=(const Version& o) const { return cmp(o) != 0; }
-        /** @brief Returns true if this version is less than o. */
-        bool operator< (const Version& o) const { return cmp(o) <  0; }
-        /** @brief Returns true if this version is less than or equal to o. */
-        bool operator<=(const Version& o) const { return cmp(o) <= 0; }
-        /** @brief Returns true if this version is greater than o. */
-        bool operator> (const Version& o) const { return cmp(o) >  0; }
-        /** @brief Returns true if this version is greater than or equal to o. */
-        bool operator>=(const Version& o) const { return cmp(o) >= 0; }
+        /** @brief Provides component-wise equality and lexicographic ordering. */
+        friend constexpr auto operator<=>(const Version&, const Version&) noexcept = default;
 
     private:
         /**
@@ -217,12 +247,14 @@ namespace System {
             return 4;
         }
 
-        static void requireNonNegative(intcs value, const char* name) {
+        static constexpr void requireNonNegative(intcs value, const char* name) {
             if (value < 0)
                 throw System::ArgumentOutOfRangeException(name, std::string(name) + " must be greater than or equal to zero.");
         }
 
-        intcs cmp(const Version& o) const {
+        static constexpr bool isWhite(char c) noexcept { return c == ' ' || (c >= 0x09 && c <= 0x0D); }
+
+        constexpr intcs cmp(const Version& o) const noexcept {
             // Uses direct comparison rather than subtraction, matching .NET's actual
             // CompareTo: a subtraction-based comparison would silently overflow
             // (undefined behavior) if components could span the full int32 range.
@@ -232,44 +264,84 @@ namespace System {
             if (Revision != o.Revision) return Revision > o.Revision ? 1 : -1;
             return 0;
         }
-        void parse(const std::string& s) {
+
+        /** Failure category reported by parseCore() and parseComponent(); mapped to a .NET exception type by parse(). */
+        enum class ParseError { None, Count, Format, Overflow, Negative };
+
+        /**
+         * Parses one component the way .NET's NumberStyles.Integer does: optional white
+         * space, an optional sign, digits, optional trailing white space.
+         * @param c   the component text, without dots.
+         * @param out receives the value; written only on ParseError::None.
+         * @return ParseError::None on success, otherwise the failure category.
+         */
+        static ParseError parseComponent(std::string_view c, intcs& out) noexcept {
+            const char* first = c.data();
+            const char* const last = c.data() + c.size();
+            while (first != last && isWhite(*first)) ++first;
+            if (first != last && *first == '+') {
+                ++first;
+                if (first != last && *first == '-') return ParseError::Format; // "+-1"
+            }
+            intcs value = 0;
+            const auto r = std::from_chars(first, last, value);
+            if (r.ec == std::errc::result_out_of_range) return ParseError::Overflow;
+            if (r.ec != std::errc()) return ParseError::Format;
+            const char* p = r.ptr;
+            while (p != last && isWhite(*p)) ++p;
+            if (p != last) return ParseError::Format;
+            if (value < 0) return ParseError::Negative;
+            out = value;
+            return ParseError::None;
+        }
+
+        /**
+         * Splits @p s on '.' into 2–4 components and parses each with parseComponent().
+         * @param s        the version text.
+         * @param parts    receives the parsed components; entries past the count are untouched.
+         * @param badIndex receives the index of the offending component for Format/Overflow/Negative.
+         * @return ParseError::None on success, otherwise the first failure found.
+         */
+        static ParseError parseCore(std::string_view s, intcs (&parts)[4],
+                                    std::size_t& badIndex) noexcept {
+            // Preserve the empty component produced by a trailing separator.
+            // "1.2." and "1.2.3." therefore fail as malformed components, while
+            // "1.2.3.4." reaches the five-component limit first. This matches
+            // Version.ParseVersion (`Version.cs:358-428`).
+
+            std::string_view comps[4];
+            std::size_t n = 0;
+            for (;;) {
+                if (n == 4) return ParseError::Count; // a fifth component
+                const std::size_t dot = s.find('.');
+                comps[n++] = s.substr(0, dot);
+                if (dot == std::string_view::npos) break;
+                s.remove_prefix(dot + 1);
+            }
+            if (n < 2) return ParseError::Count;
+
+            for (std::size_t i = 0; i < n; ++i) {
+                const ParseError e = parseComponent(comps[i], parts[i]);
+                if (e != ParseError::None) { badIndex = i; return e; }
+            }
+            return ParseError::None;
+        }
+
+        void parse(std::string_view s) {
             static constexpr const char* kComponentNames[4] = {"major", "minor", "build", "revision"};
-
-            // A trailing '.' (e.g. "1.2.") must produce an empty final component and fail --
-            // real .NET's ParseVersion slices up to the *last* separator it finds and rejects an
-            // empty trailing component with FormatException. std::getline(ss, tok, '.') instead
-            // silently drops that phantom trailing empty token (extraction hits EOF with nothing
-            // left to read, so the loop condition just becomes false one iteration early) --
-            // confirmed via a standalone repro that "1.2." and "1.2.3." both parsed successfully
-            // here even though real .NET throws for both. Reject it explicitly before splitting.
-            if (!s.empty() && s.back() == '.')
-                throw System::FormatException("Input string was not in a correct format.");
-
-            std::vector<std::string> toks;
-            std::istringstream ss(s);
-            std::string tok;
-            while (std::getline(ss, tok, '.')) toks.push_back(tok);
-            // .NET requires at least "major.minor" and at most 4 dot-separated components.
-            if (toks.size() < 2 || toks.size() > 4)
-                throw System::ArgumentException("Version string portion was too short or too long.", "version");
-
             intcs parts[4] = {0, 0, -1, -1};
-            for (std::size_t i = 0; i < toks.size(); ++i) {
-                std::size_t consumed = 0;
-                int v;
-                try {
-                    v = std::stoi(toks[i], &consumed);
-                } catch (const std::out_of_range&) {
-                    throw System::OverflowException("Value was either too large or too small for an Int32.");
-                } catch (const std::invalid_argument&) {
-                    throw System::FormatException("Input string was not in a correct format.");
-                }
-                if (consumed != toks[i].size())
-                    throw System::FormatException("Input string was not in a correct format.");
-                if (v < 0)
-                    throw System::ArgumentOutOfRangeException(kComponentNames[i],
-                        std::string(kComponentNames[i]) + " must be greater than or equal to zero.");
-                parts[i] = static_cast<intcs>(v);
+            std::size_t bad = 0;
+            switch (parseCore(s, parts, bad)) {
+            case ParseError::None: break;
+            case ParseError::Count:
+                throw System::ArgumentException("Version string portion was too short or too long.", "version");
+            case ParseError::Format:
+                throw System::FormatException("Input string was not in a correct format.");
+            case ParseError::Overflow:
+                throw System::OverflowException("Value was either too large or too small for an Int32.");
+            case ParseError::Negative:
+                throw System::ArgumentOutOfRangeException(kComponentNames[bad],
+                    std::string(kComponentNames[bad]) + " must be greater than or equal to zero.");
             }
             Major = parts[0]; Minor = parts[1]; Build = parts[2]; Revision = parts[3];
         }

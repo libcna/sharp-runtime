@@ -578,8 +578,8 @@ TEST(EnvironmentTests, OSVersion_PlatformIsValid) {
 
 TEST(EnvironmentTests, OSVersion_VersionNonNegative) {
     auto osv = Environment::getOSVersionProperty();
-    EXPECT_GE(osv.getVersionProperty().Major, 0);
-    EXPECT_GE(osv.getVersionProperty().Minor, 0);
+    EXPECT_GE(osv.getVersionProperty().getMajorProperty(), 0);
+    EXPECT_GE(osv.getVersionProperty().getMinorProperty(), 0);
 }
 
 #ifdef __linux__
@@ -591,7 +591,7 @@ TEST(EnvironmentTests, OSVersion_LinuxPlatformIsUnix) {
 TEST(EnvironmentTests, OSVersion_LinuxMajorVersionReasonable) {
     auto osv = Environment::getOSVersionProperty();
     // Linux kernel major version has been >= 2 since 1996
-    EXPECT_GE(osv.getVersionProperty().Major, 2);
+    EXPECT_GE(osv.getVersionProperty().getMajorProperty(), 2);
 }
 #endif
 
@@ -910,12 +910,12 @@ TEST(EnvironmentTests, CurrentManagedThreadId_Idempotent) {
 
 TEST(EnvironmentTests, Version_MajorAtLeastOne) {
     System::Version v = Environment::getVersionProperty();
-    EXPECT_GE(v.Major, 1);
+    EXPECT_GE(v.getMajorProperty(), 1);
 }
 
 TEST(EnvironmentTests, Version_MinorNonNegative) {
     System::Version v = Environment::getVersionProperty();
-    EXPECT_GE(v.Minor, 0);
+    EXPECT_GE(v.getMinorProperty(), 0);
 }
 
 // Environment::Version is Version(1, 0, 0) -- a three-component version, and the
@@ -925,7 +925,7 @@ TEST(EnvironmentTests, Version_MinorNonNegative) {
 // domain is reachable from a public property rather than from a literal.
 TEST(EnvironmentTests, Version_RevisionIsUndefinedAndCannotBeRequested) {
     System::Version v = Environment::getVersionProperty();
-    ASSERT_LT(v.Revision, 0);
+    ASSERT_LT(v.getRevisionProperty(), 0);
     EXPECT_EQ(v.ToString(), "1.0.0");
     EXPECT_EQ(v.ToString(3), "1.0.0");
     EXPECT_THROW(v.ToString(4), System::ArgumentException);

@@ -13,31 +13,31 @@ using System::Version;
 
 TEST(VersionTests, DefaultCtor_AllZeroOrMinusOne) {
     Version v;
-    EXPECT_EQ(v.Major,    0);
-    EXPECT_EQ(v.Minor,    0);
-    EXPECT_EQ(v.Build,   -1);
-    EXPECT_EQ(v.Revision,-1);
+    EXPECT_EQ(v.getMajorProperty(),    0);
+    EXPECT_EQ(v.getMinorProperty(),    0);
+    EXPECT_EQ(v.getBuildProperty(),   -1);
+    EXPECT_EQ(v.getRevisionProperty(),-1);
 }
 
 TEST(VersionTests, TwoArgCtor_MajorMinorSet) {
     Version v(1, 2);
-    EXPECT_EQ(v.Major, 1);
-    EXPECT_EQ(v.Minor, 2);
-    EXPECT_EQ(v.Build, -1);
+    EXPECT_EQ(v.getMajorProperty(), 1);
+    EXPECT_EQ(v.getMinorProperty(), 2);
+    EXPECT_EQ(v.getBuildProperty(), -1);
 }
 
 TEST(VersionTests, ThreeArgCtor_BuildSet) {
     Version v(1, 2, 3);
-    EXPECT_EQ(v.Build,    3);
-    EXPECT_EQ(v.Revision,-1);
+    EXPECT_EQ(v.getBuildProperty(),    3);
+    EXPECT_EQ(v.getRevisionProperty(),-1);
 }
 
 TEST(VersionTests, FourArgCtor_RevisionSet) {
     Version v(1, 2, 3, 4);
-    EXPECT_EQ(v.Major,    1);
-    EXPECT_EQ(v.Minor,    2);
-    EXPECT_EQ(v.Build,    3);
-    EXPECT_EQ(v.Revision, 4);
+    EXPECT_EQ(v.getMajorProperty(),    1);
+    EXPECT_EQ(v.getMinorProperty(),    2);
+    EXPECT_EQ(v.getBuildProperty(),    3);
+    EXPECT_EQ(v.getRevisionProperty(), 4);
 }
 
 // ---------------------------------------------------------------------------
@@ -66,23 +66,59 @@ TEST(VersionTests, ToString_ZeroMajorMinor) {
 
 TEST(VersionTests, ParseString_TwoParts) {
     Version v("3.7");
-    EXPECT_EQ(v.Major, 3);
-    EXPECT_EQ(v.Minor, 7);
+    EXPECT_EQ(v.getMajorProperty(), 3);
+    EXPECT_EQ(v.getMinorProperty(), 7);
 }
 
 TEST(VersionTests, ParseString_ThreeParts) {
     Version v("1.2.3");
-    EXPECT_EQ(v.Build, 3);
+    EXPECT_EQ(v.getBuildProperty(), 3);
 }
 
 TEST(VersionTests, ParseString_FourParts) {
     Version v("1.2.3.4");
-    EXPECT_EQ(v.Revision, 4);
+    EXPECT_EQ(v.getRevisionProperty(), 4);
 }
 
 TEST(VersionTests, ParseString_RoundTrip) {
     std::string s = "10.20.30.40";
     EXPECT_EQ(Version(s).ToString(), s);
+}
+
+TEST(VersionTests, ParseString_SpaceAtTheStart) {
+
+    EXPECT_EQ(Version(" 1.2.3"), Version("1.2.3"));
+}
+
+TEST(VersionTests, ParseString_SpaceAtTheEnd) {
+
+    EXPECT_EQ(Version("1.2.3 "), Version("1.2.3"));
+}
+
+TEST(VersionTests, ParseString_SpaceAtTheStartAndTheEnd) {
+
+    EXPECT_EQ(Version(" 1.2.3 "), Version("1.2.3"));
+}
+
+TEST(VersionTests, ParseString_NewLineAtTheEnd) {
+
+    EXPECT_EQ(Version("1.2.3\n"), Version("1.2.3"));
+}
+
+TEST(VersionTests, ParseString_SpaceInside_Throws) {
+    EXPECT_THROW(Version(" 1.2 3"), System::FormatException);
+}
+
+TEST(VersionTests, ParseString_SpaceInside_Eq) {
+    EXPECT_EQ(Version(" 1 .2"), Version("1.2"));
+}
+
+TEST(VersionTests, ParseString_SpaceInside3_Throws) {
+    EXPECT_THROW(Version(" 1 2.3"), System::FormatException);
+}
+
+TEST(VersionTests, ParseString_SpaceInside4_Throws) {
+    EXPECT_THROW(Version(" 1. "), System::FormatException);
 }
 
 TEST(VersionTests, ParseString_SingleComponent_Throws) {
@@ -102,6 +138,17 @@ TEST(VersionTests, ParseString_NegativeComponent_Throws) {
     EXPECT_THROW(Version("1.-2"), System::ArgumentOutOfRangeException);
 }
 
+TEST(VersionTests, Parse_TrailingDotAfterRevision_ThrowsArgumentException) {
+    EXPECT_THROW(Version("1.2.3.4."), System::ArgumentException);
+}
+
+TEST(VersionTests, Parse_EmptyComponent_ThrowsFormatException) {
+    EXPECT_THROW(Version(".2"), System::FormatException);
+    EXPECT_THROW(Version("1..2"), System::FormatException);
+    EXPECT_THROW(Version("1.2..4"), System::FormatException);
+}
+
+
 // ---------------------------------------------------------------------------
 // Equality operators
 // ---------------------------------------------------------------------------
@@ -117,6 +164,29 @@ TEST(VersionTests, Equality_DifferentMajor_NotEqual) {
 // ---------------------------------------------------------------------------
 // Comparison operators
 // ---------------------------------------------------------------------------
+
+TEST(VersionTests, Comparison_IsConstexprAndNoexcept) {
+    constexpr Version older(1, 2, 3, 4);
+    constexpr Version same(1, 2, 3, 4);
+    constexpr Version newer(1, 2, 3, 5);
+
+    static_assert(older.CompareTo(newer) == -1);
+    static_assert(newer.CompareTo(older) == 1);
+    static_assert(older.CompareTo(same) == 0);
+    static_assert((older <=> newer) < 0);
+    static_assert(older < newer);
+    static_assert(older == same);
+    static_assert(older != newer);
+    static_assert(Version(1, 9) < Version(2, 0));
+    static_assert(Version(1, 2) < Version(1, 3));
+    static_assert(Version(1, 2) < Version(1, 2, 0));
+    static_assert(Version(1, 2, 3) < Version(1, 2, 3, 0));
+
+    static_assert(noexcept(older.CompareTo(newer)));
+    static_assert(noexcept(older <=> newer));
+    static_assert(noexcept(older < newer));
+    static_assert(noexcept(older == same));
+}
 
 TEST(VersionTests, LessThan_OlderMajor_IsLess) {
     EXPECT_TRUE(Version(1, 0) < Version(2, 0));
@@ -144,24 +214,24 @@ TEST(VersionTests, GreaterOrEqual_SameVersion) {
 
 TEST(VersionTests, Parse_ValidString) {
     Version v = Version::Parse("3.5.1.9");
-    EXPECT_EQ(v.Major, 3);
-    EXPECT_EQ(v.Minor, 5);
-    EXPECT_EQ(v.Build, 1);
-    EXPECT_EQ(v.Revision, 9);
+    EXPECT_EQ(v.getMajorProperty(), 3);
+    EXPECT_EQ(v.getMinorProperty(), 5);
+    EXPECT_EQ(v.getBuildProperty(), 1);
+    EXPECT_EQ(v.getRevisionProperty(), 9);
 }
 
 TEST(VersionTests, Parse_TwoParts) {
     Version v = Version::Parse("1.0");
-    EXPECT_EQ(v.Major, 1);
-    EXPECT_EQ(v.Minor, 0);
+    EXPECT_EQ(v.getMajorProperty(), 1);
+    EXPECT_EQ(v.getMinorProperty(), 0);
 }
 
 TEST(VersionTests, TryParse_Valid_ReturnsTrue) {
     Version v;
     EXPECT_TRUE(Version::TryParse("2.4.6", v));
-    EXPECT_EQ(v.Major, 2);
-    EXPECT_EQ(v.Minor, 4);
-    EXPECT_EQ(v.Build, 6);
+    EXPECT_EQ(v.getMajorProperty(), 2);
+    EXPECT_EQ(v.getMinorProperty(), 4);
+    EXPECT_EQ(v.getBuildProperty(), 6);
 }
 
 TEST(VersionTests, TryParse_Invalid_ReturnsFalse) {
@@ -292,6 +362,10 @@ TEST(VersionTests, ToString_FieldCount4_All) {
     EXPECT_EQ(Version(1, 2, 3, 4).ToString(4), "1.2.3.4");
 }
 
+TEST(VersionTests, ToString_FieldCount4_All_2) {
+    EXPECT_EQ(Version("2147483647.2147483647.2147483647.2147483647").ToString(4), "2147483647.2147483647.2147483647.2147483647");
+}
+
 TEST(VersionTests, ToString_FieldCountNegative_Throws) {
     EXPECT_THROW(Version(1, 2, 3, 4).ToString(-1), System::ArgumentException);
 }
@@ -320,10 +394,40 @@ TEST(VersionTests, TryParse_TrailingDot_ReturnsFalse) {
 
 TEST(VersionTests, Parse_NoTrailingDot_StillWorks) {
     Version v("1.2.3.4");
-    EXPECT_EQ(v.Major, 1);
-    EXPECT_EQ(v.Minor, 2);
-    EXPECT_EQ(v.Build, 3);
-    EXPECT_EQ(v.Revision, 4);
+    EXPECT_EQ(v.getMajorProperty(), 1);
+    EXPECT_EQ(v.getMinorProperty(), 2);
+    EXPECT_EQ(v.getBuildProperty(), 3);
+    EXPECT_EQ(v.getRevisionProperty(), 4);
+}
+
+TEST(VersionTests, Parse_TooManyComponents_ThrowsArgumentException) {
+    EXPECT_THROW(Version("1.2.3.4.5"), System::ArgumentException);
+}
+
+TEST(VersionTests, Parse_EmptyString_ThrowsArgumentException) {
+    EXPECT_THROW(Version(""), System::ArgumentException);
+}
+
+TEST(VersionTests, Parse_LeadingPlusSign_IsAccepted) {
+    EXPECT_EQ(Version("+1.2"), Version(1, 2));
+}
+
+TEST(VersionTests, Parse_PlusFollowedByMinus_ThrowsFormatException) {
+    EXPECT_THROW(Version("+-1.2"), System::FormatException);
+}
+
+TEST(VersionTests, Parse_PositiveComponentOverflow_ThrowsOverflowException) {
+    EXPECT_THROW(Version("99999999999.1"), System::OverflowException);
+}
+
+TEST(VersionTests, Parse_NegativeComponentOverflow_ThrowsOverflowException) {
+    EXPECT_THROW(Version("-99999999999.1"), System::OverflowException);
+}
+
+TEST(VersionTests, TryParse_InvalidComponent_LeavesResultUntouched) {
+    Version v(7, 8);
+    EXPECT_FALSE(Version::TryParse("1.2x", v));
+    EXPECT_EQ(v, Version(7, 8));
 }
 
 // ---------------------------------------------------------------------------
@@ -444,41 +548,18 @@ TEST(VersionTests, ToString_ZeroComponentsAreDefined) {
     EXPECT_EQ(Version(0, 0, 0, 0).ToString(4), "0.0.0.0");
 }
 
-// Build and Revision are public mutable fields, so this port can reach a state
-// no .NET constructor produces: an undefined Build alongside a defined
-// Revision.  .NET tests _Build first, so both 3 and 4 are rejected on the Build
-// guard and report its bound.
+// The two-component constructor leaves Build and Revision unspecified at -1.
+// Their read-only accessors expose those sentinels, while ToString() emits only
+// the two components that are defined.
 
-TEST(VersionTests, ToString_UndefinedBuildWithDefinedRevision_RejectsOnBuildGuard) {
-    Version v(1, 2);
-    v.Revision = 5;
-    for (System::intcs fieldCount : {3, 4}) {
-        try {
-            (void)v.ToString(fieldCount);
-            FAIL() << "expected System::ArgumentException for fieldCount " << fieldCount;
-        } catch (const System::ArgumentException& e) {
-            EXPECT_STREQ(e.what(), "Argument must be between 0 and 2. (Parameter 'fieldCount')");
-        }
-    }
-}
+TEST(VersionTests, ToString_TwoComponentVersionHasUndefinedBuildAndRevision) {
+    const Version v(1, 2);
 
-// "Specified" means non-negative, matching the predicate the no-argument
-// ToString() already used, rather than exactly the -1 sentinel -- otherwise the
-// two overloads would disagree about which components exist for any other
-// negative value a caller writes into these public fields.
-
-TEST(VersionTests, ToString_AnyNegativeComponentIsUnspecified) {
-    Version v(1, 2, 3, 4);
-    v.Build = -5;
+    EXPECT_EQ(v.getBuildProperty(), -1);
+    EXPECT_EQ(v.getRevisionProperty(), -1);
+    EXPECT_EQ(v.ToString(), "1.2");
     EXPECT_THROW(v.ToString(3), System::ArgumentException);
     EXPECT_THROW(v.ToString(4), System::ArgumentException);
-    EXPECT_EQ(v.ToString(2), "1.2");
-
-    Version w(1, 2, 3, 4);
-    w.Revision = -5;
-    EXPECT_THROW(w.ToString(4), System::ArgumentException);
-    EXPECT_EQ(w.ToString(3), "1.2.3");
-    EXPECT_EQ(w.ToString(), "1.2.3");
 }
 
 // The no-argument ToString() is the control for the whole repair: it already
@@ -496,44 +577,19 @@ TEST(VersionTests, ToString_NoArgument_ByteIdenticalAcrossTheMatrix) {
 }
 
 // ---------------------------------------------------------------------------
-// ToString() truncates at the first unspecified component (ticket #2259, a
-// post-audit defect with no SR-AUD identifier -- it is NOT SR-AUD-011, which is
-// about the fieldCount overload emitting a sentinel it was asked for).
-//
-// Before the repair ToString() tested Build >= 0 and Revision >= 0 in two
-// INDEPENDENT ifs, so it omitted an undefined leading component while still
-// emitting a defined trailing one: Build = -5 on 1.2.3.4 rendered "1.2.4",
-// printing Revision in Build's position.  .NET's ToString() delegates to
-// ToString(n) with a short-circuiting field count and truncates at two fields.
-//
-// The state is reachable only because Build and Revision are public mutable
-// fields; no constructor and no parse() produces it, which is why
-// ToString_NoArgument_ByteIdenticalAcrossTheMatrix above is unaffected and
-// stands as this ticket's compatibility control.
+// The three-component constructor leaves Revision unspecified at -1.
+// ToString() emits all defined components, while ToString(4) rejects a request
+// for the undefined Revision component.
 // ---------------------------------------------------------------------------
 
-TEST(VersionTests, ToString_UndefinedBuildTruncatesBeforeDefinedRevision) {
-    Version v(1, 2, 3, 4);
-    v.Build = -5;
-    EXPECT_EQ(v.ToString(), "1.2");
+TEST(VersionTests, ToString_ThreeComponentVersionHasUndefinedRevision) {
+    const Version v(1, 2, 3);
 
-    Version w(1, 2);
-    w.Revision = 5;
-    EXPECT_EQ(w.ToString(), "1.2");
-}
-
-// ToString() never rejects its own derived field count, for any component
-// state -- the derived count can only name components that are defined.
-TEST(VersionTests, ToString_NoArgument_NeverRejectsItsOwnFieldCount) {
-    for (System::intcs build : {-5, -1, 0, 3}) {
-        for (System::intcs revision : {-5, -1, 0, 4}) {
-            Version v(1, 2);
-            v.Build    = build;
-            v.Revision = revision;
-            EXPECT_NO_THROW((void)v.ToString())
-                << "Build=" << build << " Revision=" << revision;
-        }
-    }
+    EXPECT_EQ(v.getBuildProperty(), 3);
+    EXPECT_EQ(v.getRevisionProperty(), -1);
+    EXPECT_EQ(v.ToString(), "1.2.3");
+    EXPECT_EQ(v.ToString(3), "1.2.3");
+    EXPECT_THROW(v.ToString(4), System::ArgumentException);
 }
 
 // The no-argument overload and the fieldCount overload agree: ToString() is
@@ -542,8 +598,4 @@ TEST(VersionTests, ToString_NoArgument_AgreesWithFieldCountOverload) {
     EXPECT_EQ(Version(1, 2).ToString(),       Version(1, 2).ToString(2));
     EXPECT_EQ(Version(1, 2, 3).ToString(),    Version(1, 2, 3).ToString(3));
     EXPECT_EQ(Version(1, 2, 3, 4).ToString(), Version(1, 2, 3, 4).ToString(4));
-
-    Version v(1, 2, 3, 4);
-    v.Build = -5;
-    EXPECT_EQ(v.ToString(), v.ToString(2));
 }

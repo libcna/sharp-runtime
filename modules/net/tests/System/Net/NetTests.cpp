@@ -779,18 +779,18 @@ TEST(HttpResponseHeaderTests, GetName_OutOfRange_ThrowsIndexOutOfRangeException)
 // ===========================================================================
 
 TEST(HttpVersionTests, Version11_Is1Dot1) {
-    EXPECT_EQ(HttpVersion::Version11.Major, 1);
-    EXPECT_EQ(HttpVersion::Version11.Minor, 1);
+    EXPECT_EQ(HttpVersion::Version11.getMajorProperty(), 1);
+    EXPECT_EQ(HttpVersion::Version11.getMinorProperty(), 1);
 }
 
 TEST(HttpVersionTests, Unknown_IsZeroZero) {
-    EXPECT_EQ(HttpVersion::Unknown.Major, 0);
-    EXPECT_EQ(HttpVersion::Unknown.Minor, 0);
+    EXPECT_EQ(HttpVersion::Unknown.getMajorProperty(), 0);
+    EXPECT_EQ(HttpVersion::Unknown.getMinorProperty(), 0);
 }
 
 TEST(HttpVersionTests, Version20_Is2Dot0) {
-    EXPECT_EQ(HttpVersion::Version20.Major, 2);
-    EXPECT_EQ(HttpVersion::Version20.Minor, 0);
+    EXPECT_EQ(HttpVersion::Version20.getMajorProperty(), 2);
+    EXPECT_EQ(HttpVersion::Version20.getMinorProperty(), 0);
 }
 
 // ===========================================================================
