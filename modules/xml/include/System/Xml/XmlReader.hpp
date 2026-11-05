@@ -271,7 +271,8 @@ namespace System::Xml {
          * '\' or ends with ".xml") the file is loaded, and it is treated as raw XML text
          * otherwise. A leading U+FEFF followed by whitespace and/or '<' is also
          * recognized as character input, but fails on the first @c Read() rather
-         * than being stripped as a file encoding preamble.
+         * than being stripped as a file encoding preamble. Malformed UTF-8 in either
+         * input route also fails on the first read, before any nodes are exposed.
          *
          * @param inputUri  File path or raw XML text.
          * @return Heap-allocated XmlReader; caller owns the pointer.
@@ -284,6 +285,8 @@ namespace System::Xml {
          *        @c DtdProcessing::Prohibit rejects a document that carries a DOCTYPE,
          *        @c DtdProcessing::Ignore drops the node, and @c IgnoreComments,
          *        @c IgnoreProcessingInstructions and @c IgnoreWhitespace drop those nodes.
+         *
+         * UTF-8 encoding validity is enforced even when @c CheckCharacters is false.
          *
          * @param inputUri  File path or raw XML text.
          * @param settings  The reader settings to apply.
@@ -299,7 +302,8 @@ namespace System::Xml {
          * A leading U+FEFF is character content, not a byte-stream preamble.
          * Creation succeeds; the first @c Read() throws @c XmlException and
          * records @c ReadState::Error. Later reads return false. Closing before
-         * the first read does not raise that deferred error.
+         * the first read does not raise that deferred error. Malformed UTF-8 storage
+         * has the same deferred error behavior, with an invalid-encoding diagnostic.
          *
          * @param xmlContent  XML character text, without an encoding preamble.
          * @return Heap-allocated XmlReader; caller owns the pointer.

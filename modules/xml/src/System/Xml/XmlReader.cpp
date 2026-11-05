@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Xml/XmlReader.hpp"
 #include "XmlCharacterInput.hpp"
+#include "System/detail/Utf8Scalar.hpp"
 
 #include <cstdio>
 
@@ -63,6 +64,7 @@ struct XmlReaderState {
     int                                attrIndex = -1;  // attribute cursor (-1 = on element)
     ReadState                          readState = ReadState::Initial;
     bool                               characterPreamble = false;
+    bool                               invalidUtf8 = false;
     // ReadContentAsBase64 may be called repeatedly to drain one text node in chunks, so how
     // far it has drained has to survive between calls. Keyed on the event it was draining;
     // moving to another node starts over.
@@ -317,6 +319,10 @@ bool XmlReader::Read() {
     // both kept traversing and stopped reporting itself as closed.
     if (isClosed(state_.get())) return false;
     if (state_->readState == ReadState::Error) return false;
+    if (state_->invalidUtf8) {
+        state_->readState = ReadState::Error;
+        throw XmlException("Invalid character in the given encoding.");
+    }
     if (state_->characterPreamble) {
         // Like a .NET character reader, creation succeeds and the first read
         // reports invalid root content. Close before reading suppresses the fault.
@@ -558,6 +564,20 @@ void XmlReader::Close() {
 // Factory helpers
 // ---------------------------------------------------------------------------
 
+// Validate the complete byte range, including bytes after NUL and ignored XML nodes.
+// UTF-8 shortest forms and Unicode scalar limits are enforced by Core.Base's decoder.
+// .NET 11 reference: XmlTextReaderImpl.cs:21-22 uses throwOnInvalidBytes;
+// InvalidCharRecovery at 3535-3562 reports Xml_InvalidCharInThisEncoding.
+static bool hasInvalidUtf8(const std::string& bytes) {
+    for (std::size_t i = 0; i < bytes.size();) {
+        std::uint32_t scalar = 0;
+        std::size_t length = 0;
+        if (!System::detail::TryDecodeUtf8Scalar(bytes, i, scalar, length)) return true;
+        i += length;
+    }
+    return false;
+}
+
 static XmlReader* createFromDoc(std::unique_ptr<XmlReaderState> st) {
     if (st->doc.Error())
         throw XmlException(std::string("XmlReader: parse error: ") +
@@ -602,10 +622,23 @@ static void applySettings(XmlReaderState& st, const XmlReaderSettings& settings)
 namespace {
     // tinyxml2 opens with fopen/fopen_s, which on Windows is the process ANSI code page -- so an
     // .xml under a directory that code page cannot spell simply reported
-    // XML_ERROR_FILE_NOT_FOUND. Its FILE* overload takes the file already open, which keeps every
-    // one of tinyxml2's own error codes and BOM/encoding rules intact while letting the OPEN
-    // happen through a wide path.
-    void loadXmlFile(tinyxml2::XMLDocument& doc, const std::string& utf8Path) {
+    // XML_ERROR_FILE_NOT_FOUND. Keep opening Windows paths through the wide API, then
+    // validate the encoded bytes before passing them to tinyxml2 (which consumes file BOMs).
+    void loadOpenXmlFile(XmlReaderState& st, FILE* file) {
+        // Own the handle while allocating/validating, and parse the same bytes we validated.
+        const auto closeFile = [](FILE* handle) { (void)std::fclose(handle); };
+        const std::unique_ptr<FILE, decltype(closeFile)> owner(file, closeFile);
+        std::string bytes;
+        char buffer[4096];
+        while (const std::size_t count = std::fread(buffer, 1, sizeof(buffer), file))
+            bytes.append(buffer, count);
+        if (std::ferror(file))
+            throw XmlException("XmlReader: parse error: XML_ERROR_FILE_READ_ERROR");
+        st.invalidUtf8 = hasInvalidUtf8(bytes);
+        if (!st.invalidUtf8) st.doc.Parse(bytes.data(), bytes.size());
+    }
+
+    void loadXmlFile(XmlReaderState& st, const std::string& utf8Path) {
 #if defined(_WIN32)
         const int needed = ::MultiByteToWideChar(CP_UTF8, 0, utf8Path.c_str(),
                                                  static_cast<int>(utf8Path.size()), nullptr, 0);
@@ -615,16 +648,24 @@ namespace {
                                       static_cast<int>(utf8Path.size()), wide.data(), needed) > 0) {
                 FILE* file = nullptr;
                 if (::_wfopen_s(&file, wide.c_str(), L"rb") == 0 && file != nullptr) {
-                    doc.LoadFile(file);
-                    std::fclose(file);
+                    loadOpenXmlFile(st, file);
                     return;
                 }
             }
         }
-        // Fall through so tinyxml2 reports its own XML_ERROR_FILE_NOT_FOUND rather than a
-        // silently empty document.
+        // Retain the narrow-path fallback when the wide-path open could not be used.
 #endif
-        doc.LoadFile(utf8Path.c_str());
+        FILE* file = nullptr;
+#if defined(_WIN32)
+        (void)::fopen_s(&file, utf8Path.c_str(), "rb");
+#else
+        file = std::fopen(utf8Path.c_str(), "rb");
+#endif
+        if (file != nullptr) {
+            loadOpenXmlFile(st, file);
+            return;
+        }
+        throw XmlException("XmlReader: parse error: XML_ERROR_FILE_NOT_FOUND filename=" + utf8Path);
     }
 }
 
@@ -650,7 +691,7 @@ XmlReader* XmlReader::Create(const std::string& inputUri) {
                     inputUri.substr(inputUri.size() - 4) == ".xml"));
     if (!isFile) return CreateFromString(inputUri);
     auto st = std::make_unique<XmlReaderState>();
-    loadXmlFile(st->doc, inputUri);
+    loadXmlFile(*st, inputUri);
     return createFromDoc(std::move(st));
 }
 
@@ -663,7 +704,11 @@ XmlReader* XmlReader::Create(const std::string& inputUri, const XmlReaderSetting
 XmlReader* XmlReader::CreateFromString(const std::string& xmlContent) {
     auto st = std::make_unique<XmlReaderState>();
     st->characterPreamble = detail::HasCharacterPreamble(xmlContent);
-    if (!st->characterPreamble) st->doc.Parse(xmlContent.c_str());
+    st->invalidUtf8 = hasInvalidUtf8(xmlContent);
+    // Defer the encoding failure to Read(), like the existing character-preamble error.
+    // XNA Refresh IntermediateSerializer.Deserialize IL_0081..00a5 then wraps XmlException.
+    if (!st->characterPreamble && !st->invalidUtf8)
+        st->doc.Parse(xmlContent.data(), xmlContent.size());
     return createFromDoc(std::move(st));
 }
 
