@@ -284,3 +284,69 @@ TEST(StringComparerTests, CurrentCultureIgnoreCase_Equals_CaseInsensitive) {
     auto cmp = StringComparer::CurrentCultureIgnoreCase();
     EXPECT_TRUE(cmp->Equals("ABC", "abc"));
 }
+
+TEST(OrdinalComparerTests, Tq078UnicodeSimpleCasePairsAgreeAcrossEqualsCompareAndHash) {
+
+    struct Case { const char* left; const char* right; };
+    // .NET 4.0 OrdinalComparer.Equals IL_001b-0036 / GetHashCode IL_000e-001c;
+    // default AND linguistic sortdefault.nlp uppercase tables agree on these pairs.
+    // U+00E4->00C4, 00E9->00C9, 00FF->0178, 03B1->0391, 0430->0410,
+    // 0451->0401. A + U+0308 is compared without normalization.
+    const Case cases[] = {
+        {"\xC3\x84" "sset", "\xC3\xA4" "SSET"},
+        {"\xC3\x89" "clair", "\xC3\xA9" "CLAIR"},
+        {"\xC5\xB8" "ard", "\xC3\xBF" "ARD"},
+        {"\xCE\x91" "sset", "\xCE\xB1" "SSET"},
+        {"\xD0\x90" "sset", "\xD0\xB0" "SSET"},
+        {"\xD0\x81" "sset", "\xD1\x91" "SSET"},
+        {"A\xCC\x88" "sset", "a\xCC\x88" "SSET"},
+    };
+
+    const auto cmp = StringComparer::OrdinalIgnoreCase();
+    const auto ordinal = StringComparer::Ordinal();
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.left);
+        SCOPED_TRACE(c.right);
+        EXPECT_TRUE(cmp->Equals(c.left, c.right));
+        EXPECT_TRUE(cmp->Equals(c.right, c.left));
+        EXPECT_EQ(cmp->Compare(c.left, c.right), 0);
+        EXPECT_EQ(cmp->Compare(c.right, c.left), 0);
+        // Equality above is an unconditional oracle: this check cannot pass
+        // vacuously if Equals remains broken. Numeric hashes are unspecified.
+        EXPECT_EQ(cmp->GetHashCode(c.left), cmp->GetHashCode(c.right));
+        EXPECT_FALSE(ordinal->Equals(c.left, c.right));
+    }
+}
+TEST(OrdinalComparerTests, Tq078OrdinalIgnoreCaseDoesNotApplyLinguisticEquivalence) {
+
+    struct Case { const char* left; const char* right; };
+    // .NET 4.0 OrdinalComparer.Equals IL_001b-002a rejects unequal UTF-16
+    // lengths. Ordinal invariant casing preserves U+0131 and U+0130;
+    // it performs neither ss expansion, accent removal, nor NFC composition.
+    const Case cases[] = {
+        {"I", "\xC4\xB1"}, {"i", "\xC4\xB1"}, {"i", "\xC4\xB0"},
+        {"stra\xC3\x9F" "e", "STRASSE"},
+        {"\xC3\x84" "sset", "A\xCC\x88" "sset"},
+        {"\xC3\xA9" "clair", "eclair"},
+    };
+
+    const auto cmp = StringComparer::OrdinalIgnoreCase();
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.left);
+        SCOPED_TRACE(c.right);
+        EXPECT_FALSE(cmp->Equals(c.left, c.right));
+        EXPECT_FALSE(cmp->Equals(c.right, c.left));
+        EXPECT_NE(cmp->Compare(c.left, c.right), 0);
+        // Unequal strings are permitted to collide: no hash-inequality assertion.
+    }
+}
+TEST(OrdinalComparerTests, Tq078IgnoreCaseOrdersUppercaseUtf16Units) {
+    // .NET 4.0 OrdinalComparer.Compare IL_001d-0025 -> String.Compare(...,5).
+    // Uppercase 'a' = U+0041 < '[' = U+005B. Byte-lowercasing reverses that sign.
+    const auto cmp = StringComparer::OrdinalIgnoreCase();
+    EXPECT_LT(cmp->Compare("a", "["), 0);
+    EXPECT_GT(cmp->Compare("[", "a"), 0);
+    // U+10000 encodes D800 DC00; D800 < E000, unlike UTF-8/scalar ordering.
+    EXPECT_LT(cmp->Compare("\xF0\x90\x80\x80", "\xEE\x80\x80"), 0);
+    EXPECT_GT(cmp->Compare("\xEE\x80\x80", "\xF0\x90\x80\x80"), 0);
+}

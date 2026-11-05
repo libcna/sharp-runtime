@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 #include "System/StringComparison.hpp"
+#include "System/detail/OrdinalCase.hpp"
 #include "System/ArgumentException.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
@@ -113,16 +114,11 @@ namespace System {
      *
      * C++ counterpart of .NET System.OrdinalComparer.
      * When ignoreCase is false, comparisons are case-sensitive (binary).
-     * When ignoreCase is true, comparisons fold case using the C locale rules (ASCII).
+     * When ignoreCase is true, simple UCD16 ordinal uppercase is compared as UTF-16 units.
      */
     class OrdinalComparer : public StringComparer {
         bool ignoreCase_;
 
-        static std::string toLower(std::string s) {
-            std::transform(s.begin(), s.end(), s.begin(),
-                [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
-            return s;
-        }
 
     public:
         /**
@@ -147,7 +143,7 @@ namespace System {
          */
         [[nodiscard]] SharpRuntime::intcs Compare(const std::string& x, const std::string& y) const override {
             if (ignoreCase_) {
-                auto lx = toLower(x), ly = toLower(y);
+                auto lx = detail::OrdinalIgnoreCaseKey(x), ly = detail::OrdinalIgnoreCaseKey(y);
                 return lx < ly ? -1 : (lx > ly ? 1 : 0);
             }
             return x < y ? -1 : (x > y ? 1 : 0);
@@ -159,7 +155,7 @@ namespace System {
          * C++ counterpart of .NET OrdinalComparer.Equals(string, string).
          */
         [[nodiscard]] bool Equals(const std::string& x, const std::string& y) const override {
-            return ignoreCase_ ? toLower(x) == toLower(y) : x == y;
+            return ignoreCase_ ? detail::OrdinalIgnoreCaseKey(x) == detail::OrdinalIgnoreCaseKey(y) : x == y;
         }
 
         /**
@@ -172,7 +168,9 @@ namespace System {
             // bits on some targets (e.g. Emscripten's wasm32), where "h >> 32" would shift by
             // the full width of the type (UB). Matches the identical fix already established
             // in String::GetHashCode (src/System/String.cpp).
-            const auto h = static_cast<std::uint64_t>(std::hash<std::string>{}(ignoreCase_ ? toLower(s) : s));
+            const auto h = static_cast<std::uint64_t>(ignoreCase_
+                ? std::hash<std::u16string>{}(detail::OrdinalIgnoreCaseKey(s))
+                : std::hash<std::string>{}(s));
             return static_cast<SharpRuntime::intcs>(h ^ (h >> 32));
         }
     };
