@@ -6,6 +6,8 @@
 #include "System/detail/Utf8Scalar.hpp"
 
 #include <cstdio>
+#include <filesystem>
+#include <string_view>
 
 #if defined(_WIN32)
 // Contained in this translation unit: <windows.h> in a header is what produced the ERROR and
@@ -49,6 +51,8 @@ struct XmlEvent {
     const tinyxml2::XMLElement*              scope        = nullptr;
     int                                      depth        = 0;
     int                                      lineNumber   = 0;
+    int                                      linePosition = 0;
+    std::vector<std::pair<int, int>>           attributeLocations;
 };
 
 // ---------------------------------------------------------------------------
@@ -65,6 +69,7 @@ struct XmlReaderState {
     ReadState                          readState = ReadState::Initial;
     bool                               characterPreamble = false;
     bool                               invalidUtf8 = false;
+    std::string                        baseUri;
     // ReadContentAsBase64 may be called repeatedly to drain one text node in chunks, so how
     // far it has drained has to survive between calls. Keyed on the event it was draining;
     // moving to another node starts over.
@@ -277,13 +282,23 @@ SharpRuntime::intcs XmlReader::getAttributeCountProperty() const {
 
 bool XmlReader::HasLineInfo() const { return true; }
 
-SharpRuntime::intcs XmlReader::getLineNumberProperty() const {
-    if (!hasCurrentNode(state_.get()))
-        return 0;
-    return state_->events[static_cast<size_t>(state_->pos)].lineNumber;
+std::string XmlReader::getBaseURIProperty() const {
+    return isClosed(state_.get()) ? std::string{} : state_->baseUri;
 }
 
-SharpRuntime::intcs XmlReader::getLinePositionProperty() const { return 0; }
+SharpRuntime::intcs XmlReader::getLineNumberProperty() const {
+    if (!hasCurrentNode(state_.get())) return 0;
+    const auto& event = state_->events[static_cast<size_t>(state_->pos)];
+    return state_->attrIndex >= 0 && static_cast<size_t>(state_->attrIndex) < event.attributeLocations.size()
+        ? event.attributeLocations[static_cast<size_t>(state_->attrIndex)].first : event.lineNumber;
+}
+
+SharpRuntime::intcs XmlReader::getLinePositionProperty() const {
+    if (!hasCurrentNode(state_.get())) return 0;
+    const auto& event = state_->events[static_cast<size_t>(state_->pos)];
+    return state_->attrIndex >= 0 && static_cast<size_t>(state_->attrIndex) < event.attributeLocations.size()
+        ? event.attributeLocations[static_cast<size_t>(state_->attrIndex)].second : event.linePosition;
+}
 
 std::optional<std::string> XmlReader::LookupNamespace(const std::string& prefix) const {
     if (prefix == "xml") return std::string("http://www.w3.org/XML/1998/namespace");
@@ -578,13 +593,122 @@ static bool hasInvalidUtf8(const std::string& bytes) {
     return false;
 }
 
-static XmlReader* createFromDoc(std::unique_ptr<XmlReaderState> st) {
+// XmlTextReaderImpl.cs (local .NET snapshot), BaseURI :933-939 and IXmlLineInfo
+// :1906-1921 expose source locations, not positions in the decoded DOM. Attach lexical
+// locations after parsing so entities, repeated names, and closing tags keep their own spans.
+// The scanner only locates already-validated tokens; tinyxml2 remains the XML parser.
+static void attachSourceLocations(XmlReaderState& st, std::string_view source) {
+    std::size_t eventIndex = 0, scanned = 0;
+    int line = 1, column = 1;
+    bool afterCr = false;
+    if (source.starts_with("\xef\xbb\xbf")) scanned = 3;
+    const auto location = [&](std::size_t offset) {
+        while (scanned < offset) {
+            const auto byte = static_cast<unsigned char>(source[scanned]);
+            if (byte == '\r') { ++line; column = 1; afterCr = true; ++scanned; }
+            else if (byte == '\n') {
+                if (!afterCr) ++line;
+                column = 1; afterCr = false; ++scanned;
+            } else {
+                // .NET line positions count UTF-16 code units, not UTF-8 bytes.
+                std::uint32_t scalar = 0;
+                std::size_t length = 0;
+                if (!System::detail::TryDecodeUtf8Scalar(source.data(), source.size(), scanned, scalar, length)) length = 1;
+                column += scalar > 0xffff ? 2 : 1;
+                scanned += length; afterCr = false;
+            }
+        }
+        return std::pair{line, column};
+    };
+    const auto whitespace = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+    std::size_t at = scanned;
+    while (at < source.size() && eventIndex < st.events.size()) {
+        XmlNodeType type;
+        std::size_t start = at, end = at;
+        std::vector<std::size_t> attributes;
+        if (source[at] != '<') {
+            end = source.find('<', at);
+            if (end == std::string_view::npos) end = source.size();
+            type = source.substr(at, end - at).find_first_not_of(" \t\r\n") == std::string_view::npos
+                ? XmlNodeType::Whitespace : XmlNodeType::Text;
+        } else if (source.substr(at).starts_with("<!--")) {
+            type = XmlNodeType::Comment; start += 4;
+            end = source.find("-->", start) + 3;
+        } else if (source.substr(at).starts_with("<![CDATA[")) {
+            type = XmlNodeType::CDATA; start += 9;
+            end = source.find("]]>", start) + 3;
+        } else if (source.substr(at).starts_with("<?")) {
+            start += 2;
+            const auto nameEnd = source.find_first_of(" \t\r\n?", start);
+            type = source.substr(start, nameEnd - start) == "xml"
+                ? XmlNodeType::XmlDeclaration : XmlNodeType::ProcessingInstruction;
+            end = source.find("?>", start) + 2;
+        } else {
+            const bool declaration = source.substr(at).starts_with("<!");
+            const bool closing = source.substr(at).starts_with("</");
+            type = declaration ? XmlNodeType::DocumentType
+                : closing ? XmlNodeType::EndElement : XmlNodeType::Element;
+            start += closing || declaration ? 2 : 1;
+            if (declaration) {
+                while (start < source.size() && !whitespace(source[start])) ++start;
+                while (start < source.size() && whitespace(source[start])) ++start;
+            }
+            std::size_t cursor = start;
+            while (cursor < source.size() && !whitespace(source[cursor]) &&
+                   source[cursor] != '/' && source[cursor] != '>') ++cursor;
+            int subsetDepth = 0;
+            char quote = 0;
+            for (; cursor < source.size(); ++cursor) {
+                const char c = source[cursor];
+                if (quote) { if (c == quote) quote = 0; continue; }
+                if (c == '\'' || c == '"') { quote = c; continue; }
+                if (declaration && c == '[') ++subsetDepth;
+                if (declaration && c == ']') --subsetDepth;
+                if (c == '>' && subsetDepth == 0) { ++cursor; break; }
+                if (type == XmlNodeType::Element && !whitespace(c) && c != '/') {
+                    attributes.push_back(cursor);
+                    while (cursor < source.size() && source[cursor] != '=') ++cursor;
+                    // Attribute values may contain '>' or '='; the quote-aware scan skips them.
+                }
+            }
+            end = cursor;
+        }
+        auto& event = st.events[eventIndex];
+        if (event.type == type) {
+            const auto [nodeLine, nodeColumn] = location(start);
+            event.lineNumber = nodeLine; event.linePosition = nodeColumn;
+            for (const auto offset : attributes) event.attributeLocations.push_back(location(offset));
+            ++eventIndex;
+        }
+        if (end <= at || end > source.size()) break;
+        at = end;
+    }
+}
+
+static std::string fileBaseUri(const std::string& path) {
+    const auto absolute = std::filesystem::absolute(
+        std::filesystem::path(std::u8string(path.begin(), path.end()))).lexically_normal().generic_u8string();
+    std::string uri = absolute.starts_with(u8"//") ? "file:"
+        : absolute.starts_with(u8"/") ? "file://" : "file:///";
+    constexpr char hex[] = "0123456789ABCDEF";
+    for (const auto raw : absolute) {
+        const auto c = static_cast<unsigned char>(raw);
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+            c == '-' || c == '_' || c == '.' || c == '~' || c == '/' || c == ':') uri += static_cast<char>(c);
+        else { uri += '%'; uri += hex[c >> 4]; uri += hex[c & 15]; }
+    }
+    return uri;
+}
+
+static XmlReader* createFromDoc(std::unique_ptr<XmlReaderState> st, std::string_view source) {
     if (st->doc.Error())
         throw XmlException(std::string("XmlReader: parse error: ") +
-                                 (st->doc.ErrorStr() ? st->doc.ErrorStr() : ""));
+                                 (st->doc.ErrorStr() ? st->doc.ErrorStr() : ""), nullptr,
+                           st->doc.ErrorLineNum(), 0);
     // Walk all top-level nodes (declaration + root element)
     for (tinyxml2::XMLNode* n = st->doc.FirstChild(); n; n = n->NextSibling())
         buildEvents(n, st->events, nullptr, 0);
+    attachSourceLocations(*st, source);
     return new XmlReader(std::move(st));
 }
 
@@ -624,7 +748,7 @@ namespace {
     // .xml under a directory that code page cannot spell simply reported
     // XML_ERROR_FILE_NOT_FOUND. Keep opening Windows paths through the wide API, then
     // validate the encoded bytes before passing them to tinyxml2 (which consumes file BOMs).
-    void loadOpenXmlFile(XmlReaderState& st, FILE* file) {
+    std::string loadOpenXmlFile(XmlReaderState& st, FILE* file) {
         // Own the handle while allocating/validating, and parse the same bytes we validated.
         const auto closeFile = [](FILE* handle) { (void)std::fclose(handle); };
         const std::unique_ptr<FILE, decltype(closeFile)> owner(file, closeFile);
@@ -636,9 +760,10 @@ namespace {
             throw XmlException("XmlReader: parse error: XML_ERROR_FILE_READ_ERROR");
         st.invalidUtf8 = hasInvalidUtf8(bytes);
         if (!st.invalidUtf8) st.doc.Parse(bytes.data(), bytes.size());
+        return bytes;
     }
 
-    void loadXmlFile(XmlReaderState& st, const std::string& utf8Path) {
+    std::string loadXmlFile(XmlReaderState& st, const std::string& utf8Path) {
 #if defined(_WIN32)
         const int needed = ::MultiByteToWideChar(CP_UTF8, 0, utf8Path.c_str(),
                                                  static_cast<int>(utf8Path.size()), nullptr, 0);
@@ -648,8 +773,7 @@ namespace {
                                       static_cast<int>(utf8Path.size()), wide.data(), needed) > 0) {
                 FILE* file = nullptr;
                 if (::_wfopen_s(&file, wide.c_str(), L"rb") == 0 && file != nullptr) {
-                    loadOpenXmlFile(st, file);
-                    return;
+                    return loadOpenXmlFile(st, file);
                 }
             }
         }
@@ -662,8 +786,7 @@ namespace {
         file = std::fopen(utf8Path.c_str(), "rb");
 #endif
         if (file != nullptr) {
-            loadOpenXmlFile(st, file);
-            return;
+            return loadOpenXmlFile(st, file);
         }
         throw XmlException("XmlReader: parse error: XML_ERROR_FILE_NOT_FOUND filename=" + utf8Path);
     }
@@ -691,8 +814,9 @@ XmlReader* XmlReader::Create(const std::string& inputUri) {
                     inputUri.substr(inputUri.size() - 4) == ".xml"));
     if (!isFile) return CreateFromString(inputUri);
     auto st = std::make_unique<XmlReaderState>();
-    loadXmlFile(*st, inputUri);
-    return createFromDoc(std::move(st));
+    const auto source = loadXmlFile(*st, inputUri);
+    st->baseUri = fileBaseUri(inputUri);
+    return createFromDoc(std::move(st), source);
 }
 
 XmlReader* XmlReader::Create(const std::string& inputUri, const XmlReaderSettings& settings) {
@@ -709,7 +833,7 @@ XmlReader* XmlReader::CreateFromString(const std::string& xmlContent) {
     // XNA Refresh IntermediateSerializer.Deserialize IL_0081..00a5 then wraps XmlException.
     if (!st->characterPreamble && !st->invalidUtf8)
         st->doc.Parse(xmlContent.data(), xmlContent.size());
-    return createFromDoc(std::move(st));
+    return createFromDoc(std::move(st), xmlContent);
 }
 
 } // namespace System::Xml

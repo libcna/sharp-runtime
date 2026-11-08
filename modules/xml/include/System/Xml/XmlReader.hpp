@@ -157,10 +157,13 @@ namespace System::Xml {
          *  no vtable (the class is pinned to a single owning pointer). */
         [[nodiscard]] bool HasLineInfo() const;
 
-        /** @brief Returns the 1-based line the current node starts on, or 0 on no node. */
+        /** @brief Returns the absolute file URI for a file reader, or empty for string input or a closed reader. */
+        [[nodiscard]] std::string getBaseURIProperty() const;
+
+        /** @brief Returns the 1-based line the current node or attribute starts on, or 0 on no node. */
         [[nodiscard]] SharpRuntime::intcs getLineNumberProperty() const;
 
-        /** @brief Returns 0: the parser does not record the column a node starts in. */
+        /** @brief Returns the 1-based UTF-16 column of the current node or attribute, or 0 on no node. */
         [[nodiscard]] SharpRuntime::intcs getLinePositionProperty() const;
 
         /**

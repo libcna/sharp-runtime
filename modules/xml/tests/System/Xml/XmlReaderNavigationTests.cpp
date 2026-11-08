@@ -67,7 +67,9 @@ TEST(XmlReaderNavigationTests, ReadStartElementWithWrongNameThrowsWithLine) {
         r->ReadStartElement("Asset");
         FAIL() << "expected XmlException";
     } catch (const XmlException& e) {
-        EXPECT_EQ(std::string(e.what()), "Element 'Asset' was not found. Line 2, position 0.");
+        // .NET reports the current node's 1-based line info: <XnaContent at column 1 of line 2,
+        // so its name starts at position 2 (the former 0 was tinyxml2's missing column).
+        EXPECT_EQ(std::string(e.what()), "Element 'Asset' was not found. Line 2, position 2.");
     }
 }
 
@@ -141,7 +143,8 @@ TEST(XmlReaderNavigationTests, LineInfoReportsTheStartLineOfEveryNode) {
     r->ReadStartElement("Asset");
     ASSERT_TRUE(r->IsStartElement("Name"));
     EXPECT_EQ(r->getLineNumberProperty(), 5);
-    EXPECT_EQ(r->getLinePositionProperty(), 0) << "tinyxml2 records lines only";
+    // Four spaces then '<': the Name token starts at UTF-16 column6 (.NET line info).
+    EXPECT_EQ(r->getLinePositionProperty(), 6);
     r->Skip();
     r->Skip();
     EXPECT_EQ(r->MoveToContent(), XmlNodeType::Text);
