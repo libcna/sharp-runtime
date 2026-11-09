@@ -1185,27 +1185,32 @@ TEST(BinaryReaderWriterTests, ReadChar_AdvancesStreamByExactByteCount) {
     EXPECT_EQ(br.ReadChar(), u'B');
 }
 
-TEST(BinaryReaderWriterTests, ReadChar_FourByteUtf8SupplementaryPlane_ReturnsSurrogatePairAcrossCalls) {
+// .NET 4.0 BinaryReader.InternalReadOneChar decodes into a one-char buffer (IL_0045-00b9): a
+// surrogate pair does not fit, so ReadChar throws ArgumentException after seeking back
+// (IL_00c1-00e9). See docs/Migration-BinaryReaderNet4Decoding.md.
+TEST(BinaryReaderWriterTests, ReadChar_FourByteUtf8SupplementaryPlane_ThrowsArgumentExceptionAndSeeksBack) {
     std::vector<uint8_t> bytes{0xF0, 0x9F, 0x98, 0x80}; // U+1F600, needs a surrogate pair
     MemoryStream ms(bytes.data(), (int32_t)bytes.size());
     BinaryReader br(&ms, true);
-    EXPECT_EQ(br.ReadChar(), static_cast<char16_t>(0xD83D));
-    EXPECT_EQ(br.ReadChar(), static_cast<char16_t>(0xDE00));
-    EXPECT_THROW(br.ReadChar(), System::IO::EndOfStreamException);
+    EXPECT_THROW(br.ReadChar(), System::ArgumentException);
+    EXPECT_EQ(ms.getPositionProperty(), 0);
 }
 
-TEST(BinaryReaderWriterTests, ReadChar_InvalidLeadByte_ThrowsFormatException) {
+TEST(BinaryReaderWriterTests, ReadChar_InvalidLeadByte_ReadsAsReplacementCharacter) {
     std::vector<uint8_t> bytes{0xFF};
     MemoryStream ms(bytes.data(), (int32_t)bytes.size());
     BinaryReader br(&ms, true);
-    EXPECT_THROW(br.ReadChar(), System::FormatException);
+    EXPECT_EQ(br.ReadChar(), static_cast<char16_t>(0xFFFD));
 }
 
-TEST(BinaryReaderWriterTests, ReadChar_InvalidContinuationByte_ThrowsFormatException) {
-    std::vector<uint8_t> bytes{0xC3, 0x00}; // lead byte says 2-byte sequence, continuation byte is invalid
+TEST(BinaryReaderWriterTests, ReadChar_InvalidContinuationByte_ThrowsArgumentExceptionAndSeeksBack) {
+    // lead byte says 2-byte sequence, continuation byte is invalid: U+FFFD and U+0000 both
+    // complete with the second byte, and a one-char buffer cannot hold them.
+    std::vector<uint8_t> bytes{0xC3, 0x00};
     MemoryStream ms(bytes.data(), (int32_t)bytes.size());
     BinaryReader br(&ms, true);
-    EXPECT_THROW(br.ReadChar(), System::FormatException);
+    EXPECT_THROW(br.ReadChar(), System::ArgumentException);
+    EXPECT_EQ(ms.getPositionProperty(), 0);
 }
 
 TEST(BinaryReaderWriterTests, ReadChar_TruncatedMultiByteSequence_ThrowsEndOfStreamException) {
@@ -1234,16 +1239,21 @@ TEST(BinaryReaderWriterTests, ReadChars_DecodesMixedUtf8AndTrimsAtCleanEndOfStre
     EXPECT_TRUE(br.ReadChars(1).empty());
 }
 
-TEST(BinaryReaderWriterTests, ReadChars_SupplementaryCharacterCrossesBatchBoundary) {
+TEST(BinaryReaderWriterTests, ReadChars_SupplementaryCharacterNeedsRoomForBothSurrogates) {
     std::vector<uint8_t> bytes{0xF0, 0x9F, 0x98, 0x80, 0x42}; // U+1F600 then B
+    {
+        // .NET 4.0 InternalReadChars passes the remaining count as the decoder's capacity.
+        MemoryStream ms(bytes.data(), static_cast<intcs>(bytes.size()));
+        BinaryReader br(&ms, true);
+        EXPECT_THROW((void)br.ReadChars(1), System::ArgumentException);
+    }
     MemoryStream ms(bytes.data(), static_cast<intcs>(bytes.size()));
     BinaryReader br(&ms, true);
-
-    const auto first = br.ReadChars(1);
-    ASSERT_EQ(first.size(), 1u);
-    EXPECT_EQ(first[0], static_cast<char16_t>(0xD83D));
-    EXPECT_EQ(br.PeekChar(), static_cast<intcs>(0xDE00));
-    EXPECT_EQ(br.ReadChar(), static_cast<char16_t>(0xDE00));
+    const auto pair = br.ReadChars(2);
+    ASSERT_EQ(pair.size(), 2u);
+    EXPECT_EQ(pair[0], static_cast<char16_t>(0xD83D));
+    EXPECT_EQ(pair[1], static_cast<char16_t>(0xDE00));
+    EXPECT_EQ(br.PeekChar(), static_cast<intcs>(u'B'));
     EXPECT_EQ(br.ReadChar(), u'B');
 }
 
@@ -1272,12 +1282,13 @@ TEST(BinaryReaderWriterTests, ReadChars_NonSeekableStreamSupportsSupplementaryUt
     EXPECT_EQ(characters[2], u'A');
 }
 
-TEST(BinaryReaderWriterTests, ReadChars_TruncatedUtf8PropagatesEndOfStreamException) {
+TEST(BinaryReaderWriterTests, ReadChars_TruncatedUtf8ReturnsTheCompleteCharacters) {
     std::vector<uint8_t> bytes{0x41, 0xC3}; // A, then a truncated two-byte sequence
     MemoryStream ms(bytes.data(), static_cast<intcs>(bytes.size()));
     BinaryReader br(&ms, true);
 
-    EXPECT_THROW(br.ReadChars(2), System::IO::EndOfStreamException);
+    // The unfinished sequence stays in the decoder (.NET 4.0 decodes with flush = false).
+    EXPECT_EQ(br.ReadChars(2), (std::vector<char16_t>{u'A'}));
 }
 
 TEST(BinaryReaderWriterTests, ReadCharArray_ValidatesArgumentsAndDisposal) {
@@ -1319,7 +1330,7 @@ TEST(BinaryReaderWriterTests, PeekChar_InvalidUtf8RestoresStreamPosition) {
     MemoryStream ms(bytes.data(), static_cast<intcs>(bytes.size()));
     BinaryReader br(&ms, true);
 
-    EXPECT_THROW(br.PeekChar(), System::FormatException);
+    EXPECT_THROW(br.PeekChar(), System::ArgumentException);
     EXPECT_EQ(ms.getPositionProperty(), 0);
     EXPECT_EQ(br.ReadByte(), 0xC3u);
 }
@@ -1329,7 +1340,7 @@ TEST(BinaryReaderWriterTests, PeekChar_TruncatedUtf8RestoresStreamPosition) {
     MemoryStream ms(bytes.data(), static_cast<intcs>(bytes.size()));
     BinaryReader br(&ms, true);
 
-    EXPECT_THROW(br.PeekChar(), System::IO::EndOfStreamException);
+    EXPECT_EQ(br.PeekChar(), -1);
     EXPECT_EQ(ms.getPositionProperty(), 0);
     EXPECT_EQ(br.ReadByte(), 0xC3u);
 }

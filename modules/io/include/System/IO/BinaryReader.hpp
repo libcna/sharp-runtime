@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -29,12 +30,11 @@ namespace System::IO
      *
      * C++ counterpart of the .NET System.IO.BinaryReader class. This is a byte-oriented
      * subset: real .NET's BinaryReader accepts an arbitrary, pluggable Encoding; this port
-     * always decodes UTF-8 (matching .NET's own default `BinaryReader(Stream)` constructor,
-     * which uses UTF8Encoding — the only encoding real-world .NET/XNA content ever uses).
-     * `PeekChar` is available for seekable streams by decoding and restoring the stream position.
-     * Character APIs retain one pending UTF-16 code unit when a supplementary UTF-8 scalar spans
-     * a caller-provided output boundary, so `ReadChar`, `ReadChars`, and `Read(char[])` can be
-     * safely mixed.
+     * always decodes UTF-8, exactly as .NET Framework 4.0's default `BinaryReader(Stream)`
+     * does with `new UTF8Encoding()` -- the runtime Microsoft XNA 4.0 content is read by.
+     * Every character API shares one stateful decoder that never flushes: an invalid sequence
+     * becomes one U+FFFD, grouped as .NET Framework 4.0's UTF8Encoding groups it, and an
+     * unfinished sequence waits for the next read. See `docs/Migration-BinaryReaderNet4Decoding.md`.
      */
     class BinaryReader
     {
@@ -42,12 +42,16 @@ namespace System::IO
         Stream* stream_;
         bool leaveOpen_;
         bool disposed_ = false;
-        bool hasPendingCharacter_ = false;
-        charcs pendingCharacter_ = 0;
+        // .NET 4 UTF8Decoder.bits: the unfinished sequence, with its marker bits, or 0.
+        std::int32_t decoderBits_ = 0;
 
         void ThrowIfDisposed() const;
         void ReadBytesExact(bytecs* buf, intcs count);
-        [[nodiscard]] bool TryReadChar(charcs& character);
+        [[nodiscard]] intcs DecodeUtf8(const bytecs* bytes, intcs byteCount, charcs* chars,
+                                       intcs charCount);
+        [[nodiscard]] intcs InternalReadOneChar();
+        intcs InternalReadChars(charcs* buffer, intcs index, intcs count,
+                                std::vector<charcs>* grow);
 
     public:
         /** Initializes a new BinaryReader over @p stream, optionally leaving it open on Dispose. */
@@ -91,75 +95,81 @@ namespace System::IO
         [[nodiscard]] virtual bool ReadBoolean();
 
         /**
-         * @brief Returns the next UTF-8 character without advancing a seekable stream.
+         * @brief Returns the next character without advancing a seekable stream.
          *
-         * C++ counterpart of .NET `BinaryReader.PeekChar()` under its default UTF8Encoding.
-         * This narrow implementation records and restores the stream position rather than
-         * maintaining a character decoder buffer, so it requires `getCanSeekProperty()`.
-         * @return The next UTF-16 character as an intcs, or -1 when already at end of stream.
-         * @throws System::NotSupportedException if the underlying stream is not seekable.
-         * @throws System::IO::EndOfStreamException if the next character is truncated. The
-         *         original stream position is restored before throwing.
-         * @throws System::FormatException if the next bytes are not a valid supported UTF-8
-         *         character. The original stream position is restored before throwing.
+         * C++ counterpart of .NET Framework 4.0 `BinaryReader.PeekChar()`: it reads one
+         * character as ReadChar() does and restores the stream position, but not the decoder,
+         * whose state the read may have changed, exactly as .NET 4's does not.
+         * @return The next UTF-16 character as an intcs, or -1 at the end of the stream,
+         *         including the end of an unfinished UTF-8 sequence.
+         * @throws System::NotSupportedException if the underlying stream is not seekable (.NET
+         *         answers -1 there; this port keeps its documented stream-capability refusal).
+         * @throws System::ArgumentException if the character needs two UTF-16 code units, or an
+         *         invalid sequence's U+FFFD and the next character both complete in one byte, as
+         *         ReadChar(). The stream position is restored before throwing.
          */
         [[nodiscard]] virtual intcs PeekChar();
 
         /**
-         * @brief Reads one character, decoded from UTF-8, advancing the stream by however
-         *        many bytes that character's encoding occupies.
+         * @brief Reads one character, decoded from UTF-8, one byte at a time until a character
+         *        comes out.
          *
-         * C++ counterpart of .NET `BinaryReader.ReadChar()` under its default UTF8Encoding.
-         * A scalar above the Basic Multilingual Plane is exposed as its UTF-16 surrogate pair
-         * across two character reads. The high surrogate is returned first and the low surrogate
-         * is retained for the next character API call.
+         * C++ counterpart of .NET Framework 4.0 `BinaryReader.ReadChar()` (InternalReadOneChar):
+         * an invalid sequence reads as U+FFFD; the output is a single UTF-16 code unit, so a
+         * scalar above the Basic Multilingual Plane, or a U+FFFD completed together with the
+         * character of the byte that ended its sequence, does not fit and throws, after the
+         * stream is sought back to where the call began (seekable streams only). The decoder's
+         * state is what .NET 4 leaves in it.
          * @return The next decoded UTF-16 code unit.
-         * @throws System::IO::EndOfStreamException if the stream ends before a full character is read.
-         * @throws System::FormatException if the bytes are not a valid UTF-8 scalar value.
+         * @throws System::IO::EndOfStreamException if the stream ends before a character is
+         *         complete; an unfinished sequence stays in the decoder.
+         * @throws System::ArgumentException ("The output char buffer is too small...", parameter
+         *         `chars`) when the decoded output needs two code units.
          */
         [[nodiscard]] virtual charcs ReadChar();
 
         /**
          * @brief Reads up to @p count UTF-16 code units decoded from UTF-8 into a new array.
          *
-         * The returned vector is shortened at clean end-of-stream, like .NET's `ReadChars`.
-         * A supplementary Unicode scalar occupies two entries. If it reaches the requested
-         * boundary after its high surrogate, the low surrogate is retained for the next
-         * character API call.
+         * C++ counterpart of .NET Framework 4.0 `BinaryReader.ReadChars` (InternalReadChars):
+         * the vector is shortened at the end of the stream, an unfinished sequence there stays
+         * in the decoder, and an invalid sequence reads as U+FFFD. The result grows with the
+         * characters read rather than being allocated for @p count up front.
          *
          * @throws System::ArgumentOutOfRangeException if @p count is negative.
-         * @throws System::FormatException if the input is malformed UTF-8.
-         * @throws System::IO::EndOfStreamException if the input ends inside a UTF-8 sequence.
+         * @throws System::ArgumentException when the last requested position would need two code
+         *         units, as .NET 4's decoder refuses there; the bytes read stay consumed.
          */
         [[nodiscard]] virtual std::vector<charcs> ReadChars(intcs count);
 
         /**
          * @brief Reads up to @p count UTF-16 code units decoded from UTF-8 into @p buffer.
          *
-         * Returns a shorter count at clean end-of-stream. The caller must provide storage for
-         * at least `offset + count` `charcs` elements; raw C++ arrays do not carry their length.
+         * Decodes as ReadChars(intcs) does. Returns a shorter count at the end of the stream.
+         * The caller must provide storage for at least `offset + count` `charcs` elements; raw
+         * C++ arrays do not carry their length.
          *
          * @throws System::ArgumentNullException if @p buffer is null.
          * @throws System::ArgumentOutOfRangeException if @p offset or @p count is negative.
-         * @throws System::FormatException if the input is malformed UTF-8.
-         * @throws System::IO::EndOfStreamException if the input ends inside a UTF-8 sequence.
+         * @throws System::ArgumentException when the last requested position would need two code
+         *         units, as ReadChars(intcs).
          */
         virtual intcs Read(charcs buffer[], intcs offset, intcs count);
 
         /**
-         * @brief Reads a UTF-8 string prefixed with its 7-bit encoded length.
+         * @brief Reads a string prefixed with its 7-bit encoded byte length.
          *
-         * For a seekable @ref stream_ (`getCanSeekProperty()` true), a declared length exceeding
-         * the stream's own remaining bytes is rejected before the string buffer is allocated --
-         * a corrupt or adversarial length prefix (up to ~2GB from a single 5-byte 7-bit-encoded
-         * value) can otherwise trigger a huge allocation attempt before the truncation would
-         * naturally be detected. Non-seekable streams (`Length`/`Position` not meaningful, e.g.
-         * `NetworkStream`) are unaffected -- same behavior as before.
+         * C++ counterpart of .NET Framework 4.0 `BinaryReader.ReadString()`: the bytes are
+         * decoded 128 at a time through the reader's decoder, so an invalid sequence becomes
+         * U+FFFD (returned here as its UTF-8 encoding, EF BF BD) and an unfinished sequence at
+         * the end stays in the decoder for the next read. Well-formed UTF-8 comes back
+         * byte-identical. The result grows with the bytes actually read, never with the declared
+         * length, so a corrupt length prefix cannot request a large allocation.
          *
-         * @return The decoded string.
+         * @return The decoded string, as UTF-8.
          * @throws System::IO::IOException if the decoded length is negative.
-         * @throws System::IO::EndOfStreamException if the declared length exceeds the seekable
-         *         stream's remaining length, or the stream ends before the full string is read.
+         * @throws System::IO::EndOfStreamException if the stream ends before the declared
+         *         length is read; the bytes read before that are consumed.
          */
         [[nodiscard]] virtual std::string ReadString();
 
@@ -205,9 +215,11 @@ namespace System::IO
         /**
          * @brief Reads a 32-bit integer encoded 7 bits at a time (little-endian-first, high bit = continuation).
          *
-         * C++ counterpart of .NET BinaryReader.Read7BitEncodedInt().
+         * C++ counterpart of .NET Framework 4.0 BinaryReader.Read7BitEncodedInt(): a fifth byte
+         * contributes only its low four bits; the rest are dropped without an error.
          * @return The decoded 32-bit integer.
-         * @throws System::FormatException if the encoding uses more bytes than a 32-bit value requires.
+         * @throws System::FormatException if the fifth byte still sets the continuation bit; no
+         *         sixth byte is read.
          */
         intcs Read7BitEncodedInt();
 
