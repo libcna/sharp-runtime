@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <initializer_list>
+#include <type_traits>
 #include <unordered_set>
 #include <vector>
 #include "System/Span.hpp"
@@ -29,18 +30,35 @@ namespace detail {
      * A disabled `std::hash<T>` is not copy-constructible, and libstdc++ 15 asserts that in the
      * class body of `std::unordered_set<T>`. A member of that type therefore made merely
      * instantiating `SearchValues<T>` fail inside the standard library, before the
-     * constructors' own asserts could explain the requirement. This wrapper is always
-     * copy-constructible and uses `std::hash<T>` only when a value is hashed. Ticket #2054.
+     * constructors' own asserts could explain the requirement. This wrapper keeps one
+     * `std::hash<T>` for a usable specialization, as the set did before, and an empty
+     * placeholder otherwise, so it is copy-constructible for every `T`. Ticket #2054.
      */
     template<typename T>
     struct SearchValuesHasher {
+        /** @brief Stand-in member for a `T` without a usable `std::hash<T>`. */
+        struct Unusable {};
+
+        /** @brief The hasher this wrapper holds. */
+        [[no_unique_address]] std::conditional_t<searchValuesHashUsable<T>, std::hash<T>, Unusable>
+            hash{};
+
         /**
-         * @brief Returns `std::hash<T>{}(value)`.
+         * @brief Hashes @p value with the held `std::hash<T>`.
          *
          * @param value The value to hash.
          * @return Its hash code.
          */
-        std::size_t operator()(const T& value) const { return std::hash<T>{}(value); }
+        std::size_t operator()(const T& value) const {
+            if constexpr (searchValuesHashUsable<T>) {
+                return hash(value);
+            } else {
+                static_assert(searchValuesHashUsable<T>,
+                    "System::Buffers::SearchValues<T> requires a usable std::hash<T>: the backing "
+                    "std::unordered_set<T> hashes every element. See ticket #2054.");
+                return 0;
+            }
+        }
     };
 } // namespace detail
 
