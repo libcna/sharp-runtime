@@ -9,6 +9,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the
 
 ## [Unreleased]
 
+### Fixed
+
+- `System/Decimal.hpp` no longer triggers `-Wpedantic` ("ISO C++ does not support '__int128'") in
+  consumers that include it, such as CNA's `Game.hpp` through `ContentManager.hpp`.
+
 ## [0.2.0] — 2026-10-28
 
 A compatibility release driven by the ported XNA demos and the CNA engine. Where a ported game

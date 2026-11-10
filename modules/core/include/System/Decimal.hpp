@@ -46,7 +46,8 @@ namespace System {
  *     and reflection-based IConvertible/GetTypeCode are out of scope.
  */
 class Decimal {
-    using u128 = unsigned __int128;
+    // __extension__ keeps -Wpedantic quiet in consumers; the type is a GCC/Clang extension.
+    __extension__ typedef unsigned __int128 u128;
     static constexpr u128 MAX_MANTISSA = (u128(1) << 96) - 1;
 
     u128    mantissa_ = 0;
