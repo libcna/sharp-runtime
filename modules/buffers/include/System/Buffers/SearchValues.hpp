@@ -22,6 +22,26 @@ namespace detail {
     template<typename T>
     inline constexpr bool searchValuesEqualityUsable =
         requires(const T& a, const T& b) { a == b; };
+
+    /**
+     * @brief Hashes values through `std::hash<T>` for the backing set.
+     *
+     * A disabled `std::hash<T>` is not copy-constructible, and libstdc++ 15 asserts that in the
+     * class body of `std::unordered_set<T>`. A member of that type therefore made merely
+     * instantiating `SearchValues<T>` fail inside the standard library, before the
+     * constructors' own asserts could explain the requirement. This wrapper is always
+     * copy-constructible and uses `std::hash<T>` only when a value is hashed. Ticket #2054.
+     */
+    template<typename T>
+    struct SearchValuesHasher {
+        /**
+         * @brief Returns `std::hash<T>{}(value)`.
+         *
+         * @param value The value to hash.
+         * @return Its hash code.
+         */
+        std::size_t operator()(const T& value) const { return std::hash<T>{}(value); }
+    };
 } // namespace detail
 
 /**
@@ -47,7 +67,7 @@ namespace detail {
  */
 template<typename T>
 class SearchValues {
-    std::unordered_set<T> values_;
+    std::unordered_set<T, detail::SearchValuesHasher<T>> values_;
 
 public:
     // The two asserts below are deliberately in the CONSTRUCTOR bodies, not at class scope:

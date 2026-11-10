@@ -13,6 +13,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the
 
 - `System/Decimal.hpp` no longer triggers `-Wpedantic` ("ISO C++ does not support '__int128'") in
   consumers that include it, such as CNA's `Game.hpp` through `ContentManager.hpp`.
+- `System::Buffers::SearchValues<T>` hashes through an always-copyable wrapper. Under GCC 15's
+  libstdc++, `std::unordered_set<T>` asserts in its class body that `std::hash<T>` is
+  copy-constructible, so instantiating `SearchValues<T>` for an equality-only `T` failed there,
+  and the constructors' explanatory `static_assert` was never reached.
 
 ## [0.2.0] — 2026-10-28
 
