@@ -50,8 +50,8 @@ namespace System::IO
      * A seekable stream should override getCanSeekProperty() too. Note that Seek() and
      * getPositionProperty() are **not** gated on it — Seek()'s default is expressed in terms
      * of Position/Length — so an un-overridden getCanSeekProperty() does not stop seeking
-     * from working; it only makes capability-checking callers such as
-     * `BinaryReader::PeekChar` refuse.
+     * from working; it only makes capability-checking callers treat the stream as
+     * unseekable -- `BinaryReader::PeekChar` then answers -1 without reading, as .NET does.
      *
      * A stream whose capability depends on its own lifetime must fold that in: see
      * `MemoryStream::getCanReadProperty()` (`isOpen_`) and the zlib wrappers, both of which
@@ -138,8 +138,9 @@ namespace System::IO
          * **Defaults to `false`**, unlike .NET where `Stream.CanSeek` is abstract. Note that
          * this property does **not** gate Seek() or getPositionProperty(): Seek()'s default is
          * expressed in terms of Position/Length, so leaving this un-overridden does not stop
-         * seeking from working — it only makes capability-checking callers such as
-         * `BinaryReader::PeekChar` refuse. Override this in every seekable stream. See the
+         * seeking from working — it only makes capability-checking callers treat the stream
+         * as unseekable (`BinaryReader::PeekChar` answers -1 without reading). Override this in
+         * every seekable stream. See the
          * class doc-comment and `docs/StreamCapabilityContractDesign.md`.
          */
         [[nodiscard]] virtual bool getCanSeekProperty() const { return false; }

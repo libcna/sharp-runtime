@@ -10,7 +10,6 @@
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
-#include "System/NotSupportedException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/IO/EndOfStreamException.hpp"
 #include "System/IO/IOException.hpp"
@@ -412,10 +411,11 @@ namespace System::IO
 
     intcs BinaryReader::PeekChar()
     {
+        // BinaryReader.PeekChar IL_0000-0008: a closed reader is FileNotOpen.
         ThrowIfDisposed();
+        // IL_000d-001b: a stream that cannot seek answers -1 without being read.
         if (!stream_->getCanSeekProperty())
-            throw System::NotSupportedException(
-                "BinaryReader::PeekChar requires a seekable stream in this implementation.");
+            return -1;
 
         // BinaryReader.PeekChar IL_001c-003c: read one character and restore the position. The
         // decoder state is not restored, exactly as .NET 4's is not; a failing read has already

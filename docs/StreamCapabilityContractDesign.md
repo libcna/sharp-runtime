@@ -148,7 +148,7 @@ other.
 
 | Site | Uses | Purpose |
 |---|---|---|
-| `BinaryReader.cpp:210` | `!CanSeek` → throw | `PeekChar` needs to rewind |
+| `BinaryReader.cpp:210` | `!CanSeek` → throw (since 2026-11-11: → `-1`, as .NET 4.0's `PeekChar` `IL_000d`-`001b`) | `PeekChar` needs to rewind |
 | `BinaryReader.cpp:324, 357` | `CanSeek` → branch | bounded vs unbounded length handling |
 | `BufferedStream.cpp:63, 159-164, 183, 216-218, 232` | inner's three | buffering, flush, seek and `SetLength` policy |
 | `UnmanagedMemoryStream.cpp:62, 77, 116` | **own** `CanRead`/`CanWrite` → `NotSupportedException("Stream does not support reading."/"…writing.")` | per-operation access enforcement |
@@ -466,7 +466,7 @@ appears — at that point the per-ticket approvals cost more than the one-time b
 | overrides `Write()` **and** `CanWrite` | works | unchanged | works |
 | overrides `Read()`, not `CanRead` | works (default `true`) | unchanged | works — `CanRead`'s default is permissive, so Layer 2 adds no read-direction rejection |
 | positively declares `CanRead == false` | rejected by `StreamReader`/`BinaryReader` since #1808 | unchanged | unchanged |
-| seekable but does not override `CanSeek` | `Seek`/`Position` work; `BinaryReader::PeekChar` throws | unchanged | additionally rejected by `ZipArchive` `Update` |
+| seekable but does not override `CanSeek` | `Seek`/`Position` work; `BinaryReader::PeekChar` throws (answers `-1` since 2026-11-11) | unchanged | additionally rejected by `ZipArchive` `Update` |
 | zlib wrapper after `Close()` | still claims its mode's capability | **returns `false`** | also `false` |
 
 The diagnostic for every Layer 2 rejection is an `ArgumentException` at the construction

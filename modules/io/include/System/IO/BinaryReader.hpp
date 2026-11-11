@@ -99,11 +99,10 @@ namespace System::IO
          *
          * C++ counterpart of .NET Framework 4.0 `BinaryReader.PeekChar()`: it reads one
          * character as ReadChar() does and restores the stream position, but not the decoder,
-         * whose state the read may have changed, exactly as .NET 4's does not.
-         * @return The next UTF-16 character as an intcs, or -1 at the end of the stream,
-         *         including the end of an unfinished UTF-8 sequence.
-         * @throws System::NotSupportedException if the underlying stream is not seekable (.NET
-         *         answers -1 there; this port keeps its documented stream-capability refusal).
+         * whose state the read may have changed, exactly as .NET 4's does not. A stream whose
+         * getCanSeekProperty() is false is not read at all, and the answer is -1.
+         * @return The next UTF-16 character as an intcs; -1 at the end of the stream, including
+         *         the end of an unfinished UTF-8 sequence, and -1 for a stream that cannot seek.
          * @throws System::ArgumentException if the character needs two UTF-16 code units, or an
          *         invalid sequence's U+FFFD and the next character both complete in one byte, as
          *         ReadChar(). The stream position is restored before throwing.

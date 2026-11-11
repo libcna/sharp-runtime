@@ -1345,11 +1345,25 @@ TEST(BinaryReaderWriterTests, PeekChar_TruncatedUtf8RestoresStreamPosition) {
     EXPECT_EQ(br.ReadByte(), 0xC3u);
 }
 
-TEST(BinaryReaderWriterTests, PeekChar_NonSeekableStreamThrowsNotSupportedException) {
-    NonSeekableReadStream stream({0x41});
+TEST(BinaryReaderWriterTests, PeekChar_NonSeekableStreamReturnsMinusOneWithoutReading) {
+    // .NET Framework 4.0 BinaryReader.PeekChar IL_000d-001b: !CanSeek answers -1 before any read.
+    NonSeekableReadStream stream({0x41, 0x42});
     BinaryReader br(&stream, true);
 
-    EXPECT_THROW(br.PeekChar(), System::NotSupportedException);
+    EXPECT_EQ(br.PeekChar(), -1);
+    EXPECT_EQ(br.PeekChar(), -1);
+    // Nothing was consumed, neither from the stream nor into the decoder.
+    EXPECT_EQ(br.ReadChar(), u'A');
+    EXPECT_EQ(br.ReadByte(), 0x42u);
+}
+
+TEST(BinaryReaderWriterTests, PeekChar_NonSeekableStreamAfterCloseThrowsObjectDisposedException) {
+    // IL_0000-0008: the closed-reader check comes before the CanSeek answer.
+    NonSeekableReadStream stream({0x41});
+    BinaryReader br(&stream, true);
+    br.Close();
+
+    EXPECT_THROW(br.PeekChar(), System::ObjectDisposedException);
 }
 
 TEST(BinaryReaderWriterTests, ReadDecimal_PositiveValueRoundTrips) {

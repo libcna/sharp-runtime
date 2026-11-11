@@ -69,8 +69,8 @@ decoder serves every character read and is always called with `flush = false`
   4.0 nor .NET 11 does. `ReadChars(1)` and `Read(buffer, i, 1)` throw the same way, without
   seeking back (`InternalReadChars` has no handler).
 - **`PeekChar`** restores the stream position but not the decoder (`IL_001c`-`003c`), so peeking
-  at an unfinished sequence leaves it pending. A non-seekable stream keeps this port's documented
-  `NotSupportedException` (`docs/StreamCapabilityContractDesign.md`); .NET answers `-1` there.
+  at an unfinished sequence leaves it pending. A non-seekable stream answers `-1` without being
+  read (`IL_000d`-`001b`) since 2026-11-11 (§4); until then it threw `NotSupportedException`.
 
 | Call | Bytes | Was | Is |
 |---|---|---|---|
@@ -93,3 +93,22 @@ writer emits one at a time, never a surrogate pair together), and `ReadString` b
 read; CNA's content tests pin the new behaviour at `ContentManager::Load<T>`
 (`ContentNet4BinaryDecodingTest`). mobile-eggbert was searched for `ReadChar`, `ReadChars`,
 `PeekChar` and `Read7BitEncodedInt`; the result is recorded in the CNA HND-TQ-16 report.
+
+## 4. `PeekChar` on a stream that cannot seek (CNA KI-SHARP-PEEKCHAR, 2026-11-11)
+
+`BinaryReader.PeekChar` checks for a closed reader (`IL_0000`-`0008`, `__Error.FileNotOpen`), then
+returns `-1` when `m_stream.CanSeek` is false (`IL_000d`-`001b`), before anything is read. This
+port threw `NotSupportedException` there instead. It now answers `-1`, reads nothing, and leaves
+the decoder untouched; a closed reader still throws `ObjectDisposedException` first. No public
+signature, `noexcept`, vtable or layout change.
+
+| Call | Stream | Was | Is |
+|---|---|---|---|
+| `PeekChar` | `CanSeek == false` | `NotSupportedException` | `-1`, nothing consumed |
+
+A stream that can seek but does not override `getCanSeekProperty()` (whose default is `false`, see
+`docs/StreamCapabilityContractDesign.md`) used to be told so by the exception; it now gets `-1`.
+Override the property in every seekable stream.
+
+Downstream measurement (SA-2 condition 5): `PeekChar` has no call site in CNA's `modules/`,
+`tests/` or `tools/`, nor in mobile-eggbert; nothing relied on the exception.

@@ -11,6 +11,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the
 
 ### Fixed
 
+- `System::IO::BinaryReader::PeekChar` on a stream that cannot seek returns `-1` without reading,
+  as .NET Framework 4.0's does (`PeekChar` `IL_000d`-`001b`), instead of throwing
+  `NotSupportedException`. A closed reader still throws `ObjectDisposedException` first
+  ([`docs/Migration-BinaryReaderNet4Decoding.md`](docs/Migration-BinaryReaderNet4Decoding.md) §4).
 - `System/Decimal.hpp` no longer triggers `-Wpedantic` ("ISO C++ does not support '__int128'") in
   consumers that include it, such as CNA's `Game.hpp` through `ContentManager.hpp`.
 - `System::Buffers::SearchValues<T>` hashes through an always-copyable wrapper that holds one
