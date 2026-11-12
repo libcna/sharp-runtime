@@ -128,6 +128,15 @@ namespace System::IO
         [[nodiscard]] virtual charcs ReadChar();
 
         /**
+         * @brief Reads the next character, or answers -1 at the end of the stream.
+         *
+         * C++ counterpart of .NET Framework 4.0 `BinaryReader.Read()` (InternalReadOneChar), the
+         * non-throwing sibling of ReadChar(). Not virtual: it adds no vtable slot.
+         * @return The character's value, or -1 when no character is left.
+         */
+        [[nodiscard]] intcs Read();
+
+        /**
          * @brief Reads up to @p count UTF-16 code units decoded from UTF-8 into a new array.
          *
          * C++ counterpart of .NET Framework 4.0 `BinaryReader.ReadChars` (InternalReadChars):

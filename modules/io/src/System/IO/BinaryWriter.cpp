@@ -4,9 +4,12 @@
 #include "System/IO/BinaryWriter.hpp"
 
 #include <cstring>
+#include <string>
+#include <vector>
 
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ObjectDisposedException.hpp"
 
 namespace System::IO {
@@ -100,6 +103,101 @@ namespace System::IO {
         Write7BitEncodedInt(static_cast<intcs>(value.size()));
         WriteBytes(reinterpret_cast<const bytecs*>(value.data()),
                    static_cast<intcs>(value.size()));
+    }
+
+    namespace {
+        // Appends one Unicode scalar value's UTF-8 bytes.
+        void AppendUtf8(std::vector<bytecs>& out, char32_t cp) {
+            if (cp < 0x80) {
+                out.push_back(static_cast<bytecs>(cp));
+            } else if (cp < 0x800) {
+                out.push_back(static_cast<bytecs>(0xC0 | (cp >> 6)));
+                out.push_back(static_cast<bytecs>(0x80 | (cp & 0x3F)));
+            } else if (cp < 0x10000) {
+                out.push_back(static_cast<bytecs>(0xE0 | (cp >> 12)));
+                out.push_back(static_cast<bytecs>(0x80 | ((cp >> 6) & 0x3F)));
+                out.push_back(static_cast<bytecs>(0x80 | (cp & 0x3F)));
+            } else {
+                out.push_back(static_cast<bytecs>(0xF0 | (cp >> 18)));
+                out.push_back(static_cast<bytecs>(0x80 | ((cp >> 12) & 0x3F)));
+                out.push_back(static_cast<bytecs>(0x80 | ((cp >> 6) & 0x3F)));
+                out.push_back(static_cast<bytecs>(0x80 | (cp & 0x3F)));
+            }
+        }
+
+        bool IsSurrogate(charcs ch) { return ch >= 0xD800 && ch <= 0xDFFF; }
+    }
+
+    void BinaryWriter::Write(charcs ch) {
+        // .NET Framework 4 BinaryWriter.Write(char) refuses a surrogate on its own.
+        if (IsSurrogate(ch))
+            throw System::ArgumentException(
+                "Unicode surrogate characters must be written out as pairs together in the same "
+                "call, not individually. Consider passing in a character array instead.");
+        std::vector<bytecs> bytes;
+        AppendUtf8(bytes, ch);
+        WriteBytes(bytes.data(), static_cast<intcs>(bytes.size()));
+    }
+
+    void BinaryWriter::Write(char ch) {
+        Write(static_cast<charcs>(static_cast<unsigned char>(ch)));
+    }
+
+    void BinaryWriter::Write(const char* value) {
+        if (value == nullptr)
+            throw System::ArgumentNullException("value");
+        Write(std::string(value));
+    }
+
+    void BinaryWriter::Write(const std::vector<bytecs>& buffer) {
+        if (!buffer.empty())
+            Write(buffer.data(), 0, static_cast<intcs>(buffer.size()));
+        else
+            ThrowIfDisposed();
+    }
+
+    void BinaryWriter::Write(const std::vector<charcs>& chars) {
+        if (!chars.empty())
+            Write(chars.data(), 0, static_cast<intcs>(chars.size()));
+        else
+            ThrowIfDisposed();
+    }
+
+    void BinaryWriter::Write(const charcs* chars, intcs index, intcs count) {
+        if (chars == nullptr)
+            throw System::ArgumentNullException("chars");
+        System::ArgumentOutOfRangeException::ThrowIfNegative(index, "index");
+        System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");
+        // UTF8Encoding(false, true) -- .NET Framework 4 BinaryWriter(Stream)'s encoder -- throws for a
+        // lone surrogate (EncoderFallbackException, an ArgumentException) before anything is written.
+        std::vector<bytecs> bytes;
+        bytes.reserve(static_cast<std::size_t>(count));
+        for (intcs i = 0; i < count; ++i) {
+            const charcs ch = chars[index + i];
+            if (ch >= 0xD800 && ch <= 0xDBFF && i + 1 < count &&
+                chars[index + i + 1] >= 0xDC00 && chars[index + i + 1] <= 0xDFFF) {
+                const char32_t cp = 0x10000 + ((static_cast<char32_t>(ch) - 0xD800) << 10) +
+                                    (static_cast<char32_t>(chars[index + i + 1]) - 0xDC00);
+                AppendUtf8(bytes, cp);
+                ++i;
+                continue;
+            }
+            if (IsSurrogate(ch))
+                throw System::ArgumentException(
+                    "Unable to translate Unicode character at index " + std::to_string(i) +
+                    " to specified code page.");
+            AppendUtf8(bytes, ch);
+        }
+        WriteBytes(bytes.data(), static_cast<intcs>(bytes.size()));
+    }
+
+    void BinaryWriter::Write(const System::Decimal& value) {
+        intcs lo = 0, mid = 0, hi = 0, flags = 0;
+        System::Decimal::GetBits(value, lo, mid, hi, flags);
+        Write(lo);
+        Write(mid);
+        Write(hi);
+        Write(flags);
     }
 
     void BinaryWriter::Write7BitEncodedInt(intcs value) {

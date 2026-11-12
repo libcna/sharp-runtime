@@ -3,8 +3,11 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <cstddef>
 #include <string>
+#include <vector>
 
+#include "System/Decimal.hpp"
 #include "System/IO/Stream.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
@@ -16,6 +19,7 @@ namespace System::IO {
     using SharpRuntime::ushortcs;
     using SharpRuntime::longcs;
     using SharpRuntime::Single;
+    using SharpRuntime::charcs;
 
     /**
      * @brief Writes primitive types to a stream in binary, little-endian format.
@@ -73,6 +77,77 @@ namespace System::IO {
 
         /** Writes a region of a byte array to the stream. */
         virtual void Write(const bytecs* buffer, intcs offset, intcs count);
+
+        // The overloads below are not virtual: they add no vtable slot. Without them a C++ caller's
+        // char16_t, string literal or array argument silently converted to Write(intcs) or
+        // Write(bool) and wrote the wrong bytes.
+
+        /**
+         * @brief Writes a Unicode character to the stream, UTF-8 encoded.
+         *
+         * C++ counterpart of .NET BinaryWriter.Write(char): one character in its UTF-8 bytes.
+         * @param ch The character; a lone surrogate cannot be encoded on its own.
+         * @throws System::ArgumentException if @p ch is a surrogate (.NET
+         *         Arg_SurrogatesNotAllowedAsSingleChar).
+         */
+        void Write(charcs ch);
+        /**
+         * @brief Writes a narrow character as the Unicode character of the same value.
+         *
+         * The C++ spelling of a C# character literal: `Write('A')` writes the one byte 0x41.
+         * @param ch The character, read as an unsigned code point (U+0000..U+00FF).
+         */
+        void Write(char ch);
+        /**
+         * @brief Writes a length-prefixed string -- the C++ spelling of a C# string literal.
+         * @param value A null-terminated UTF-8 string.
+         * @throws System::ArgumentNullException if @p value is null.
+         */
+        void Write(const char* value);
+        /**
+         * @brief Writes a whole byte array to the stream. C++ counterpart of .NET Write(byte[]).
+         * @param buffer The bytes to write.
+         */
+        void Write(const std::vector<bytecs>& buffer);
+        /**
+         * @brief Writes a whole byte array to the stream. C++ counterpart of .NET Write(byte[]).
+         * @param buffer The bytes to write.
+         */
+        template<std::size_t N>
+        void Write(const bytecs (&buffer)[N]) { Write(buffer, 0, static_cast<intcs>(N)); }
+        /**
+         * @brief Writes a character array to the stream, UTF-8 encoded.
+         *
+         * C++ counterpart of .NET BinaryWriter.Write(char[]). A surrogate pair is one character.
+         * @param chars The characters to write.
+         * @throws System::ArgumentException for a lone surrogate (.NET EncoderFallbackException).
+         */
+        void Write(const std::vector<charcs>& chars);
+        /**
+         * @brief Writes a region of a character array to the stream, UTF-8 encoded.
+         *
+         * C++ counterpart of .NET BinaryWriter.Write(char[], int, int).
+         * @param chars The characters.
+         * @param index The first character to write.
+         * @param count How many characters to write.
+         * @throws System::ArgumentNullException if @p chars is null.
+         * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative.
+         * @throws System::ArgumentException for a lone surrogate.
+         */
+        void Write(const charcs* chars, intcs index, intcs count);
+        /**
+         * @brief Writes a whole character array to the stream, UTF-8 encoded.
+         * @param chars The characters to write.
+         */
+        template<std::size_t N>
+        void Write(const charcs (&chars)[N]) { Write(chars, 0, static_cast<intcs>(N)); }
+        /**
+         * @brief Writes a decimal value as its 16 bytes: lo, mid, hi and flags, little-endian.
+         *
+         * C++ counterpart of .NET BinaryWriter.Write(decimal) (Decimal.GetBytes).
+         * @param value The value to write.
+         */
+        void Write(const System::Decimal& value);
 
         /**
          * @brief Writes a 32-bit integer encoded 7 bits at a time (high bit = continuation).

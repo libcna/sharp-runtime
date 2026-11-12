@@ -435,6 +435,13 @@ namespace System::IO
         return static_cast<charcs>(character);
     }
 
+    intcs BinaryReader::Read()
+    {
+        // BinaryReader.Read() IL_000d-0013: InternalReadOneChar, -1 at the end of the stream.
+        ThrowIfDisposed();
+        return InternalReadOneChar();
+    }
+
     std::vector<charcs> BinaryReader::ReadChars(intcs count)
     {
         System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");

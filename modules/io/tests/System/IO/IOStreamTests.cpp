@@ -909,6 +909,54 @@ TEST(BinaryReaderWriterTests, BinaryWriter_Close_LeaveOpenFalse_ClosesUnderlying
     EXPECT_TRUE(fs.closeCalled);
 }
 
+namespace {
+    template<class F>
+    std::vector<uint8_t> WrittenBytes(F write) {
+        MemoryStream ms;
+        BinaryWriter bw(&ms, true);
+        write(bw);
+        bw.Flush();
+        return ms.ToArray();
+    }
+}
+
+// CNA rv-netapi #1/#4: a char16_t, a string literal and whole arrays reach .NET's Write(char),
+// Write(string), Write(byte[]) and Write(char[]) -- they used to convert to Write(int) or
+// Write(bool) and write the wrong bytes -- and Write(decimal), Write(char[], int, int) and Read()
+// exist (.NET Framework 4 BinaryWriter Write(char) IL_0036-005c, Write(string) IL_000e-0083,
+// Write(byte[]) IL_000e-0019, Write(char[]) IL_000e-002a, Write(decimal) IL_0000-001b;
+// BinaryReader.Read() IL_000d-0013).
+TEST(BinaryReaderWriterTests, CharacterStringArrayAndDecimalArgumentsWriteTheirDotNetBytes) {
+    using Bytes = std::vector<uint8_t>;
+    EXPECT_EQ(WrittenBytes([](BinaryWriter& w) { w.Write(u'A'); }), (Bytes{0x41}));
+    EXPECT_EQ(WrittenBytes([](BinaryWriter& w) { w.Write(u'\u00E9'); }), (Bytes{0xC3, 0xA9}));
+    EXPECT_EQ(WrittenBytes([](BinaryWriter& w) { w.Write('A'); }), (Bytes{0x41}));
+    EXPECT_EQ(WrittenBytes([](BinaryWriter& w) { w.Write("AB"); }), (Bytes{0x02, 0x41, 0x42}));
+    const SharpRuntime::bytecs raw[2] = {42, 43};
+    EXPECT_EQ(WrittenBytes([&](BinaryWriter& w) { w.Write(raw); }), (Bytes{42, 43}));
+    EXPECT_EQ(WrittenBytes([](BinaryWriter& w) { w.Write(std::vector<SharpRuntime::bytecs>{7, 8, 9}); }),
+              (Bytes{7, 8, 9}));
+    const SharpRuntime::charcs chars[4] = {u'A', u'B', 0xD83D, 0xDE00};
+    EXPECT_EQ(WrittenBytes([&](BinaryWriter& w) { w.Write(chars); }),
+              (Bytes{0x41, 0x42, 0xF0, 0x9F, 0x98, 0x80}));
+    EXPECT_EQ(WrittenBytes([&](BinaryWriter& w) { w.Write(chars, 1, 1); }), (Bytes{0x42}));
+    EXPECT_EQ(WrittenBytes([](BinaryWriter& w) { w.Write(System::Decimal(1)); }),
+              (Bytes{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    EXPECT_THROW(bw.Write(static_cast<SharpRuntime::charcs>(0xD800)), System::ArgumentException);
+    const SharpRuntime::charcs lone[1] = {0xDC00};
+    EXPECT_THROW(bw.Write(lone), System::ArgumentException);
+    EXPECT_THROW(bw.Write(static_cast<const char*>(nullptr)), System::ArgumentNullException);
+    EXPECT_EQ(ms.getLengthProperty(), 0) << "a refused write wrote nothing";
+
+    const auto bytes = WrittenBytes([](BinaryWriter& w) { w.Write(u'Z'); });
+    MemoryStream in(bytes.data(), static_cast<int32_t>(bytes.size()));
+    BinaryReader br(&in, true);
+    EXPECT_EQ(br.Read(), static_cast<SharpRuntime::intcs>(u'Z'));
+    EXPECT_EQ(br.Read(), -1);
+}
+
 TEST(BinaryReaderWriterTests, WriteRead_Int32_Roundtrip) {
     MemoryStream ms;
     BinaryWriter bw(&ms, true);
