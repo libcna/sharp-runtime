@@ -7,9 +7,14 @@
 #include <string>
 #include <vector>
 
-#include "System/Decimal.hpp"
 #include "System/IO/Stream.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+
+// Keep BinaryWriter available when its one native-128-dependent method is unavailable (MSVC),
+// as BinaryReader does for ReadDecimal.
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
+#  include "System/Decimal.hpp"
+#endif
 
 namespace System::IO {
 
@@ -146,8 +151,11 @@ namespace System::IO {
          *
          * C++ counterpart of .NET BinaryWriter.Write(decimal) (Decimal.GetBytes).
          * @param value The value to write.
+         * @note Available when @c SHARP_RUNTIME_HAS_NATIVE_INT128 is 1.
          */
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
         void Write(const System::Decimal& value);
+#endif // SHARP_RUNTIME_HAS_NATIVE_INT128
 
         /**
          * @brief Writes a 32-bit integer encoded 7 bits at a time (high bit = continuation).

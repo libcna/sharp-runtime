@@ -10,7 +10,7 @@
 `BinaryWriter` gains non-virtual overloads: `Write(charcs)`, `Write(char)`, `Write(const char*)`,
 `Write(const std::vector<bytecs>&)`, `Write(const bytecs (&)[N])`, `Write(const std::vector<charcs>&)`,
 `Write(const charcs*, intcs index, intcs count)`, `Write(const charcs (&)[N])` and
-`Write(const System::Decimal&)`. `BinaryReader` gains the non-virtual `intcs Read()`.
+`Write(const System::Decimal&)` (only where `SHARP_RUNTIME_HAS_NATIVE_INT128` is 1, as for `BinaryReader::ReadDecimal`; MSVC has no native 128-bit integer). `BinaryReader` gains the non-virtual `intcs Read()`.
 
 ## Why it is a behaviour change for existing calls
 

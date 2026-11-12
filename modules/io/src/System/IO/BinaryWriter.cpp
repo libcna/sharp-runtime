@@ -191,6 +191,7 @@ namespace System::IO {
         WriteBytes(bytes.data(), static_cast<intcs>(bytes.size()));
     }
 
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
     void BinaryWriter::Write(const System::Decimal& value) {
         intcs lo = 0, mid = 0, hi = 0, flags = 0;
         System::Decimal::GetBits(value, lo, mid, hi, flags);
@@ -199,6 +200,7 @@ namespace System::IO {
         Write(hi);
         Write(flags);
     }
+#endif // SHARP_RUNTIME_HAS_NATIVE_INT128
 
     void BinaryWriter::Write7BitEncodedInt(intcs value) {
         uint32_t uValue = static_cast<uint32_t>(value);
