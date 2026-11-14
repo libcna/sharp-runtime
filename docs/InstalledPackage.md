@@ -6,7 +6,7 @@
 Sharp Runtime can be consumed without its source checkout:
 
 ```cmake
-find_package(SharpRuntime 0.2 CONFIG REQUIRED COMPONENTS Core.Base IO)
+find_package(SharpRuntime 0.3 CONFIG REQUIRED COMPONENTS Core.Base IO)
 target_link_libraries(game PRIVATE SharpRuntime::Core.Base SharpRuntime::IO)
 ```
 
@@ -20,8 +20,8 @@ cmake --install build --component SharpRuntime --prefix /path/to/sdk
 Set the consumer's `CMAKE_PREFIX_PATH` to that prefix. The package version comes
 from the existing project release version, with SameMinorVersion compatibility;
 it is not a promise of binary compatibility across compiler/toolchain/ABI changes.
-Before 1.0 a minor release may change the ABI, so a consumer requesting `0.1`
-does not find a 0.2.x package: raise the requested version and rebuild.
+Before 1.0 a minor release may change the ABI, so a consumer requesting `0.2`
+does not find a 0.3.x package: raise the requested version and rebuild.
 Use compatible compiler, standard library, architecture and build settings.
 
 `SHARP_RUNTIME_INSTALL` defaults to ON for a standalone Sharp Runtime build and

@@ -3,7 +3,7 @@
 
 # Releasing Sharp Runtime
 
-*Current as of 0.2.0 (2026-10-28).*
+*Current as of 0.3.0 (2026-11-14).*
 
 Sharp Runtime follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html). A release
 is a git tag plus a `CHANGELOG.md` entry — there is no separate release branch, and nothing is

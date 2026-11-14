@@ -9,8 +9,88 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-11-14
+
+A compatibility release driven by CNA's XNA content pipeline and its ported games. Where CNA
+observed `BinaryReader`, `BinaryWriter`, `XmlReader` or `StringComparer::OrdinalIgnoreCase`
+behaving differently from .NET Framework 4.0, this release follows .NET. Each such change is
+recorded in a `docs/Migration-*.md` note, linked below.
+
+**One public source spelling is removed:** `System::Version`'s `Major`, `Minor`, `Build` and
+`Revision` data members are private. This is why the release is `0.3.0` and not `0.2.1`. The
+installed package is `SameMinorVersion`-compatible, so it refuses `find_package(SharpRuntime 0.2)`.
+Object layouts are unchanged: `BinaryReader`'s decoder state reuses the slot of the two members
+it replaces, and a layout test pins it.
+
+### Added
+
+- `System::Version::getMajorProperty()`, `getMinorProperty()`, `getBuildProperty()` and
+  `getRevisionProperty()`. The constructors, `CompareTo` and the comparison operators are
+  `constexpr`; the comparisons come from a defaulted `operator<=>` and are `noexcept`.
+- `System::IO::BinaryWriter` overloads that write what .NET writes for the same argument:
+  `Write(charcs)`, `Write(char)`, `Write(const char*)`, `Write(const std::vector<bytecs>&)`,
+  `Write(const bytecs (&)[N])`, `Write(const std::vector<charcs>&)`,
+  `Write(const charcs*, intcs, intcs)` and `Write(const charcs (&)[N])`. Also
+  `Write(const System::Decimal&)`, which exists only where `SHARP_RUNTIME_HAS_NATIVE_INT128` is
+  1, as `BinaryReader::ReadDecimal` already does, so MSVC consumers keep compiling. All are
+  non-virtual. No vtable, `sizeof` or existing signature changes
+  ([`docs/Migration-BinaryWriterCharacterOverloads.md`](docs/Migration-BinaryWriterCharacterOverloads.md)).
+- `System::IO::BinaryReader::Read()`, which reads one character or returns `-1`.
+- `System::Xml::XmlReader::getBaseURIProperty()`. It returns the URI the reader was created from.
+- `System::Index` and `System::Range` are `constexpr`, including `Range::GetOffsetAndLength`.
+
+### Changed
+
+- **Source break:** `System::Version::Major`, `Minor`, `Build` and `Revision` are private, as
+  .NET's fields are. Read them through the new `get…Property()` accessors, and replace a write with
+  a new `Version`. All eight read and write spellings are rejected by sites in
+  `test/consumer/core_version_private_components_negative.cpp`. Measured for this release, neither
+  CNA nor mobile-eggbert reads or writes these members.
+- `System::Version` parses as .NET's `Version.TryParseComponent` does: each component may carry
+  leading and trailing whitespace (0x09–0x0D, 0x20) and a `+` sign. A negative component is
+  `ArgumentOutOfRangeException`. A non-integer or empty component is `FormatException`, and a
+  component beyond `Int32` is `OverflowException`. Fewer than two or more than four components
+  are `ArgumentException`: an empty string, and a `.` after the fourth component. `TryParse`
+  leaves its result untouched when it fails.
+- `System::IO::BinaryReader` decodes as .NET Framework 4.0's does, transliterated from its IL.
+  Changes include:
+  - `Read7BitEncodedInt` keeps the low four bits of a fifth byte instead of refusing it.
+  - Invalid UTF-8 becomes `U+FFFD` grouped as .NET 4.0 groups it.
+  - An unfinished sequence waits for the next read.
+  - `ReadChar` on a surrogate pair throws after seeking back.
+  - `ReadString` beyond the end of a seekable stream reads what is there before it throws
+    `EndOfStreamException`.
+
+  See [`docs/Migration-BinaryReaderNet4Decoding.md`](docs/Migration-BinaryReaderNet4Decoding.md).
+- `System::IO::BinaryWriter` writes a `char16_t` argument as its UTF-8 bytes. It used to convert
+  to `Write(intcs)` and write four bytes, so `Write(u'A')` wrote `41 00 00 00` instead of `41`.
+  A string literal, a byte array and a `char16_t` array used to convert to `Write(bool)` and
+  write `01`. Each now writes what .NET writes for that argument. Existing calls with such
+  arguments therefore write different bytes, which is what CNA's `PacketWriter` needed
+  ([`docs/Migration-BinaryWriterCharacterOverloads.md`](docs/Migration-BinaryWriterCharacterOverloads.md)).
+- `System::StringComparer::OrdinalIgnoreCase` folds every UTF-16 code unit through its invariant
+  simple upper-case mapping, as .NET 4 does, so `Ä` and `ä` compare equal. Before, it folded only
+  ASCII. Hashes stay consistent with equality, and invalid UTF-8 keeps a byte-exact fallback
+  ([`docs/Migration-TQ-078-OrdinalIgnoreCase.md`](docs/Migration-TQ-078-OrdinalIgnoreCase.md)).
+- `System::Xml::XmlReader` refuses malformed UTF-8 with `XmlException` when it reads, in text and
+  in attributes. Before, it accepted it, and only the writer refused it later. The refused forms
+  are:
+  - lone and truncated continuation bytes;
+  - overlong forms;
+  - UTF-16 surrogates;
+  - values above U+10FFFF.
+
+  See [`docs/Migration-XmlReaderUtf8.md`](docs/Migration-XmlReaderUtf8.md).
+- `System::Xml::XmlReader` records the 1-based UTF-16 line and position of each element, end
+  element, attribute and text token, as .NET's `IXmlLineInfo` does, and `XmlException` messages
+  carry them. tinyxml2's own syntax errors keep column 0
+  ([`docs/Migration-XmlReaderSourceLocations.md`](docs/Migration-XmlReaderSourceLocations.md)).
+- `System::Range::GetHashCode()` combines through `HashCode::Combine` and is no longer `noexcept`.
+
 ### Fixed
 
+- `System::Range::GetHashCode()` no longer has undefined behavior: it used to multiply a signed
+  hash by 397, which could overflow.
 - `System::IO::BinaryReader::PeekChar` on a stream that cannot seek returns `-1` without reading,
   as .NET Framework 4.0's does (`PeekChar` `IL_000d`-`001b`), instead of throwing
   `NotSupportedException`. A closed reader still throws `ObjectDisposedException` first
@@ -22,6 +102,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the
   libstdc++, `std::unordered_set<T>` asserts in its class body that `std::hash<T>` is
   copy-constructible, so instantiating `SearchValues<T>` for an equality-only `T` failed there,
   and the constructors' explanatory `static_assert` was never reached.
+
+### Dependency pins
+
+Unchanged from `0.2.0`:
+- `vendor/googletest` is pinned by its submodule gitlink
+  (`7e2c425db2c2e024b2807bfe6d386f4ff068d0d6`).
+- `vendor/nlohmann` (**3.10.4**), `vendor/tinyxml2` (**11.0.0**) and `vendor/miniz` (**11.3.1**)
+  are checked in as source.
+- **zlib** remains a system dependency, and **tzdata** still decides two `TimeZoneInfo` test
+  expectations, so the tag selects neither.
+- The external test prerequisites are the original Yacht SOAP service and the XNA Game Studio
+  samples tree.
+
+### Known limitations
+
+- Everything listed under `0.2.0` still holds.
+- The verified gate is Linux with GCC 14. The `SearchValues<T>` repair for GCC 15's libstdc++ was
+  verified only on a CI probe branch under GCC 15.2. The MSVC repair of `BinaryWriter.hpp` was
+  checked by compiling with `SHARP_RUNTIME_HAS_NATIVE_INT128=0`, not with MSVC.
+- The `System::Version` break has a negative consumer fixture and a measured downstream impact
+  (none), but no `docs/Migration-*.md` note of its own. This entry is its record.
+
+### Verification
+
+- **18,282/18,282** tests pass across **42** executables, with 0 failed and 0 skipped. That is 50
+  more tests than `0.2.0`'s 18,232. The run includes the two live `ServiceModel` tests, against a
+  private copy of the original Yacht SOAP service, and the five `XnaRealFixtureTests`, against the
+  official XNA samples.
+- The module graph is **44 modules / 109 edges**. All **11** selective component configurations
+  pass with their own tests. **56** negative consumer fixtures reject all **292** sites, including
+  the eight new `System::Version` sites. The 5 test-only seams have one definition each.
+- GCC 14.2.0 builds with **0 warnings and 0 errors**. Clang 19.1.7 builds all 231 production
+  translation units under `-Werror` with **0 warnings**.
+- The Doxygen no-regression gate passes with **2,674 warnings**, against the ceiling of 2,675.
+- The installed package, built from the full graph, relocates. It refuses requests for `99.0` and
+  `0.2`, and passes both consumer tests (`scripts/check_installed_package.py --mode full`).
+- Verified on Debian GNU/Linux 13 with GCC 14.2.0, Clang 19.1.7, glibc 2.41, CMake 3.31.6, tzdata
+  **2026c**, zlib 1.3.1, Doxygen 1.9.8 and Mono 6.12.0.199. As for `0.2.0`, `vendor/googletest`
+  was a plain copy (`GOOGLETEST_VERSION` 1.16.0), not an initialised submodule, in the verifying
+  checkout, so its revision was not checked against the gitlink.
 
 ## [0.2.0] — 2026-10-28
 
@@ -355,7 +475,8 @@ instead. See [`docs/releasing.md`](docs/releasing.md).
   (`SHARP_RUNTIME_HAS_NATIVE_INT128`); they are absent on MSVC and 32-bit MinGW, which is a
   known, accepted and permanent boundary.
 
-[Unreleased]: https://github.com/libcna/sharp-runtime/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/libcna/sharp-runtime/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/libcna/sharp-runtime/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/libcna/sharp-runtime/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/libcna/sharp-runtime/compare/v0.1.0-beta.1...v0.1.0
 [0.1.0-beta.1]: https://github.com/libcna/sharp-runtime/compare/v0.1.0-alpha.1...v0.1.0-beta.1

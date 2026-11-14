@@ -199,13 +199,13 @@ commit remains strict:
 3. Relevant boundary, negative-fixture, sanitizer, platform, documentation, or local-CI checks
    run when the change can affect them.
 
-The latest fully verified runtime test baseline is **18,232 tests across 42 executables: 18,232
-passed, 0 failed, 0 skipped**, measured 2026-10-28 with the supported XNA sample fixture view and
-the original Yacht SOAP service on a private loopback port. The fixture runner is
-`scripts/run_component_tests_with_soap_fixture.py`; set `XNA_SAMPLES_ROOT` for the five real XNA
-serialization fixtures. The 2026-09-30 checkpoint additionally recorded graph 44/109, test-only
-seams 5/22, negative fixtures 55/284, 230 first-party production translation units clean under
-Clang 19.1.7 with `-Werror`, and 2,674 Doxygen warnings under the ceiling of 2,675. Do not silently
+The latest fully verified runtime test baseline is **18,282 tests across 42 executables: 18,282
+passed, 0 failed, 0 skipped**, measured 2026-11-14 for the 0.3.0 release with the supported XNA
+sample fixture view and the original Yacht SOAP service on a private loopback port. The fixture
+runner is `scripts/run_component_tests_with_soap_fixture.py`; set `XNA_SAMPLES_ROOT` for the five
+real XNA serialization fixtures. The same run recorded graph 44/109, test-only seams 5/22, negative
+fixtures 56/292, 231 first-party production translation units clean under Clang 19.1.7 with
+`-Werror`, and 2,674 Doxygen warnings under the ceiling of 2,675. Do not silently
 replace the current test baseline with a partial run; update it only from a complete, reproducible
 gate. Historical checkpoints belong in `docs/TestCountLedger.md`.
 
